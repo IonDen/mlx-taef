@@ -50,6 +50,7 @@ test = [
   "pytest-cov>=5.0",
   "hypothesis>=6.130",
   "pytest-benchmark>=4.0",
+  "mflux>=0.17",
 ]
 typecheck = [
   "mypy>=1.13",
@@ -145,6 +146,14 @@ strict = true
 warn_unreachable = true
 enable_error_code = ["redundant-expr", "truthy-bool", "ignore-without-code"]
 files = ["src/mlx_taef"]
+
+[[tool.mypy.overrides]]
+# mflux has no py.typed marker; the type: ignore comment must list both
+# import-untyped (mflux installed) and import-not-found (mflux absent,
+# e.g. typecheck venv on Linux). One code is always unused depending on
+# the environment, so suppress warn_unused_ignores for this module.
+module = "mlx_taef.integrations.mflux"
+warn_unused_ignores = false
 
 [tool.pytest.ini_options]
 minversion = "8.0"

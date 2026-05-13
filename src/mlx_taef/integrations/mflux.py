@@ -14,7 +14,9 @@ import mlx.core as mx
 import numpy as np
 
 try:
-    from mflux.callbacks.callback import InLoopCallback  # type: ignore[import-untyped]
+    from mflux.callbacks.callback import (  # type: ignore[import-untyped,import-not-found]
+        InLoopCallback,
+    )
 except ImportError as e:  # pragma: no cover
     raise ImportError(
         "mflux is required for mlx_taef.integrations.mflux. "

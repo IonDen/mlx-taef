@@ -1552,6 +1552,7 @@ mflux = [
 [package.dev-dependencies]
 dev = [
     { name = "hypothesis" },
+    { name = "mflux" },
     { name = "mkdocs-material" },
     { name = "mkdocstrings", extra = ["python"] },
     { name = "mypy" },
@@ -1576,6 +1577,7 @@ lint = [
 ]
 test = [
     { name = "hypothesis" },
+    { name = "mflux" },
     { name = "pytest" },
     { name = "pytest-benchmark" },
     { name = "pytest-cov" },
@@ -1598,6 +1600,7 @@ provides-extras = ["image", "mflux"]
 [package.metadata.requires-dev]
 dev = [
     { name = "hypothesis", specifier = ">=6.130" },
+    { name = "mflux", specifier = ">=0.17" },
     { name = "mkdocs-material", specifier = ">=9.5" },
     { name = "mkdocstrings", extras = ["python"], specifier = ">=0.27" },
     { name = "mypy", specifier = ">=1.13" },
@@ -1620,6 +1623,7 @@ fixtures = [
 lint = [{ name = "ruff", specifier = ">=0.7" }]
 test = [
     { name = "hypothesis", specifier = ">=6.130" },
+    { name = "mflux", specifier = ">=0.17" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-benchmark", specifier = ">=4.0" },
     { name = "pytest-cov", specifier = ">=5.0" },
