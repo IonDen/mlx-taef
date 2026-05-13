@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] — 2026-05-13
+
+### Added
+- `tests/fixtures.toml` SHA-256 pins for all eight committed converted-weight fixtures plus the source image, with a `test_fixtures_integrity` test that verifies the hashes haven't drifted.
+- `test_decode_handles_extreme_input_without_nan` — guarantees `decode()` produces finite, clamped-to-`[0, 1]` output even when fed pathologically large latents.
+- `test_encode_decode_roundtrip_ssim_on_structured_image` — perceptual-quality contract via SSIM ≥ 0.75 (with luminance-MSE fallback when `scikit-image` is absent).
+- `docs/release-setup.md` — one-time PyPI Trusted Publishing setup guide for the repo owner.
+- `mlx-taef` now ships a GitHub Release on tag push (auto-generated notes, prerelease detection from tag suffix).
+
+### Changed
+- Release workflow (`release.yml`): added `github-release` job after the publish step.
+- Parity tests now include inline comments documenting the cosine-similarity / `atol` tolerance choices.
+
+### Fixed
+- Linux typecheck previously failed because `# type: ignore[import-untyped]` didn't cover mypy's `import-not-found` error when `mflux` is absent. Broadened the ignore to cover both codes; `mflux` is now also installed in the `test` dependency group so the `LivePreviewCallback` test runs in CI and the integration code stays at honest coverage.
+- Bumped `actions/checkout` v4 → v6, `actions/setup-python` v5 → v6 to clear the Node.js 20 deprecation warning.
+
 ## [0.1.0] — 2026-05-13
 
 ### Added
