@@ -56,6 +56,10 @@ def test_variant_encode_parity(
     expected = np.array(mx.load(str(REF_DIR / f"{variant_name}_encoded_001.safetensors"))["latent"])
     actual = np.array(model.encode(src))
     sim = _cosine_sim(actual, expected)
+    # Cosine similarity > 0.999 = numerically equivalent for our purposes.
+    # Reference fixtures are PyTorch fp32 outputs; MLX runs fp32 by default
+    # (overridden to fp16 only in perf tests). Latent values can be large
+    # (roughly ±3), so cosine sim is more stable than a raw atol here.
     assert sim > 0.999, f"{variant_name}: encode cos_sim={sim:.6f}"
 
 

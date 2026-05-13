@@ -25,3 +25,22 @@ jobs:
           name: Packages
           path: dist
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Packages
+          path: dist
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*
+          generate_release_notes: true
+          draft: false
+          # Tags containing a hyphen (e.g. v0.2.0-alpha) are marked prerelease.
+          prerelease: ${{ contains(github.ref_name, '-') }}

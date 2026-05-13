@@ -12,6 +12,8 @@ def test_clamp_passes_zero_unchanged():
     layer = Clamp()
     x = mx.zeros((1, 4, 4, 8))
     out = layer(x)
+    # atol=1e-6: fp32 zero should be exactly zero; 1e-6 guards against any
+    # spurious subnormal flush-to-zero behavior on Metal.
     assert np.allclose(np.array(out), 0.0, atol=1e-6)
 
 
@@ -38,6 +40,8 @@ def test_clamp_matches_pytorch_reference():
     x_np = rng.standard_normal((2, 8, 8, 16)).astype(np.float32) * 5.0
     mlx_out = np.array(layer(mx.array(x_np)))
     torch_out = (torch.tanh(torch.from_numpy(x_np) / 3) * 3).numpy()
+    # atol=1e-5: fp32 vs fp32 — standard tolerance for identical math on CPU/Metal.
+    # See skill §3: "fp32 layer vs NumPy reference: atol=1e-5, rtol=1e-5".
     assert np.allclose(mlx_out, torch_out, atol=1e-5)
 
 
@@ -86,6 +90,8 @@ def test_make_conv_matches_pytorch_at_fixed_weights():
     mlx_out_nhwc = np.array(mlx_conv(mx.array(x_nhwc)))
     mlx_out_nchw = np.transpose(mlx_out_nhwc, (0, 3, 1, 2))
 
+    # atol=1e-4: slightly looser than 1e-5 because of NCHW→NHWC transposition
+    # and accumulated rounding across the padding+conv op on Metal vs PyTorch CPU.
     assert np.allclose(mlx_out_nchw, torch_out, atol=1e-4)
 
 
@@ -164,6 +170,8 @@ def test_block_parity_with_pytorch_reference():
     m_out_nhwc = np.array(mb(mx.array(x_nhwc)))
     m_out_nchw = np.transpose(m_out_nhwc, (0, 3, 1, 2))
 
+    # atol=1e-4: three-conv chain with ReLU accumulates more rounding than
+    # a single conv; Metal fp32 arithmetic may differ from PyTorch CPU fp32.
     assert np.allclose(m_out_nchw, t_out, atol=1e-4)
 
 
@@ -246,6 +254,9 @@ def test_block_midblock_gn_parity_with_pytorch():
     m_out_nhwc = np.array(mb(mx.array(x_nhwc)))
     m_out_nchw = np.transpose(m_out_nhwc, (0, 3, 1, 2))
 
+    # atol=1e-4: GroupNorm on Metal adds one more fp32 rounding stage vs PyTorch CPU.
+    # pytorch_compatible=True on nn.GroupNorm is required; without it, MLX uses a
+    # different group-channel ordering that produces larger divergence (~1e-2).
     assert np.allclose(m_out_nchw, t_out, atol=1e-4), (
         f"Block midblock_gn parity failed. "
         f"Max diff: {np.abs(m_out_nchw - t_out).max():.6f}. "
@@ -282,4 +293,6 @@ def test_mlx_upsample_matches_pytorch_reference():
     x_nhwc = np.transpose(x_nchw, (0, 2, 3, 1)).copy()
     m_out_nhwc = np.array(nn.Upsample(scale_factor=2, mode="nearest")(mx.array(x_nhwc)))
     m_out_nchw = np.transpose(m_out_nhwc, (0, 3, 1, 2))
+    # atol=1e-6: nearest-neighbor upsample is exact integer indexing; should be
+    # bit-for-bit identical to PyTorch, modulo fp32 copy overhead.
     assert np.allclose(m_out_nchw, t_out, atol=1e-6)

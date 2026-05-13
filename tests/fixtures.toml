@@ -1,0 +1,20 @@
+# tests/fixtures.toml
+# SHA-256 of each pre-baked reference fixture. Update intentionally when
+# regenerating. Run `python -m pytest tests/test_fixtures_integrity.py` to verify.
+
+[converted]
+"taef1_decoder.safetensors" = "5540cc67e4594c72748c282baab1efb52875750fadde8772004919906874562a"
+"taef1_encoder.safetensors" = "aed99c3aa7c280b29d9b6d1450b00451f0cb7d587763331bb9864dff6fc9d6bb"
+"taef2_decoder.safetensors" = "2127bd4e2150fa0f919a828a55f5ae87b5759b7c6bbf8446951e57847e3c1aa3"
+"taef2_encoder.safetensors" = "29cbefd611d5b270930f90b56185ff2cdb763cf7093614c73bda0e63e65c204a"
+"taesd_decoder.safetensors" = "f41f53596f868c490623a95b740bd5ae2bf150a6b46567409b68d3e8371b9a3b"
+"taesd_encoder.safetensors" = "cb5715646f78703d12573f33d368e4c7ec28d48ed175196d8698a0c72aaaa224"
+"taesdxl_decoder.safetensors" = "863fa2a1c1ba414466f88a38a43839110ca02798361b7fa29a85434ee1553475"
+"taesdxl_encoder.safetensors" = "75e1619b782b999d9525bbbe889db8daa5c80c34ed0e6838feba1de7362df9fd"
+
+[reference]
+"_source_image.png" = "0bb9b1cfcfa50b27e4b076ecd7dd62d1b64e7cc4d8b7c3953eb0548273a88f2f"
+# (The other reference fixtures — decoded .safetensors and encoded .safetensors —
+# are derived from the weights above + the upstream converter. They are validated
+# indirectly by the decode/encode parity tests; they do not need independent
+# SHA pinning here.)

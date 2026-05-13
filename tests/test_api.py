@@ -95,4 +95,7 @@ def test_variant_decode_against_committed_reference(
         )
         out = np.array(model.decode(latent))
         sim = _cosine_sim(out, ref)
+        # Cosine similarity > 0.999 = numerically equivalent for our purposes.
+        # Reference fixtures are PyTorch fp32 outputs; MLX runs fp32 by default.
+        # Values in [0, 1], so cosine sim is tighter than atol on raw magnitudes.
         assert sim > 0.999, f"{variant_name} fixture {i}: cos_sim={sim:.6f}"
