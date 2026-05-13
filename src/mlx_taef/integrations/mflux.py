@@ -33,7 +33,7 @@ def unpack_flux2_latent(
     latent_width: int,
     bn_mean: mx.array | None = None,
     bn_var: mx.array | None = None,
-    bn_eps: float = 1e-5,
+    bn_eps: float = 1e-4,
 ) -> mx.array:
     """Unpack mflux's packed FLUX.2 latent into NHWC `(B, lH*2, lW*2, 32)` for TAEF2.
 
@@ -52,7 +52,8 @@ def unpack_flux2_latent(
         latent_width: latent spatial width.
         bn_mean: optional BN running_mean for exact value recovery (128 elements).
         bn_var: optional BN running_var for exact value recovery (128 elements).
-        bn_eps: BN epsilon. Default matches Flux2BatchNormStats default.
+        bn_eps: BN epsilon. Matches mflux's Flux2BatchNormStats default of 1e-4,
+            verified at mflux 0.17.5.
 
     Returns:
         NHWC tensor of shape (B, latent_height*2, latent_width*2, 32) — ready
@@ -61,7 +62,8 @@ def unpack_flux2_latent(
     See `notes/mflux-latent-layout.md` for the analysis behind this transform.
     """
     b, _, c = packed.shape
-    assert c == 128, f"Expected 128-channel packed latent, got {c}"
+    if c != 128:
+        raise ValueError(f"Expected 128-channel packed latent, got {c}")
 
     # Step 1: reshape and transpose to NCHW: (B, lH*lW, 128) -> (B, lH, lW, 128) -> (B, 128, lH, lW)
     latents = packed.reshape(b, latent_height, latent_width, c).transpose(0, 3, 1, 2)

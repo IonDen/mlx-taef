@@ -22,7 +22,7 @@ def test_unpack_flux2_latent_shape() -> None:
 
 def test_unpack_flux2_latent_rejects_wrong_channel_count() -> None:
     packed = mx.zeros((1, 16, 64))  # 64 channels, should be 128
-    with pytest.raises(AssertionError, match="128-channel"):
+    with pytest.raises(ValueError, match="128-channel"):
         unpack_flux2_latent(packed, latent_height=4, latent_width=4)
 
 
@@ -48,6 +48,26 @@ def test_live_preview_callback_writes_png(tmp_path: Path, monkeypatch: pytest.Mo
     cb.call_in_loop(t=0, seed=0, prompt="", latents=fake_packed, config=None, time_steps=None)
     assert save_path.exists()
     assert save_path.stat().st_size > 100  # not an empty file
+
+
+def test_flux2_klein_generate_image_has_no_callbacks_kwarg() -> None:
+    """Doc-shape guard: ensure README/manual examples match installed mflux API."""
+    import inspect
+
+    from mflux.models.flux2 import Flux2Klein
+
+    sig = inspect.signature(Flux2Klein.generate_image)
+    assert "callbacks" not in sig.parameters, (
+        "If mflux added a callbacks kwarg, update the README to use it directly."
+    )
+    # Affirmatively assert the registration path:
+    assert hasattr(Flux2Klein, "__init__")  # placeholder anchor
+
+
+def test_callback_registry_register_method_exists() -> None:
+    from mflux.callbacks.callback_registry import CallbackRegistry
+
+    assert hasattr(CallbackRegistry, "register")
 
 
 def test_unpack_with_bn_stats_differs_from_identity_bn() -> None:

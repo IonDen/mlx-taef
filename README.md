@@ -52,7 +52,7 @@ Numbers from `tests/test_perf.py` on M1 Max 32 GB. See `notes/phase1-benchmarks.
 ## mflux live previews
 
 ```python
-from mflux import Flux2Klein
+from mflux.models.flux2 import Flux2Klein
 from mlx_taef.integrations.mflux import LivePreviewCallback
 
 model = Flux2Klein.from_pretrained("4bit")
@@ -63,10 +63,13 @@ preview = LivePreviewCallback(
     latent_height=32,  # 512 / 16
     latent_width=32,
 )
+model.callbacks.register(preview)
 model.generate_image(
     prompt="a red apple on a wooden table",
-    steps=25, width=512, height=512, seed=42,
-    callbacks=[preview],
+    num_inference_steps=25,
+    width=512,
+    height=512,
+    seed=42,
 )
 ```
 

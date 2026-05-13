@@ -1,8 +1,7 @@
 """User-facing Taef family API: load weights and decode/encode latents.
 
 Tensor layout: all public methods use NHWC mx.array.
-Value space: decode() outputs [0, 1] float; encode() expects [0, 1] float
-(when implemented in Phase 2).
+Value space: decode() outputs [0, 1] float; encode() expects [0, 1] float.
 """
 
 import logging

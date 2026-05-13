@@ -17,7 +17,7 @@ This validates that `LivePreviewCallback` produces recognizable previews during 
 2. Run a generation with the callback:
    ```python
    from pathlib import Path
-   from mflux import Flux2Klein
+   from mflux.models.flux2 import Flux2Klein
    from mlx_taef.integrations.mflux import LivePreviewCallback
 
    model = Flux2Klein.from_pretrained("4bit")
@@ -28,13 +28,13 @@ This validates that `LivePreviewCallback` produces recognizable previews during 
        latent_height=32,  # 512 / 16
        latent_width=32,
    )
+   model.callbacks.register(callback)
    model.generate_image(
        prompt="a red apple on a wooden table",
-       steps=25,
+       num_inference_steps=25,
        width=512,
        height=512,
        seed=42,
-       callbacks=[callback],
    )
    ```
 

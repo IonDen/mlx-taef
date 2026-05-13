@@ -98,7 +98,7 @@ def convert_hf_decoder_to_mlx(  # pragma: no cover
     mx.save_safetensors(str(out_path), converted)
 
 
-def _sequential_key_to_mlx(src_key: str) -> str:  # pragma: no cover
+def _sequential_key_to_mlx(src_key: str) -> str:
     """Convert an upstream-Sequential key to an MLX-flat dotted key.
 
     MLX's `nn.Sequential` stores its children under `.layers`, so every
@@ -127,7 +127,7 @@ def _sequential_key_to_mlx(src_key: str) -> str:  # pragma: no cover
     return ".".join(out)
 
 
-def _build_mlx_state_dict(  # pragma: no cover
+def _build_mlx_state_dict(
     sd: dict[str, np.ndarray],
     *,
     expected_shapes: dict[str, tuple[int, ...]],
@@ -153,9 +153,7 @@ def _build_mlx_state_dict(  # pragma: no cover
     return converted
 
 
-def _flatten_module_param_shapes(
-    module: Any, prefix: str = ""
-) -> dict[str, tuple[int, ...]]:  # pragma: no cover
+def _flatten_module_param_shapes(module: Any, prefix: str = "") -> dict[str, tuple[int, ...]]:
     """Walk module.parameters() and return a flat dict of dotted-key -> shape."""
     out: dict[str, tuple[int, ...]] = {}
 
