@@ -1,5 +1,9 @@
 # mlx-taef
 
+[![PyPI version](https://img.shields.io/pypi/v/mlx-taef.svg)](https://pypi.org/project/mlx-taef/)
+[![Python versions](https://img.shields.io/pypi/pyversions/mlx-taef.svg)](https://pypi.org/project/mlx-taef/)
+[![License: MIT](https://img.shields.io/pypi/l/mlx-taef.svg)](https://github.com/IonDen/mlx-taef/blob/main/LICENSE)
+
 Tiny AutoEncoders for diffusion latents on Apple Silicon, in pure MLX.
 
 `mlx-taef` is the first MLX port of the TAESD family — TAESD (SD1.x), TAESDXL (SDXL), TAEF1 (FLUX.1), TAEF2 (FLUX.2 Klein) — distilled mini-autoencoders that decode diffusion latents to RGB in milliseconds using a few-MB model instead of multi-GB full VAEs.
@@ -20,13 +24,35 @@ img_uint8 = taef.decode_image(latents)      # uint8 NHWC ready for PIL
 
 ## Install
 
+From PyPI:
+
 ```bash
 pip install mlx-taef
-# With mflux preview callback:
+# With the mflux preview callback:
 pip install "mlx-taef[mflux]"
 ```
 
-Requires Python ≥ 3.11 and Apple Silicon. Runtime install has **zero PyTorch dependency**.
+Or with `uv`:
+
+```bash
+uv add mlx-taef
+# With mflux:
+uv add "mlx-taef[mflux]"
+```
+
+Pin an exact version in a project that needs reproducibility:
+
+```bash
+pip install "mlx-taef==0.1.0"
+```
+
+Verify the install:
+
+```bash
+mlx-taef --help
+```
+
+Requires Python ≥ 3.11 and Apple Silicon (`mlx` itself is Apple-Silicon-only). Runtime install has **zero PyTorch dependency** — `torch` is dev-only and used solely for fixture generation in the test suite.
 
 ## Variants
 
@@ -79,7 +105,9 @@ See `docs/manual-verification.md` for the full verification recipe.
 
 ## Status
 
-- v0.1.0 — initial public release. All four variants, encoder + decoder, mflux integration, CI, 100% test coverage.
+- **v0.1.0 — initial public release on PyPI** (2026-05-13). All four variants, encoder + decoder, mflux integration, CI, 99 % honest coverage.
+
+Track future releases via the [PyPI history](https://pypi.org/project/mlx-taef/#history) or `gh release list -R IonDen/mlx-taef`.
 
 ## License
 
