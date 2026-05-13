@@ -1,0 +1,60 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: pip install uv
+      - name: Sync
+        run: uv sync --group lint
+      - name: Ruff check
+        run: uv run ruff check .
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: pip install uv
+      - name: Sync
+        run: uv sync --group typecheck
+      - name: Mypy
+        run: uv run mypy src/mlx_taef
+
+  test:
+    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install uv
+        run: pip install uv
+      - name: Sync (test group only — keep CI light)
+        run: uv sync --group test
+      - name: Run unit + parity tests
+        run: |
+          uv run pytest \
+            --cov=mlx_taef \
+            --cov-report=term-missing \
+            --cov-fail-under=95 \
+            -m "not benchmark and not network and not slow and not integration"

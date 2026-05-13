@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+dist/
+build/
+*.egg-info/
+.DS_Store
+tests/reference/*.pth
+tests/reference/*.pt
+
+# hatch-vcs auto-generated
+src/mlx_taef/_version.py
