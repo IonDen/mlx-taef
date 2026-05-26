@@ -87,6 +87,28 @@ def unpack_flux2_latent(
     return latents.transpose(0, 2, 3, 1)
 
 
+def _try_extract_bn(flux: object) -> tuple[mx.array | None, mx.array | None]:
+    """Best-effort extraction of FLUX.2 VAE BN stats.
+
+    Returns (running_mean, running_var) on success, (None, None) on any
+    failure (missing attribute, wrong shape, exception). Never raises.
+    """
+    try:
+        vae = getattr(flux, "vae", None)
+        if vae is None:
+            return (None, None)
+        bn = getattr(vae, "bn", None)
+        if bn is None:
+            return (None, None)
+        mean = getattr(bn, "running_mean", None)
+        var = getattr(bn, "running_var", None)
+        if mean is None or var is None:
+            return (None, None)
+        return (mean, var)
+    except Exception:
+        return (None, None)
+
+
 class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
     """mflux callback that writes a low-quality preview PNG every N iterations.
 
@@ -137,11 +159,27 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
         self.latent_width = latent_width
         self.bn_mean = bn_mean
         self.bn_var = bn_var
-        # Resolve BN source. Auto-extraction from flux instance is wired
-        # in Task 7; for now resolved_bn is "explicit" if user passed kwargs,
-        # else "none".
+        # Resolve BN source. Precedence:
+        #   explicit (user passed bn_mean + bn_var)
+        #     > auto (auto_bn=True + variant=="taef2" + flux.vae.bn extractable)
+        #     > none (identity BN, v0.1.x behavior)
         if bn_mean is not None and bn_var is not None:
             self.resolved_bn = "explicit"
+        elif auto_bn and variant == "taef2" and flux is not None:
+            extracted_mean, extracted_var = _try_extract_bn(flux)
+            if extracted_mean is not None and extracted_var is not None:
+                self.bn_mean = extracted_mean
+                self.bn_var = extracted_var
+                self.resolved_bn = "auto"
+            else:
+                logger.warning(
+                    "auto_bn=True but flux instance does not expose "
+                    ".vae.bn.running_mean / running_var; falling back to "
+                    "identity BN (previews will be color-shifted on taef2). "
+                    "Pass bn_mean= and bn_var= explicitly, or check the "
+                    "mflux Flux2VAE.bn attribute path."
+                )
+                self.resolved_bn = "none"
         else:
             self.resolved_bn = "none"
         self._iter = 0
