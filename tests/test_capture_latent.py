@@ -50,11 +50,17 @@ def test_main_writes_safetensors_and_sidecar(tmp_path: Path) -> None:
 
     fake_latent = mx.zeros((1, 16, 32, 32))
 
-    with patch.object(_capture_latent, "_run_mflux_generation_and_extract_latent", return_value=fake_latent):
-        exit_code = _capture_latent.main([
-            "--variant", "flux1-dev",
-            "--out-dir", str(tmp_path),
-        ])
+    with patch.object(
+        _capture_latent, "_run_mflux_generation_and_extract_latent", return_value=fake_latent
+    ):
+        exit_code = _capture_latent.main(
+            [
+                "--variant",
+                "flux1-dev",
+                "--out-dir",
+                str(tmp_path),
+            ]
+        )
 
     assert exit_code == 0
     latent_path = tmp_path / "flux1_dev.safetensors"

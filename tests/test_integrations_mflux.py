@@ -216,7 +216,7 @@ def test_auto_bn_changes_decoded_output_vs_identity_bn() -> None:
         latent_height=latent_h,
         latent_width=latent_w,
         bn_mean=cb_none.bn_mean,  # None → identity BN
-        bn_var=cb_none.bn_var,    # None → identity BN
+        bn_var=cb_none.bn_var,  # None → identity BN
     )
 
     assert not np.allclose(np.array(out_auto), np.array(out_none))

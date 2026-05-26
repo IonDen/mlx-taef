@@ -17,11 +17,16 @@ def test_argparse_orchestrator_mode() -> None:
     from scripts.bench_decode import _build_argparser
 
     parser = _build_argparser()
-    args = parser.parse_args([
-        "--latent", "/tmp/x.safetensors",
-        "--condition", "taef2",
-        "--reps", "5",
-    ])
+    args = parser.parse_args(
+        [
+            "--latent",
+            "/tmp/x.safetensors",
+            "--condition",
+            "taef2",
+            "--reps",
+            "5",
+        ]
+    )
     assert args.latent == Path("/tmp/x.safetensors")
     assert args.condition == "taef2"
     assert args.reps == 5
@@ -32,14 +37,21 @@ def test_argparse_worker_mode() -> None:
     from scripts.bench_decode import _build_argparser
 
     parser = _build_argparser()
-    args = parser.parse_args([
-        "--worker-mode",
-        "--latent", "/tmp/x.safetensors",
-        "--condition", "taef2",
-        "--rep", "0",
-        "--save-to", "/tmp/out.webp",
-        "--applied-cap-gb", "2",
-    ])
+    args = parser.parse_args(
+        [
+            "--worker-mode",
+            "--latent",
+            "/tmp/x.safetensors",
+            "--condition",
+            "taef2",
+            "--rep",
+            "0",
+            "--save-to",
+            "/tmp/out.webp",
+            "--applied-cap-gb",
+            "2",
+        ]
+    )
     assert args.worker_mode
     assert args.rep == 0
     assert args.save_to == Path("/tmp/out.webp")
@@ -60,19 +72,21 @@ def test_sentinel_emission_is_first_of_line() -> None:
     line = _emit_sentinel(result)
     assert line.startswith("::BENCH_RESULT::")
     assert "\n" not in line  # one-liner
-    payload = json.loads(line[len("::BENCH_RESULT::"):])
+    payload = json.loads(line[len("::BENCH_RESULT::") :])
     assert payload == result
 
 
 def test_parse_sentinel_extracts_first_of_line(tmp_path: Path) -> None:
     from scripts.bench_decode import _parse_worker_stdout
 
-    stdout = "\n".join([
-        "Loading model...",
-        "Decode: 0.094s",
-        "::BENCH_RESULT::" + json.dumps({"condition": "taef2", "rep": 0, "elapsed_s": 0.094}),
-        "Done.",
-    ])
+    stdout = "\n".join(
+        [
+            "Loading model...",
+            "Decode: 0.094s",
+            "::BENCH_RESULT::" + json.dumps({"condition": "taef2", "rep": 0, "elapsed_s": 0.094}),
+            "Done.",
+        ]
+    )
     parsed = _parse_worker_stdout(stdout)
     assert parsed["condition"] == "taef2"
     assert parsed["rep"] == 0
@@ -83,10 +97,12 @@ def test_parse_sentinel_ignores_mid_line_occurrences() -> None:
     a sentinel — parser must require line-start."""
     from scripts.bench_decode import _parse_worker_stdout
 
-    stdout = "\n".join([
-        "Debug log mentioning ::BENCH_RESULT:: in passing",
-        "::BENCH_RESULT::" + json.dumps({"condition": "taef2", "rep": 0, "elapsed_s": 0.094}),
-    ])
+    stdout = "\n".join(
+        [
+            "Debug log mentioning ::BENCH_RESULT:: in passing",
+            "::BENCH_RESULT::" + json.dumps({"condition": "taef2", "rep": 0, "elapsed_s": 0.094}),
+        ]
+    )
     parsed = _parse_worker_stdout(stdout)
     assert parsed["rep"] == 0  # picked the line-start one
 
@@ -98,10 +114,12 @@ def test_parse_sentinel_raises_on_multiple_sentinels() -> None:
 
     from mlx_taef.errors import TaefError
 
-    stdout = "\n".join([
-        "::BENCH_RESULT::" + json.dumps({"condition": "taef2", "rep": 0}),
-        "::BENCH_RESULT::" + json.dumps({"condition": "taef2", "rep": 0}),
-    ])
+    stdout = "\n".join(
+        [
+            "::BENCH_RESULT::" + json.dumps({"condition": "taef2", "rep": 0}),
+            "::BENCH_RESULT::" + json.dumps({"condition": "taef2", "rep": 0}),
+        ]
+    )
     with pytest.raises(TaefError, match="multiple sentinels"):
         _parse_worker_stdout(stdout)
 
@@ -158,8 +176,7 @@ def test_orchestrator_exits_nonzero_if_all_reps_fail() -> None:
 
     with patch("scripts.bench_decode._run_one_rep") as mock_rep:
         mock_rep.side_effect = [
-            {"condition": "taef2", "rep": i, "status": "failed", "error": "boom"}
-            for i in range(3)
+            {"condition": "taef2", "rep": i, "status": "failed", "error": "boom"} for i in range(3)
         ]
         with pytest.raises(TaefError, match="all reps failed"):
             _run_orchestrator(

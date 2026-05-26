@@ -45,7 +45,12 @@ def _build_argparser() -> argparse.ArgumentParser:
         choices=list(FULL_VAE_CAP_GB.keys()),
         help="Which full Flux variant the vanilla_vae condition uses.",
     )
-    parser.add_argument("--reps", type=int, default=5, help="Reps for the orchestrator (default 5 for taef, 3 for full VAE).")
+    parser.add_argument(
+        "--reps",
+        type=int,
+        default=5,
+        help="Reps for the orchestrator (default 5 for taef, 3 for full VAE).",
+    )
     parser.add_argument("--save-dir", type=Path, default=Path("_artifacts/showcase"))
 
     # Worker-mode flags (hidden from typical user; orchestrator passes these to itself).
@@ -76,16 +81,14 @@ def _parse_worker_stdout(stdout: str) -> dict[str, Any]:
 
     Contract: line-start, exactly one per worker, JSON one-liner.
     """
-    sentinel_lines = [
-        line for line in stdout.splitlines() if line.startswith(SENTINEL_PREFIX)
-    ]
+    sentinel_lines = [line for line in stdout.splitlines() if line.startswith(SENTINEL_PREFIX)]
     if len(sentinel_lines) == 0:
         raise TaefError(f"no sentinel found in worker stdout (stdout: {stdout[:500]!r})")
     if len(sentinel_lines) > 1:
         raise TaefError(
             f"multiple sentinels in worker stdout (got {len(sentinel_lines)}, expected 1)"
         )
-    payload_str = sentinel_lines[0][len(SENTINEL_PREFIX):]
+    payload_str = sentinel_lines[0][len(SENTINEL_PREFIX) :]
     payload: dict[str, Any] = json.loads(payload_str)
     return payload
 
@@ -104,11 +107,16 @@ def _run_one_rep(
         sys.executable,
         __file__,
         "--worker-mode",
-        "--latent", str(latent_path),
-        "--condition", condition,
-        "--flux-variant", flux_variant,
-        "--rep", str(rep),
-        "--save-to", str(save_to),
+        "--latent",
+        str(latent_path),
+        "--condition",
+        condition,
+        "--flux-variant",
+        flux_variant,
+        "--rep",
+        str(rep),
+        "--save-to",
+        str(save_to),
     ]
     if cap_gb is not None:
         cmd.extend(["--applied-cap-gb", str(cap_gb)])

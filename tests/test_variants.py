@@ -108,5 +108,5 @@ def test_conftest_installed_session_wired_cap() -> None:
     # mx.set_wired_limit returns the previous limit; this call sets it
     # and returns whatever it was just before. The sentinel proves the
     # cap was installed by reading back through a no-op set.
-    current = mx.set_wired_limit(int(20 * 1024**3))
-    assert current == int(20 * 1024**3)
+    current = mx.set_wired_limit(20 * 1024**3)
+    assert current == (20 * 1024**3)

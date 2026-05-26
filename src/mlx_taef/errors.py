@@ -34,7 +34,7 @@ class MlxTeacacheNotInstalledError(TaefError, ImportError):
         if message is None:
             message = (
                 "mlx-teacache is required for the combined showcase scenario. "
-                "Install with `pip install \"mlx-taef[showcase]\"` or "
+                'Install with `pip install "mlx-taef[showcase]"` or '
                 "`uv add mlx-teacache`."
             )
         super().__init__(message)

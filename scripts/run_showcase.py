@@ -64,6 +64,7 @@ def _build_argparser() -> argparse.ArgumentParser:
 # Scenario dispatch
 # ---------------------------------------------------------------------------
 
+
 def _run_taef2_vs_vae(args: argparse.Namespace) -> dict[str, Any]:
     raise NotImplementedError("Heavy MLX path — lands in the bench-day commit.")
 
@@ -92,8 +93,10 @@ _SCENARIO_DISPATCH = {
 # JSON I/O (testable in isolation)
 # ---------------------------------------------------------------------------
 
+
 def _build_hardware_metadata() -> dict[str, Any]:
     """Collect hardware + version metadata for the report header."""
+
     def _safe_version(pkg: str) -> str | None:
         try:
             return _pkg_version(pkg)
@@ -116,6 +119,7 @@ def _build_hardware_metadata() -> dict[str, Any]:
 def _detect_ram_gb() -> int:
     try:
         import psutil
+
         return round(psutil.virtual_memory().total / 1024**3)
     except Exception:  # pragma: no cover
         return 0
@@ -125,8 +129,7 @@ def _load_report(path: Path) -> dict[str, Any]:
     data = json.loads(path.read_text())
     if data.get("schema_version") != SCHEMA_VERSION:
         raise SchemaVersionError(
-            f"unknown schema_version: got {data.get('schema_version')!r}, "
-            f"expected {SCHEMA_VERSION}"
+            f"unknown schema_version: got {data.get('schema_version')!r}, expected {SCHEMA_VERSION}"
         )
     return data
 
@@ -139,6 +142,7 @@ def _write_report(path: Path, report: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 # Latent fixture handling
 # ---------------------------------------------------------------------------
+
 
 def _check_latent_sha(latent: Path) -> None:
     """Verify the .sha256 sidecar matches. Warn on mismatch; raise if missing."""
@@ -156,13 +160,16 @@ def _check_latent_sha(latent: Path) -> None:
     if expected != actual:
         logger.warning(
             "sha mismatch for %s: expected %s, got %s. Latent may have been regenerated.",
-            latent.name, expected[:12], actual[:12],
+            latent.name,
+            expected[:12],
+            actual[:12],
         )
 
 
 # ---------------------------------------------------------------------------
 # SSIM (orchestrator-side, after webps are saved)
 # ---------------------------------------------------------------------------
+
 
 def _compute_ssim(refs: list[Path], cands: list[Path]) -> dict[str, Any]:
     """Compute SSIM for each (ref, cand) pair in the cross-product."""
@@ -175,11 +182,17 @@ def _compute_ssim(refs: list[Path], cands: list[Path]) -> dict[str, Any]:
         ref_img = np.asarray(Image.open(ref).convert("RGB"), dtype=np.float32) / 255.0
         for cand in cands:
             cand_img = np.asarray(Image.open(cand).convert("RGB"), dtype=np.float32) / 255.0
-            score = float(structural_similarity(
-                ref_img, cand_img, channel_axis=-1, data_range=1.0,
-            ))
+            score = float(
+                structural_similarity(
+                    ref_img,
+                    cand_img,
+                    channel_axis=-1,
+                    data_range=1.0,
+                )
+            )
             per_pair.append(score)
     import statistics
+
     return {
         "ssim_per_pair": per_pair,
         "ssim_median": statistics.median(per_pair) if per_pair else 0.0,
@@ -189,6 +202,7 @@ def _compute_ssim(refs: list[Path], cands: list[Path]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point. Builds report, dispatches scenarios, writes JSON."""

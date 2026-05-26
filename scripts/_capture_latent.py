@@ -64,7 +64,9 @@ def _write_sha256_sidecar(target: Path) -> Path:
     return sidecar
 
 
-def _run_mflux_generation_and_extract_latent(variant: str, prompt: str, seed: int, height: int, width: int) -> mx.array:
+def _run_mflux_generation_and_extract_latent(
+    variant: str, prompt: str, seed: int, height: int, width: int
+) -> mx.array:
     """Run one mflux generation, return the final pre-decode latent.
 
     Heavy MLX path. Mocked in tests via patch.object.
@@ -86,21 +88,21 @@ def _run_mflux_generation_and_extract_latent(variant: str, prompt: str, seed: in
     return latent
 
 
-def _capture_flux1_latent(flux: object, *, prompt: str, seed: int, height: int, width: int) -> mx.array:
+def _capture_flux1_latent(
+    flux: object, *, prompt: str, seed: int, height: int, width: int
+) -> mx.array:
     """Run flux1 generation and intercept the final latent via a callback.
 
     Heavy MLX path; implementation lands in the bench-day commit.
     """
-    raise NotImplementedError(
-        "Heavy MLX path — implementation lands in the bench-day commit."
-    )
+    raise NotImplementedError("Heavy MLX path — implementation lands in the bench-day commit.")
 
 
-def _capture_flux2_latent(flux: object, *, prompt: str, seed: int, height: int, width: int) -> mx.array:
+def _capture_flux2_latent(
+    flux: object, *, prompt: str, seed: int, height: int, width: int
+) -> mx.array:
     """FLUX.2 equivalent of _capture_flux1_latent."""
-    raise NotImplementedError(
-        "Heavy MLX path — implementation lands in the bench-day commit."
-    )
+    raise NotImplementedError("Heavy MLX path — implementation lands in the bench-day commit.")
 
 
 def main(argv: list[str] | None = None) -> int:
