@@ -104,3 +104,35 @@ def test_live_preview_callback_stores_passed_flux_instance() -> None:
     sentinel = object()
     cb = LivePreviewCallback(flux=sentinel, variant="taef2", save_to="/tmp/preview.png")
     assert cb.flux is sentinel
+
+
+def test_resolved_bn_is_explicit_when_kwargs_passed() -> None:
+    import mlx.core as mx
+
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    cb = LivePreviewCallback(
+        variant="taef2",
+        save_to="/tmp/preview.png",
+        bn_mean=mx.ones(128),
+        bn_var=mx.ones(128),
+    )
+    assert cb.resolved_bn == "explicit"
+
+
+def test_resolved_bn_is_none_when_no_bn_and_no_flux() -> None:
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    cb = LivePreviewCallback(variant="taef2", save_to="/tmp/preview.png")
+    assert cb.resolved_bn == "none"
+
+
+def test_resolved_bn_is_none_for_non_taef2_variant_even_with_flux() -> None:
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    cb = LivePreviewCallback(
+        flux=object(),
+        variant="taef1",
+        save_to="/tmp/preview.png",
+    )
+    assert cb.resolved_bn == "none"

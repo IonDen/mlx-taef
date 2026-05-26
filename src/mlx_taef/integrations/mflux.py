@@ -113,6 +113,7 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
         self,
         *,
         flux: object | None = None,
+        auto_bn: bool = True,
         variant: str = "taef2",
         every: int = 5,
         save_to: str | Path = "preview.png",
@@ -129,12 +130,20 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
         else:  # pragma: no cover
             raise ValueError(f"variant must be 'taef1' or 'taef2', got {variant!r}")
         self.flux = flux
+        self.auto_bn = auto_bn
         self.every = every
         self.save_to = Path(save_to)
         self.latent_height = latent_height
         self.latent_width = latent_width
         self.bn_mean = bn_mean
         self.bn_var = bn_var
+        # Resolve BN source. Auto-extraction from flux instance is wired
+        # in Task 7; for now resolved_bn is "explicit" if user passed kwargs,
+        # else "none".
+        if bn_mean is not None and bn_var is not None:
+            self.resolved_bn = "explicit"
+        else:
+            self.resolved_bn = "none"
         self._iter = 0
 
     def call_in_loop(
