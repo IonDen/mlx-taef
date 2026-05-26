@@ -1,0 +1,122 @@
+"""Plumbing tests for scripts/run_showcase.py."""
+
+from __future__ import annotations
+
+import json
+from typing import TYPE_CHECKING
+
+import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+
+def test_argparse_scenario_choices() -> None:
+    from scripts.run_showcase import _build_argparser
+
+    parser = _build_argparser()
+    args = parser.parse_args(["--scenario", "all"])
+    assert args.scenario == "all"
+
+    args = parser.parse_args(["--scenario", "taef2_vs_vae"])
+    assert args.scenario == "taef2_vs_vae"
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--scenario", "nonexistent"])
+
+
+def test_scenario_dispatch_table() -> None:
+    """Each scenario name maps to a worker function."""
+    from scripts.run_showcase import _SCENARIO_DISPATCH
+
+    assert "taef2_vs_vae" in _SCENARIO_DISPATCH
+    assert "taef1_vs_vae" in _SCENARIO_DISPATCH
+    assert "live_preview" in _SCENARIO_DISPATCH
+    assert "combined" in _SCENARIO_DISPATCH
+
+
+def test_json_schema_version_round_trip(tmp_path: Path) -> None:
+    from scripts.run_showcase import _load_report, _write_report
+
+    report = {
+        "schema_version": 1,
+        "generated_at": "2026-05-26T00:00:00Z",
+        "hardware": {"chip": "Apple M1 Max", "ram_gb": 32},
+        "isolation": "subprocess-per-rep",
+        "scenarios": {},
+    }
+    out = tmp_path / "report.json"
+    _write_report(out, report)
+
+    loaded = _load_report(out)
+    assert loaded == report
+
+
+def test_json_schema_rejects_unknown_version(tmp_path: Path) -> None:
+    from scripts.run_showcase import _load_report
+
+    from mlx_taef.errors import SchemaVersionError
+
+    bad = tmp_path / "report.json"
+    bad.write_text(json.dumps({"schema_version": 99, "scenarios": {}}))
+
+    with pytest.raises(SchemaVersionError, match="unknown schema_version"):
+        _load_report(bad)
+
+
+def test_hardware_metadata_includes_imported_versions() -> None:
+    """importlib.metadata.version() is used for mlx_taef, mflux. mlx_teacache
+    is wrapped in try/except (may be None if not installed)."""
+    from scripts.run_showcase import _build_hardware_metadata
+
+    meta = _build_hardware_metadata()
+    assert "mlx_taef_version" in meta
+    assert "mflux_version" in meta
+    assert "mlx_teacache_version" in meta  # may be None if not installed
+    # mlx_teacache_version is None or a version string, never a raw exception
+    assert meta["mlx_teacache_version"] is None or isinstance(meta["mlx_teacache_version"], str)
+
+
+def test_compute_ssim_returns_per_pair_array_and_median(tmp_path: Path) -> None:
+    """SSIM computed in orchestrator; returned as per-pair list + median."""
+    import numpy as np
+    from PIL import Image
+    from scripts.run_showcase import _compute_ssim
+
+    img_a = (np.random.default_rng(0).random((64, 64, 3)) * 255).astype(np.uint8)
+    img_b = img_a.copy()  # identical → SSIM = 1.0
+    path_a = tmp_path / "a.webp"
+    path_b = tmp_path / "b.webp"
+    Image.fromarray(img_a).save(path_a)
+    Image.fromarray(img_b).save(path_b)
+
+    result = _compute_ssim([path_a], [path_b])
+    assert "ssim_per_pair" in result
+    assert "ssim_median" in result
+    assert result["ssim_median"] >= 0.99  # near-perfect for identical inputs
+
+
+def test_sha256_mismatch_warns_but_continues(tmp_path: Path, caplog) -> None:
+    import logging
+
+    from scripts.run_showcase import _check_latent_sha
+
+    latent = tmp_path / "latent.safetensors"
+    latent.write_bytes(b"actual content")
+    sidecar = tmp_path / "latent.safetensors.sha256"
+    # Sidecar claims a different hash
+    sidecar.write_text(f"{'0' * 64}  latent.safetensors\n")
+
+    with caplog.at_level(logging.WARNING):
+        _check_latent_sha(latent)
+    assert any("sha mismatch" in r.message.lower() for r in caplog.records)
+
+
+def test_missing_latent_raises_fixture_latent_missing(tmp_path: Path) -> None:
+    from scripts.run_showcase import _check_latent_sha
+
+    from mlx_taef.errors import FixtureLatentMissingError
+
+    missing = tmp_path / "does_not_exist.safetensors"
+    with pytest.raises(FixtureLatentMissingError):
+        _check_latent_sha(missing)
