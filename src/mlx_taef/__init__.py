@@ -9,6 +9,7 @@ from mlx_taef.errors import (
     SchemaVersionError,
     TaefError,
 )
+from mlx_taef.variants import get_memory_cap_hint
 
 __all__ = [
     "TAEF1",
@@ -20,6 +21,7 @@ __all__ = [
     "SchemaVersionError",
     "Taef",
     "TaefError",
+    "get_memory_cap_hint",
 ]
 
 logging.getLogger("mlx_taef").addHandler(logging.NullHandler())
