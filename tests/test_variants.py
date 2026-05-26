@@ -93,3 +93,20 @@ def test_get_memory_cap_hint_reexported_from_package_root() -> None:
     import mlx_taef
 
     assert mlx_taef.get_memory_cap_hint("taef2") == 2
+
+
+def test_conftest_installed_session_wired_cap() -> None:
+    """conftest should set MLX wired+memory caps at session start.
+
+    Mirrors mlx-teacache v0.6.0 conftest.py pattern (module-import-time
+    cap, not pytest_configure, so the cap lands before any worker module
+    is collected).
+    """
+    import mlx.core as mx
+
+    # If conftest ran, the wired limit should be exactly 20 GB.
+    # mx.set_wired_limit returns the previous limit; this call sets it
+    # and returns whatever it was just before. The sentinel proves the
+    # cap was installed by reading back through a no-op set.
+    current = mx.set_wired_limit(int(20 * 1024**3))
+    assert current == int(20 * 1024**3)
