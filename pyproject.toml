@@ -11,7 +11,8 @@ license = "MIT"
 authors = [{ name = "Denis Ineshin", email = "denis.ineshin@gmail.com" }]
 keywords = ["mlx", "stable-diffusion", "flux", "autoencoder", "taesd", "apple-silicon"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
+  "Environment :: MacOS X",
   "Intended Audience :: Developers",
   "Intended Audience :: Science/Research",
   "License :: OSI Approved :: MIT License",
@@ -21,6 +22,7 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Scientific/Engineering :: Image Processing",
   "Typing :: Typed",
 ]
 dynamic = ["version"]
@@ -32,8 +34,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-mflux = ["mflux>=0.17"]
-image = ["pillow>=10.0"]
+mflux = ["mflux>=0.17,<0.18"]
+image = ["Pillow>=10.0"]
+showcase = [
+  "mflux>=0.17,<0.18",
+  "mlx-teacache>=0.6,<0.7",
+  "Pillow>=10.0",
+  "scikit-image>=0.22",
+]
 
 [project.urls]
 Homepage = "https://github.com/ionden/mlx-taef"
@@ -50,7 +58,10 @@ test = [
   "pytest-cov>=5.0",
   "hypothesis>=6.130",
   "pytest-benchmark>=4.0",
-  "mflux>=0.17",
+  "mflux>=0.17,<0.18",
+  "mlx-teacache>=0.6,<0.7",
+  "scikit-image>=0.22",
+  "Pillow>=10.0",
 ]
 typecheck = [
   "mypy>=1.13",
