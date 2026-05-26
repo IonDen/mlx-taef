@@ -47,6 +47,7 @@ class TaesdVariantConfig:
     hf_encoder_filename: str | None
     latent_magnitude: float = 3.0
     latent_shift: float = 0.5
+    memory_cap_hint_gb: int | None = None
 
     @property
     def use_midblock_gn(self) -> bool:
@@ -85,6 +86,7 @@ TAEF1_CONFIG = TaesdVariantConfig(
     hf_filename="diffusion_pytorch_model.safetensors",
     hf_decoder_filename=None,
     hf_encoder_filename=None,
+    memory_cap_hint_gb=1,
 )
 
 TAEF2_CONFIG = TaesdVariantConfig(
@@ -96,6 +98,7 @@ TAEF2_CONFIG = TaesdVariantConfig(
     hf_filename="taef2.safetensors",
     hf_decoder_filename=None,
     hf_encoder_filename=None,
+    memory_cap_hint_gb=2,
 )
 
 ALL_VARIANTS: tuple[TaesdVariantConfig, ...] = (
@@ -105,11 +108,29 @@ ALL_VARIANTS: tuple[TaesdVariantConfig, ...] = (
     TAEF2_CONFIG,
 )
 
+VARIANTS: dict[str, TaesdVariantConfig] = {v.name: v for v in ALL_VARIANTS}
+
+
+def get_memory_cap_hint(variant: str) -> int | None:
+    """Return the per-variant `memory_cap_hint_gb` (GB) or None.
+
+    Raises:
+        KeyError: if `variant` is not a known variant name.
+    """
+    try:
+        cfg = VARIANTS[variant]
+    except KeyError as e:
+        raise KeyError(f"unknown variant: {variant!r}") from e
+    return cfg.memory_cap_hint_gb
+
+
 __all__ = [
     "ALL_VARIANTS",
     "TAEF1_CONFIG",
     "TAEF2_CONFIG",
     "TAESDXL_CONFIG",
     "TAESD_CONFIG",
+    "VARIANTS",
     "TaesdVariantConfig",
+    "get_memory_cap_hint",
 ]

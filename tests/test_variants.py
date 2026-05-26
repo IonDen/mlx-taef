@@ -50,3 +50,46 @@ def test_all_variants_contains_four_entries():
     assert len(ALL_VARIANTS) == 4
     names = {v.name for v in ALL_VARIANTS}
     assert names == {"taesd", "taesdxl", "taef1", "taef2"}
+
+
+def test_each_variant_has_memory_cap_hint_gb_field() -> None:
+    from mlx_taef.variants import VARIANTS
+
+    for name, cfg in VARIANTS.items():
+        assert hasattr(cfg, "memory_cap_hint_gb"), f"{name} missing memory_cap_hint_gb"
+        cap = cfg.memory_cap_hint_gb
+        assert cap is None or (isinstance(cap, int) and cap > 0), (
+            f"{name}.memory_cap_hint_gb must be None or positive int, got {cap!r}"
+        )
+
+
+def test_memory_cap_hint_defaults_per_variant() -> None:
+    from mlx_taef.variants import VARIANTS
+
+    assert VARIANTS["taesd"].memory_cap_hint_gb is None
+    assert VARIANTS["taesdxl"].memory_cap_hint_gb is None
+    assert VARIANTS["taef1"].memory_cap_hint_gb == 1
+    assert VARIANTS["taef2"].memory_cap_hint_gb == 2
+
+
+def test_get_memory_cap_hint_returns_field_value() -> None:
+    from mlx_taef.variants import get_memory_cap_hint
+
+    assert get_memory_cap_hint("taef2") == 2
+    assert get_memory_cap_hint("taef1") == 1
+    assert get_memory_cap_hint("taesd") is None
+
+
+def test_get_memory_cap_hint_raises_keyerror_on_unknown_variant() -> None:
+    import pytest
+
+    from mlx_taef.variants import get_memory_cap_hint
+
+    with pytest.raises(KeyError, match="unknown variant"):
+        get_memory_cap_hint("nonexistent")
+
+
+def test_get_memory_cap_hint_reexported_from_package_root() -> None:
+    import mlx_taef
+
+    assert mlx_taef.get_memory_cap_hint("taef2") == 2
