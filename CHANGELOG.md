@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] — TBD
+
+Substantial release. Auto-bn extraction makes FLUX.2 live previews color-correct by default; the showcase bench publishes measured timings + perceptual fidelity numbers anyone can reproduce.
+
+### Added
+- `LivePreviewCallback(flux=..., auto_bn=True)` — opt-out via `auto_bn=False`; auto-extracts `flux.vae.bn.running_{mean,var,eps}` when `variant="taef2"`. Falls back to identity BN with a warning if the flux instance doesn't expose `.vae.bn`. New `callback.resolved_bn` tri-state attribute (`"explicit" | "auto" | "none"`).
+- `TaesdVariantConfig.memory_cap_hint_gb` field + `get_memory_cap_hint(variant)` helper. Per-variant defaults: `taesd`/`taesdxl` None, `taef1` 1 GB, `taef2` 2 GB. Re-exported in `mlx_taef.__all__`.
+- New exception classes in `src/mlx_taef/errors.py`: `TaefError` (root), `SchemaVersionError`, `MlxTeacacheNotInstalledError`, `FixtureLatentMissingError`. All re-exported in `mlx_taef.__all__`.
+- `tests/conftest.py` session-level `mx.set_wired_limit(20 GB)` + `mx.set_memory_limit(22 GB)` (kernel-panic guard for the test suite).
+- `scripts/_caps.py` with `FULL_VAE_CAP_GB` shared constant (per-flux-variant cap for full-VAE baseline workers).
+- `scripts/_capture_latent.py` — one-shot fixture-latent capture with sha256 sidecar.
+- `scripts/bench_decode.py` — subprocess-per-rep decoder bench worker + orchestrator. `::BENCH_RESULT::` sentinel contract pinned (line-start, one-per-worker, JSON one-liner). Per-condition cap split: TAEF workers use the variant `memory_cap_hint_gb`; full-VAE workers use `FULL_VAE_CAP_GB[flux_variant]`. Failed-rep handling records errors and continues; raises if all reps fail.
+- `scripts/run_showcase.py` — 4-scenario showcase orchestrator. Scenarios: `taef2_vs_vae`, `taef1_vs_vae`, `live_preview`, `combined`. SSIM computed in-orchestrator (cross-process safety per gotcha #24). JSON schema v1 with `importlib.metadata.version()` for version fields, per-rep arrays for timings + peak memory, per-condition `applied_cap_gb`, `ssim_per_pair` + `ssim_median`.
+- `scripts/diff_showcase_report.py` — machine-enforced regression checker. Default tolerances: 10% wall-clock drift, 0.05 SSIM drop. Exits non-zero on any flagged regression.
+- `COMPARISON.md` — showcase doc with 4 scenarios, ecosystem positioning, reproducer commands.
+- `ROADMAP.md` — Released / Active / Future / Known-upstream-deferred (TAESD3, TAESANA, TAESDV, TAEHV, TAEM1).
+- `docs/manual-verification.md` cross-process MLX non-determinism section.
+
+### Changed
+- `pyproject.toml`: Trove classifier alignment with mlx-teacache; new `showcase` runtime extra (`mflux`, `mlx-teacache`, `Pillow`, `scikit-image`); test dep group adds `mlx-teacache` and `scikit-image`.
+- README install-pin example bumped `0.1.0` → `0.2.0`. `## Benchmarks` section now links to COMPARISON.md instead of inlining the (same-process v0.1.x) numbers.
+
+### Removed
+- Nothing intentionally removed. v0.1.x API surface preserved.
+
 ## [0.1.1] — 2026-05-13
 
 ### Added
