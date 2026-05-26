@@ -43,32 +43,32 @@ def diff_reports(
                 continue
             drift = (new_med - old_med) / old_med
             if drift > wallclock_tolerance:
-                regressions.append({
-                    "kind": "wallclock-drift",
-                    "scenario": scenario,
-                    "condition": cond,
-                    "old_seconds": old_med,
-                    "new_seconds": new_med,
-                    "drift_pct": drift * 100,
-                })
+                regressions.append(
+                    {
+                        "kind": "wallclock-drift",
+                        "scenario": scenario,
+                        "condition": cond,
+                        "old_seconds": old_med,
+                        "new_seconds": new_med,
+                        "drift_pct": drift * 100,
+                    }
+                )
 
         # SSIM
         old_perc = old_data.get("perceptual", {})
         new_perc = new_data.get("perceptual", {})
         old_ssim = old_perc.get("ssim_median")
         new_ssim = new_perc.get("ssim_median")
-        if (
-            old_ssim is not None
-            and new_ssim is not None
-            and (old_ssim - new_ssim) > ssim_tolerance
-        ):
-            regressions.append({
-                "kind": "ssim-drop",
-                "scenario": scenario,
-                "old_ssim": old_ssim,
-                "new_ssim": new_ssim,
-                "drop": old_ssim - new_ssim,
-            })
+        if old_ssim is not None and new_ssim is not None and (old_ssim - new_ssim) > ssim_tolerance:
+            regressions.append(
+                {
+                    "kind": "ssim-drop",
+                    "scenario": scenario,
+                    "old_ssim": old_ssim,
+                    "new_ssim": new_ssim,
+                    "drop": old_ssim - new_ssim,
+                }
+            )
 
     return regressions
 
@@ -86,7 +86,8 @@ def main(argv: list[str] | None = None) -> int:
     new = json.loads(args.new.read_text())
 
     regressions = diff_reports(
-        old, new,
+        old,
+        new,
         wallclock_tolerance=args.wallclock_tolerance,
         ssim_tolerance=args.ssim_tolerance,
     )

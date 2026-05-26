@@ -166,6 +166,7 @@ files = ["src/mlx_taef"]
 module = "mlx_taef.integrations.mflux"
 warn_unused_ignores = false
 
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = "-ra --strict-markers --strict-config"

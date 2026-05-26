@@ -28,7 +28,9 @@ def test_clean_diff_reports_no_regression(tmp_path: Path) -> None:
     from scripts.diff_showcase_report import diff_reports
 
     old = _make_report(median_seconds=0.10, ssim_median=0.85)
-    new = _make_report(median_seconds=0.105, ssim_median=0.84)  # 5% wall-clock drift, 0.01 SSIM drop
+    new = _make_report(
+        median_seconds=0.105, ssim_median=0.84
+    )  # 5% wall-clock drift, 0.01 SSIM drop
 
     regressions = diff_reports(old, new, wallclock_tolerance=0.10, ssim_tolerance=0.05)
     assert regressions == []

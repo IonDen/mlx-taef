@@ -18,8 +18,8 @@ def _install_mlx_memory_caps() -> None:
     except ImportError:  # pragma: no cover - MLX always present on Apple Silicon
         return
     try:
-        mx.set_wired_limit(int(20 * 1024**3))
-        mx.set_memory_limit(int(22 * 1024**3))
+        mx.set_wired_limit(20 * 1024**3)
+        mx.set_memory_limit(22 * 1024**3)
     except Exception:  # pragma: no cover - older MLX / non-Metal env
         return
 
