@@ -87,3 +87,20 @@ def test_unpack_with_bn_stats_differs_from_identity_bn() -> None:
         bn_var=bn_var,
     )
     assert not np.allclose(np.array(out_identity), np.array(out_with_bn))
+
+
+def test_live_preview_callback_accepts_flux_kwarg() -> None:
+    """Constructor must accept flux= keyword (no behavior change yet — Task 7
+    adds the auto-bn extraction; this task just exposes the parameter)."""
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    cb = LivePreviewCallback(flux=None, variant="taef2", save_to="/tmp/preview.png")
+    assert cb.flux is None
+
+
+def test_live_preview_callback_stores_passed_flux_instance() -> None:
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    sentinel = object()
+    cb = LivePreviewCallback(flux=sentinel, variant="taef2", save_to="/tmp/preview.png")
+    assert cb.flux is sentinel

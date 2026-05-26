@@ -95,6 +95,11 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
     TAEF2 decode (via `TAEF1` for FLUX.1), and writes a PIL PNG to disk.
 
     Args:
+        flux: optional reference to the mflux model instance the callback will be
+            registered on. Typed as `object` to keep this module import-clean of
+            mflux; intended to be a `Flux2Klein` instance when `auto_bn=True` and
+            `variant="taef2"`. Required for auto-bn extraction (the mflux callback
+            contract does not pass the flux instance at fire time).
         variant: 'taef1' (for FLUX.1 latents) or 'taef2' (for FLUX.2 Klein).
         every: emit a preview every Nth iteration. Default 5.
         save_to: filesystem path to write previews. Overwritten each emission.
@@ -107,6 +112,7 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
     def __init__(
         self,
         *,
+        flux: object | None = None,
         variant: str = "taef2",
         every: int = 5,
         save_to: str | Path = "preview.png",
@@ -122,6 +128,7 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
             self.model = TAEF2.from_pretrained(include_encoder=False)
         else:  # pragma: no cover
             raise ValueError(f"variant must be 'taef1' or 'taef2', got {variant!r}")
+        self.flux = flux
         self.every = every
         self.save_to = Path(save_to)
         self.latent_height = latent_height
