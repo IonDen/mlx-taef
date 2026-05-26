@@ -43,7 +43,7 @@ uv add "mlx-taef[mflux]"
 Pin an exact version in a project that needs reproducibility:
 
 ```bash
-pip install "mlx-taef==0.1.0"
+pip install "mlx-taef==0.2.0"
 ```
 
 Verify the install:
@@ -65,15 +65,13 @@ Requires Python ≥ 3.11 and Apple Silicon (`mlx` itself is Apple-Silicon-only).
 
 All four share one API.
 
-## Benchmarks (M1 Max, fp16)
+## Benchmarks
 
-| Metric | TAEF2 (this library) | Full Flux VAE (reference) | Win |
-|---|---|---|---|
-| Decode latency 1024×1024 | **~100 ms** | seconds | 50–100× |
-| Peak unified memory 1024×1024 | **~1 GB** | ~9.6 GB | **9.4×** |
-| Output cosine sim vs PyTorch reference | > 0.999 | — | (parity verified) |
+Side-by-side images + measured timings: see [COMPARISON.md](COMPARISON.md).
 
-Numbers from `tests/test_perf.py` on M1 Max 32 GB. See `notes/phase1-benchmarks.md` for details.
+All numbers there come from `scripts/run_showcase.py` (subprocess-per-rep bench harness) and the committed `_artifacts/showcase_report.json`. Per-rep raw arrays are preserved so reviewers can see variance, not just summary stats.
+
+The previous v0.1.x README claim — *"~100 ms decode at 1024×1024, 50–100× faster than the full Flux VAE; ~1 GB peak vs ~9.6 GB"* — was a same-process measurement under v0.1's `tests/test_perf.py`. v0.2.0 re-measures under subprocess-per-rep with per-condition memory caps; see COMPARISON.md for the honest replacement numbers.
 
 ## mflux live previews
 
@@ -106,6 +104,7 @@ See `docs/manual-verification.md` for the full verification recipe.
 ## Status
 
 - **v0.1.0 — initial public release on PyPI** (2026-05-13). All four variants, encoder + decoder, mflux integration, CI, 99 % honest coverage.
+- **v0.2.0** *(in progress)* — auto-bn extraction in `LivePreviewCallback`; subprocess-per-rep showcase bench (`scripts/run_showcase.py`); `COMPARISON.md` + committed JSON report; `ROADMAP.md`. See [`docs/superpowers/specs/2026-05-26-mlx-taef-v0.2.0-design.md`](docs/superpowers/specs/2026-05-26-mlx-taef-v0.2.0-design.md).
 
 Track future releases via the [PyPI history](https://pypi.org/project/mlx-taef/#history) or `gh release list -R IonDen/mlx-taef`.
 
