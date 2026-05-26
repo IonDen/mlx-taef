@@ -186,28 +186,40 @@ def test_auto_bn_resolved_auto_when_flux_has_bn_for_taef2() -> None:
 
 
 def test_auto_bn_changes_decoded_output_vs_identity_bn() -> None:
-    """Behavioral test: auto-extracted BN must change the decoder output
-    direction. Mirrors test_unpack_with_bn_stats_differs_from_identity_bn."""
-    from mlx_taef.integrations.mflux import unpack_flux2_latent
+    """End-to-end behavioral test: callback constructed with flux=fake (auto path)
+    produces different decoder output than callback with no flux (identity-BN path).
+
+    Exercises the FULL chain: construct → _try_extract_bn → callback.bn_mean/var → unpack.
+    """
+    from mlx_taef.integrations.mflux import LivePreviewCallback, unpack_flux2_latent
+
+    flux = _build_fake_flux_with_nontrivial_bn()
+    cb_auto = LivePreviewCallback(flux=flux, variant="taef2", save_to="/tmp/preview_auto.png")
+    cb_none = LivePreviewCallback(variant="taef2", save_to="/tmp/preview_none.png")
+
+    assert cb_auto.resolved_bn == "auto"
+    assert cb_none.resolved_bn == "none"
 
     latent_h = 4
     latent_w = 4
     packed = mx.ones((1, latent_h * latent_w, 128))
 
-    # Identity-BN output (no kwargs)
-    out_identity = unpack_flux2_latent(packed, latent_height=latent_h, latent_width=latent_w)
-
-    # Auto-extracted BN output (use the same fake bn stats the callback would extract)
-    flux = _build_fake_flux_with_nontrivial_bn()
-    out_with_bn = unpack_flux2_latent(
+    out_auto = unpack_flux2_latent(
         packed,
         latent_height=latent_h,
         latent_width=latent_w,
-        bn_mean=flux.vae.bn.running_mean,
-        bn_var=flux.vae.bn.running_var,
+        bn_mean=cb_auto.bn_mean,
+        bn_var=cb_auto.bn_var,
+    )
+    out_none = unpack_flux2_latent(
+        packed,
+        latent_height=latent_h,
+        latent_width=latent_w,
+        bn_mean=cb_none.bn_mean,  # None → identity BN
+        bn_var=cb_none.bn_var,    # None → identity BN
     )
 
-    assert not np.allclose(np.array(out_identity), np.array(out_with_bn))
+    assert not np.allclose(np.array(out_auto), np.array(out_none))
 
 
 def test_explicit_kwargs_win_over_auto_bn() -> None:
