@@ -1,0 +1,196 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-05-27T18:58:39.461616+00:00",
+  "hardware": {
+    "chip": "arm",
+    "ram_gb": 0,
+    "machine": "arm64",
+    "os": "Darwin 25.5.0",
+    "mlx_taef_version": "0.1.2.dev26+gf9f4df3ee.d20260526",
+    "mlx_teacache_version": "0.6.1",
+    "mflux_version": "0.17.5",
+    "quantize": 4,
+    "dtype": "bf16"
+  },
+  "isolation": "subprocess-per-rep",
+  "scenarios": {
+    "taef2_vs_vae": {
+      "status": "ok",
+      "taef": {
+        "condition": "taef2",
+        "applied_cap_gb": 2,
+        "reps": 5,
+        "per_rep_seconds": [
+          0.3479966669983696,
+          0.2600294170115376,
+          0.257052291999571,
+          0.2702323749981588,
+          0.24644020799314603
+        ],
+        "median_seconds": 0.2600294170115376,
+        "min_seconds": 0.24644020799314603,
+        "max_seconds": 0.3479966669983696,
+        "per_rep_peak_memory_gb": [
+          0.5855611059814692,
+          0.5855611059814692,
+          0.5855611059814692,
+          0.5855611059814692,
+          0.5855611059814692
+        ],
+        "median_peak_memory_gb": 0.5855611059814692,
+        "image_path": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/taef2/taef/taef2_rep4.webp",
+        "per_rep_failures": []
+      },
+      "vanilla_vae": {
+        "condition": "vanilla_vae",
+        "applied_cap_gb": 12,
+        "reps": 3,
+        "per_rep_seconds": [
+          2.502052541996818,
+          2.1445868339942535,
+          2.1467097499989904
+        ],
+        "median_seconds": 2.1467097499989904,
+        "min_seconds": 2.1445868339942535,
+        "max_seconds": 2.502052541996818,
+        "per_rep_peak_memory_gb": [
+          2.373660882934928,
+          2.5538145191967487,
+          2.373660882934928
+        ],
+        "median_peak_memory_gb": 2.373660882934928,
+        "image_path": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/taef2/vae/vanilla_vae_rep2.webp",
+        "per_rep_failures": []
+      },
+      "ssim_per_pair": [
+        0.6162852644920349,
+        0.6162852644920349,
+        0.6162852644920349,
+        0.6162852644920349,
+        0.6162852644920349,
+        0.6162852644920349,
+        0.6162852644920349,
+        0.6162852644920349,
+        0.6162852644920349,
+        0.6162852644920349,
+        0.6162852644920349,
+        0.6162852644920349,
+        0.6162852644920349,
+        0.6162852644920349,
+        0.6162852644920349
+      ],
+      "ssim_median": 0.6162852644920349
+    },
+    "taef1_vs_vae": {
+      "status": "ok",
+      "taef": {
+        "condition": "taef1",
+        "applied_cap_gb": 1,
+        "reps": 5,
+        "per_rep_seconds": [
+          0.1860877909930423,
+          0.183206000001519,
+          0.18173458299133927,
+          0.18996912500006147,
+          0.18465187500987668
+        ],
+        "median_seconds": 0.18465187500987668,
+        "min_seconds": 0.18173458299133927,
+        "max_seconds": 0.18996912500006147,
+        "per_rep_peak_memory_gb": [
+          0.5460954196751118,
+          0.5460954196751118,
+          0.5460954196751118,
+          0.5460954196751118,
+          0.5460954196751118
+        ],
+        "median_peak_memory_gb": 0.5460954196751118,
+        "image_path": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/taef1/taef/taef1_rep4.webp",
+        "per_rep_failures": []
+      },
+      "vanilla_vae": {
+        "condition": "vanilla_vae",
+        "applied_cap_gb": 6,
+        "reps": 3,
+        "per_rep_seconds": [
+          2.010632582998369,
+          1.9947539580025477,
+          1.9856187920086086
+        ],
+        "median_seconds": 1.9947539580025477,
+        "min_seconds": 1.9856187920086086,
+        "max_seconds": 2.010632582998369,
+        "per_rep_peak_memory_gb": [
+          2.99538167566061,
+          2.99538167566061,
+          2.99538167566061
+        ],
+        "median_peak_memory_gb": 2.99538167566061,
+        "image_path": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/taef1/vae/vanilla_vae_rep2.webp",
+        "per_rep_failures": []
+      },
+      "ssim_per_pair": [
+        0.9388758540153503,
+        0.9388758540153503,
+        0.9388758540153503,
+        0.9388758540153503,
+        0.9388758540153503,
+        0.9388758540153503,
+        0.9388758540153503,
+        0.9388758540153503,
+        0.9388758540153503,
+        0.9388758540153503,
+        0.9388758540153503,
+        0.9388758540153503,
+        0.9388758540153503,
+        0.9388758540153503,
+        0.9388758540153503
+      ],
+      "ssim_median": 0.9388758540153503
+    },
+    "live_preview": {
+      "status": "ok",
+      "scenario_dir": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/live_preview",
+      "elapsed_s": 11.211821958000655,
+      "peak_memory_gb": 10.664289209991693,
+      "num_steps": 4,
+      "guidance": 1.0,
+      "seed": 42,
+      "prompt": "a red apple on a wooden table",
+      "height": 512,
+      "width": 512,
+      "preview_paths": [
+        "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/live_preview/live_preview_step00.webp",
+        "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/live_preview/live_preview_step01.webp",
+        "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/live_preview/live_preview_step02.webp",
+        "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/live_preview/live_preview_step03.webp"
+      ],
+      "final_path": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/live_preview/live_preview_final.webp",
+      "teacache": null
+    },
+    "combined": {
+      "status": "ok",
+      "scenario_dir": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/combined",
+      "elapsed_s": 8.83631279200199,
+      "peak_memory_gb": 6.207339311018586,
+      "num_steps": 4,
+      "guidance": 1.0,
+      "seed": 42,
+      "prompt": "a red apple on a wooden table",
+      "height": 512,
+      "width": 512,
+      "preview_paths": [
+        "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/combined/combined_step00.webp",
+        "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/combined/combined_step01.webp",
+        "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/combined/combined_step02.webp",
+        "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/combined/combined_step03.webp"
+      ],
+      "final_path": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/combined/combined_final.webp",
+      "teacache": {
+        "skipped_count": 1,
+        "computed_count": 1,
+        "variant_id": "flux2-klein-base-4b"
+      }
+    }
+  }
+}

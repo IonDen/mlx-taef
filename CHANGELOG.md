@@ -5,9 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] — TBD
+## [0.2.0] — 2026-05-27
 
 Substantial release. Auto-bn extraction makes FLUX.2 live previews color-correct by default; the showcase bench publishes measured timings + perceptual fidelity numbers anyone can reproduce.
+
+Headline measured results on M1 Max 32 GB (full table + reproducer in `COMPARISON.md`):
+
+- TAEF2 vs full FLUX.2 VAE on the same latent: 8.3× faster decode (0.260 s vs 2.147 s median), 4× lower peak decode memory (0.59 GB vs 2.37 GB), SSIM 0.616.
+- TAEF1 vs full FLUX.1 VAE: 10.8× faster decode (0.185 s vs 1.995 s median), 5.4× lower peak decode memory, SSIM 0.939.
+- `live_preview` (FLUX.2 4-step + TAEF2 previews at every step): 11.21 s, peak 10.66 GB.
+- `combined` (live_preview + mlx-teacache): 8.84 s, peak 6.21 GB — 1.27× faster than live_preview with 41% less peak memory.
 
 ### Added
 - `LivePreviewCallback(flux=..., auto_bn=True)` — opt-out via `auto_bn=False`; auto-extracts `flux.vae.bn.running_{mean,var,eps}` when `variant="taef2"`. Falls back to identity BN with a warning if the flux instance doesn't expose `.vae.bn`. New `callback.resolved_bn` tri-state attribute (`"explicit" | "auto" | "none"`).

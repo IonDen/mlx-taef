@@ -50,8 +50,16 @@ def test_main_writes_safetensors_and_sidecar(tmp_path: Path) -> None:
 
     fake_latent = mx.zeros((1, 16, 32, 32))
 
-    with patch.object(
-        _capture_latent, "_run_mflux_generation_and_extract_latent", return_value=fake_latent
+    def _fake_capture(**kwargs: object) -> dict[str, mx.array]:
+        return {
+            "latent": fake_latent,
+            "height": mx.array([kwargs["height"]], dtype=mx.int32),  # type: ignore[arg-type]
+            "width": mx.array([kwargs["width"]], dtype=mx.int32),  # type: ignore[arg-type]
+        }
+
+    with (
+        patch.object(_capture_latent, "_capture", side_effect=_fake_capture),
+        patch.object(_capture_latent, "_install_memory_caps"),
     ):
         exit_code = _capture_latent.main(
             [
