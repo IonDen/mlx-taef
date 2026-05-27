@@ -4,11 +4,12 @@ Visual showcase of what mlx-taef does on real generations. Every number on this 
 
 ## Test machine
 
-- Apple M1 Max, 32 GB unified memory
-- macOS Darwin 25.5.0
-- mflux 0.17.5, mlx-taef 0.2.0, mlx-teacache 0.6.1, MLX 0.31.2
+- Apple M1 Max, 32 GB unified memory (`sysctl machdep.cpu.brand_string` + `hw.memsize`)
+- macOS Darwin 25.5.0, Python 3.14.3
+- mflux 0.17.5, mlx-teacache 0.6.1, MLX 0.31.2
+- mlx-taef at commit `2a3fcec` (the pre-tag dev build that produced the committed report; v0.2.0 ships these numbers verbatim)
 - Quantization: int4 (mflux `quantize=4`), activation dtype bf16
-- All conditions ran in isolated subprocesses with `mx.set_wired_limit` set per the cap column
+- All conditions ran in isolated subprocesses with `mx.set_wired_limit` set per the cap column. Hardware metadata is recorded inline in `_artifacts/showcase_report.json` for auditability.
 
 ## Where this fits
 
@@ -26,13 +27,13 @@ Same FLUX.2 Klein base 4B latent, two different decoders. Both produce a 512×51
 
 | | Vanilla FLUX.2 VAE | TAEF2 |
 |---|---|---|
-| Decode latency (median of 3/5 cold subprocess reps) | 2.147 s | 0.260 s |
-| Decode latency range | 2.145 – 2.502 s | 0.246 – 0.348 s |
-| Peak decode memory (post-model-load) | 2.37 GB | 0.59 GB |
+| Decode latency (median of 3/5 cold subprocess reps) | 2.143 s | 0.258 s |
+| Decode latency range | 2.129 – 2.201 s | 0.253 – 0.268 s |
+| Peak decode memory (post-model-load) | 2.62 GB | 0.59 GB |
 | Applied wired cap | 12 GB | 2 GB |
 | Reference image | ![vanilla](_artifacts/showcase/taef2/vae/vanilla_vae_rep0.webp) | ![taef2](_artifacts/showcase/taef2/taef/taef2_rep0.webp) |
 
-**TAEF2 is ~8.3× faster, with ~4× lower peak decode memory.** SSIM(TAEF2, Vanilla) = **0.616** (15/15 pairs).
+**TAEF2 is ~8.3× faster, with ~4.4× lower peak decode memory.** SSIM(TAEF2, Vanilla) = **0.616** (15/15 pairs).
 
 That 0.616 is below the 0.75 starting threshold from the spec, and it's worth being explicit about why: TAEF2 is a 4 MB preview decoder. The full FLUX.2 VAE is ~340 MB. TAEF2 keeps the structure (apple, table, color) and loses fine detail (specular highlight, micro-texture, exact hue). That's the deliberate trade. If you need 0.95+ fidelity, use the full VAE, but expect to pay 2 GB of GPU memory and 2 seconds per preview.
 
@@ -44,13 +45,13 @@ Same setup, FLUX.1-dev side. TAEF1 has been around longer and its architecture i
 
 | | Vanilla FLUX.1 VAE | TAEF1 |
 |---|---|---|
-| Decode latency (median of 3/5 cold subprocess reps) | 1.995 s | 0.185 s |
-| Decode latency range | 1.986 – 2.011 s | 0.182 – 0.190 s |
+| Decode latency (median of 3/5 cold subprocess reps) | 2.009 s | 0.183 s |
+| Decode latency range | 1.992 – 2.013 s | 0.178 – 0.186 s |
 | Peak decode memory (post-model-load) | 3.00 GB | 0.55 GB |
 | Applied wired cap | 6 GB | 1 GB |
 | Reference image | ![vanilla](_artifacts/showcase/taef1/vae/vanilla_vae_rep0.webp) | ![taef1](_artifacts/showcase/taef1/taef/taef1_rep0.webp) |
 
-**TAEF1 is ~10.8× faster, with ~5.4× lower peak decode memory.** SSIM(TAEF1, Vanilla) = **0.939** (15/15 pairs).
+**TAEF1 is ~11.0× faster, with ~5.5× lower peak decode memory.** SSIM(TAEF1, Vanilla) = **0.939** (15/15 pairs).
 
 The taef1 image is nearly indistinguishable from the vanilla FLUX.1 VAE output by eye — the SSIM bears that out. If you're previewing FLUX.1-dev or schnell, TAEF1 is essentially a free win.
 
@@ -58,7 +59,7 @@ The taef1 image is nearly indistinguishable from the vanilla FLUX.1 VAE output b
 
 One full FLUX.2 Klein base 4B generation, 4 inference steps, seed=42, prompt "a red apple on a wooden table". `_GalleryPreviewCallback` decodes a TAEF2 preview at every step and saves it as `live_preview_step{NN}.webp`. The final image is decoded by the full FLUX.2 VAE (mflux's native return path) and saved as `live_preview_final.webp`.
 
-- Wall-clock: **11.21 s** total (model load + 4 generation steps + 4 TAEF2 previews + final VAE decode)
+- Wall-clock: **11.26 s** total (model load + 4 generation steps + 4 TAEF2 previews + final VAE decode)
 - Peak memory: **10.66 GB** (whole-process, includes Flux2Klein + TAEF2 + transformer activations)
 - Gallery: `_artifacts/showcase/live_preview/live_preview_step00..03.webp`
 - Final: `_artifacts/showcase/live_preview/live_preview_final.webp`
@@ -73,8 +74,8 @@ That's the live-preview loop in practice: noise resolves into a recognizable ima
 
 Same generation as `live_preview`, but with `apply_teacache(flux)` wrapping the transformer before the loop runs. TeaCache skips noise-prediction work when the residual is small enough; with the default `skip_first_n_steps=1` and `skip_last_n_steps=1`, only 2 of 4 steps are candidates for skipping in a 4-step run.
 
-- Wall-clock: **8.84 s** total (vs `live_preview`'s 11.21 s → **1.27× speedup**)
-- Peak memory: **6.21 GB** (vs 10.66 GB → **41% less**)
+- Wall-clock: **8.69 s** total (vs `live_preview`'s 11.26 s → **1.30× speedup**)
+- Peak memory: **7.90 GB** (vs 10.66 GB → **26% less**)
 - TeaCache stats: 1 step skipped, 1 step computed, variant=`flux2-klein-base-4b`
 
 | step 00 | step 01 | step 02 | step 03 | final (full VAE) |
@@ -84,7 +85,7 @@ Same generation as `live_preview`, but with `apply_teacache(flux)` wrapping the 
 A few honest notes on this number:
 
 - 1 skip out of 4 is a small sample. The full speedup curve scales with step count — at 28 steps and the same rel-l1 threshold, the skip count is far higher.
-- The 41% peak-memory drop is partly the skipped transformer call (whose activations never materialise) and partly the mflux compiled-path interaction noted in mlx-teacache's own v0.6.1 release notes — be careful attributing it all to one cause.
+- The 26% peak-memory drop is partly the skipped transformer call (whose activations never materialise) and partly the mflux compiled-path interaction noted in mlx-teacache's own v0.6.1 release notes. Be careful attributing it all to one cause.
 - The two libraries compose cleanly: mlx-teacache wraps the transformer, mlx-taef hooks the callback registry. Neither knows about the other.
 
 ## Reproducing these numbers
