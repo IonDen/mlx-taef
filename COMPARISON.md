@@ -57,7 +57,7 @@ The taef1 image is nearly indistinguishable from the vanilla FLUX.1 VAE output b
 
 ### `live_preview` — full FLUX.2 generation with per-step TAEF2 previews
 
-One full FLUX.2 Klein base 4B generation, 4 inference steps, seed=42, prompt "a red apple on a wooden table". `_GalleryPreviewCallback` decodes a TAEF2 preview at every step and saves it as `live_preview_step{NN}.webp`. The final image is decoded by the full FLUX.2 VAE (mflux's native return path) and saved as `live_preview_final.webp`.
+One full FLUX.2 Klein base 4B generation, 4 inference steps, seed=42, prompt "a red apple on a wooden table". `LivePreviewCallback(flux=model, numbered_frames=True, every=1)` decodes a TAEF2 preview at every step and saves it as `live_preview_step{NN}.webp`. The final image is decoded by the full FLUX.2 VAE (mflux's native return path) and saved as `live_preview_final.webp`.
 
 - Wall-clock: **11.26 s** total (model load + 4 generation steps + 4 TAEF2 previews + final VAE decode)
 - Peak memory: **10.66 GB** (whole-process, includes Flux2Klein + TAEF2 + transformer activations)
