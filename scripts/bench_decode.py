@@ -20,12 +20,19 @@ import json
 import statistics
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
-from mlx_taef.errors import TaefError
-from mlx_taef.variants import get_memory_cap_hint
-from scripts._caps import FULL_VAE_CAP_GB
+# Allow running as `python scripts/bench_decode.py` (worker subprocesses spawn
+# us this way). Adds the repo root to sys.path so `scripts._caps` resolves.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from mlx_taef.errors import TaefError  # noqa: E402  (after sys.path tweak)
+from mlx_taef.variants import get_memory_cap_hint  # noqa: E402
+from scripts._caps import FULL_VAE_CAP_GB  # noqa: E402
 
 SENTINEL_PREFIX = "::BENCH_RESULT::"
 
@@ -195,14 +202,144 @@ def _run_orchestrator(
     }
 
 
+def _install_memory_caps(applied_cap_gb: int | None) -> None:
+    """Pin wired + soft memory caps before any model load."""
+    import mlx.core as mx
+
+    wired_gb = applied_cap_gb if applied_cap_gb is not None else 20
+    mem_gb = min(wired_gb + 2, 22)
+    mx.set_wired_limit(wired_gb * 1024**3)
+    mx.set_memory_limit(mem_gb * 1024**3)
+
+
+def _decode_taef1(latent: Any, height: int, width: int) -> Any:
+    """Packed (1, lH*lW, 64) → NHWC uint8 (1, H, W, 3) via TAEF1."""
+    import mlx.core as mx
+    from mflux.models.flux.latent_creator.flux_latent_creator import FluxLatentCreator
+
+    from mlx_taef.api import TAEF1
+
+    taef = TAEF1.from_pretrained(include_encoder=False)
+    unpacked_nchw = FluxLatentCreator.unpack_latents(latent, height=height, width=width)
+    unpacked_nhwc = mx.transpose(unpacked_nchw, (0, 2, 3, 1))
+    return taef.decode_image(unpacked_nhwc)
+
+
+def _decode_taef2(latent: Any, height: int, width: int, bn_mean: Any, bn_var: Any) -> Any:
+    """Packed (1, lH*lW, 128) → NHWC uint8 (1, H, W, 3) via TAEF2 with BN denorm."""
+    from mlx_taef.api import TAEF2
+    from mlx_taef.integrations.mflux import unpack_flux2_latent
+
+    taef = TAEF2.from_pretrained(include_encoder=False)
+    latent_h = height // 16
+    latent_w = width // 16
+    unpacked = unpack_flux2_latent(
+        latent,
+        latent_height=latent_h,
+        latent_width=latent_w,
+        bn_mean=bn_mean,
+        bn_var=bn_var,
+    )
+    return taef.decode_image(unpacked)
+
+
+def _decode_full_vae_flux1(latent: Any, height: int, width: int) -> Any:
+    """Packed → full FLUX.1 VAE decode → NHWC uint8 image."""
+    from mflux.models.flux.latent_creator.flux_latent_creator import FluxLatentCreator
+    from mflux.models.flux.variants.txt2img.flux import Flux1
+
+    flux = Flux1.from_name("dev", quantize=4)
+    unpacked = FluxLatentCreator.unpack_latents(latent, height=height, width=width)
+    decoded = flux.vae.decode(unpacked)
+    return _decoded_to_uint8_nhwc(decoded)
+
+
+def _decode_full_vae_flux2(latent: Any, height: int, width: int) -> Any:
+    """Packed → full FLUX.2 Klein VAE decode → NHWC uint8 image."""
+    from mflux.models.common.config.model_config import ModelConfig
+    from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
+
+    flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_base_4b())
+    latent_h = height // 16
+    latent_w = width // 16
+    packed_nchw = latent.reshape(latent.shape[0], latent_h, latent_w, latent.shape[-1]).transpose(
+        0, 3, 1, 2
+    )
+    decoded = flux.vae.decode_packed_latents(packed_nchw)
+    return _decoded_to_uint8_nhwc(decoded)
+
+
+def _decoded_to_uint8_nhwc(decoded: Any) -> Any:
+    """Mirror mflux ImageUtil._denormalize + transpose + 255x scale + cast."""
+    import mlx.core as mx
+
+    # decoded may be (B, 3, 1, H, W) for flux1 or (B, 3, H, W) for flux2.
+    if decoded.ndim == 5:
+        decoded = mx.squeeze(decoded, axis=2)
+    normalized = mx.clip(decoded / 2.0 + 0.5, 0.0, 1.0)
+    nhwc = mx.transpose(normalized, (0, 2, 3, 1))
+    return (nhwc * 255.0).astype(mx.uint8)
+
+
+def _save_webp(image_uint8_nhwc: Any, target: Path) -> None:
+    """Write a single-image batch as a webp."""
+    import numpy as np
+    from PIL import Image
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    arr = np.array(image_uint8_nhwc[0])
+    Image.fromarray(arr).save(target, "WEBP", quality=92)
+
+
 def _worker_main(args: argparse.Namespace) -> int:
     """Run one (condition, rep) inside this subprocess. Emit sentinel."""
-    # Heavy MLX path — implemented when the user runs the bench. For TDD
-    # purposes the orchestrator's correctness is tested via mocked _run_one_rep.
-    raise NotImplementedError(
-        "Worker MLX implementation lands in the bench-day commit; "
-        "the orchestrator + sentinel contract is implemented + tested today."
+    _install_memory_caps(args.applied_cap_gb)
+
+    import mlx.core as mx
+
+    arrays = mx.load(str(args.latent))
+    latent = arrays["latent"]
+    height = int(arrays["height"].item())
+    width = int(arrays["width"].item())
+    bn_mean = arrays.get("bn_mean")
+    bn_var = arrays.get("bn_var")
+
+    mx.reset_peak_memory()
+    t0 = time.perf_counter()
+    if args.condition == "taef1":
+        image = _decode_taef1(latent, height, width)
+    elif args.condition == "taef2":
+        if bn_mean is None or bn_var is None:
+            raise TaefError("taef2 condition requires bn_mean+bn_var in the latent safetensors")
+        image = _decode_taef2(latent, height, width, bn_mean, bn_var)
+    elif args.condition == "vanilla_vae":
+        if args.flux_variant == "flux1-dev":
+            image = _decode_full_vae_flux1(latent, height, width)
+        elif args.flux_variant == "flux2-klein-base-4b":
+            image = _decode_full_vae_flux2(latent, height, width)
+        else:  # pragma: no cover
+            raise TaefError(f"unknown flux_variant: {args.flux_variant!r}")
+    else:  # pragma: no cover
+        raise TaefError(f"unknown condition: {args.condition!r}")
+    mx.eval(image)
+    elapsed_s = time.perf_counter() - t0
+    peak_gb = mx.get_peak_memory() / 1024**3
+
+    _save_webp(image, args.save_to)
+
+    print(
+        _emit_sentinel(
+            {
+                "condition": args.condition,
+                "rep": args.rep,
+                "status": "ok",
+                "elapsed_s": elapsed_s,
+                "peak_memory_gb": peak_gb,
+                "image_path": str(args.save_to),
+            }
+        )
     )
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
