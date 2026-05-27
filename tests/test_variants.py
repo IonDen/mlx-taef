@@ -100,13 +100,28 @@ def test_conftest_installed_session_wired_cap() -> None:
 
     Mirrors mlx-teacache v0.6.0 conftest.py pattern (module-import-time
     cap, not pytest_configure, so the cap lands before any worker module
-    is collected).
+    is collected). The actual GB value is hardware-dependent — on a 32 GB
+    M1 Max it lands at 20 GB; on smaller CI runners (smaller
+    max_recommended_working_set_size) it lands lower. The contract is
+    that whatever value `_memory_caps.compute_safe_caps_gb` decided is
+    what conftest installed.
     """
     import mlx.core as mx
 
-    # If conftest ran, the wired limit should be exactly 20 GB.
-    # mx.set_wired_limit returns the previous limit; this call sets it
-    # and returns whatever it was just before. The sentinel proves the
-    # cap was installed by reading back through a no-op set.
-    current = mx.set_wired_limit(20 * 1024**3)
-    assert current == (20 * 1024**3)
+    from mlx_taef._memory_caps import compute_safe_caps_gb
+    from tests.conftest import INSTALLED_CAPS_GB
+
+    expected_wired_gb, _ = compute_safe_caps_gb()
+    if expected_wired_gb == 0:
+        pytest.skip("device does not report max_recommended_working_set_size")
+
+    assert INSTALLED_CAPS_GB[0] == expected_wired_gb, (
+        f"conftest installed wired={INSTALLED_CAPS_GB[0]} GB, "
+        f"compute_safe_caps_gb returns {expected_wired_gb} GB"
+    )
+
+    # mx.set_wired_limit returns the PREVIOUS limit; calling it with the
+    # value we expect to be currently installed proves the cap is in place.
+    expected_bytes = expected_wired_gb * 1024**3
+    previous = mx.set_wired_limit(expected_bytes)
+    assert previous == expected_bytes

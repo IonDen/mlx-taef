@@ -203,11 +203,28 @@ def _run_orchestrator(
 
 
 def _install_memory_caps(applied_cap_gb: int | None) -> None:
-    """Pin wired + soft memory caps before any model load."""
+    """Pin wired + soft memory caps before any model load.
+
+    `applied_cap_gb` is the per-condition cap from `_resolve_cap_gb`
+    (taef1=1, taef2=2, vanilla_vae=6 or 12). When provided it overrides
+    the device-aware default. When None, falls back to the hardware
+    ceiling clamp from `_memory_caps.install_memory_caps`.
+    """
     import mlx.core as mx
 
-    wired_gb = applied_cap_gb if applied_cap_gb is not None else 20
-    mem_gb = min(wired_gb + 2, 22)
+    from mlx_taef._memory_caps import compute_safe_caps_gb, install_memory_caps
+
+    if applied_cap_gb is None:
+        install_memory_caps()
+        return
+
+    # Clamp the requested condition cap to fit the device too — same
+    # reason: a 12 GB vae cap would raise on an 8 GB CI runner.
+    device_wired_gb, _ = compute_safe_caps_gb()
+    if device_wired_gb == 0:
+        return  # non-Metal env
+    wired_gb = min(applied_cap_gb, device_wired_gb)
+    mem_gb = min(wired_gb + 2, max(device_wired_gb + 2, 22))
     mx.set_wired_limit(wired_gb * 1024**3)
     mx.set_memory_limit(mem_gb * 1024**3)
 
