@@ -68,15 +68,16 @@ _DEFAULT_STEPS = {"flux1-dev": 14, "flux2-klein-base-4b": 4}
 _DEFAULT_GUIDANCE = {"flux1-dev": 3.5, "flux2-klein-base-4b": 1.0}
 
 
-# Wired-memory guardrails. Set BEFORE any model load (see CLAUDE.md memory rules).
-_WIRED_LIMIT_BYTES = 20 * 1024**3
-_MEMORY_LIMIT_BYTES = 22 * 1024**3
-
-
 def _install_memory_caps() -> None:
-    """Pin wired + soft memory caps. Idempotent."""
-    mx.set_wired_limit(_WIRED_LIMIT_BYTES)
-    mx.set_memory_limit(_MEMORY_LIMIT_BYTES)
+    """Pin hardware-aware wired + soft memory caps. Idempotent.
+
+    Delegates to mlx_taef._memory_caps.install_memory_caps which clamps
+    the desired (20 GB / 22 GB) targets to whatever fits the actual
+    device — preserves user-machine behavior, doesn't crash CI runners.
+    """
+    from mlx_taef._memory_caps import install_memory_caps
+
+    install_memory_caps()
 
 
 def _write_sha256_sidecar(target: Path) -> Path:

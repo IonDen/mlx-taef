@@ -238,8 +238,10 @@ def _live_generation(
     save_dir.mkdir(parents=True, exist_ok=True)
 
     # Memory cap — live generation needs the full Flux2Klein 4B in memory.
-    mx.set_wired_limit(20 * 1024**3)
-    mx.set_memory_limit(22 * 1024**3)
+    # Use the device-aware helper so this works on smaller CI runners too.
+    from mlx_taef._memory_caps import install_memory_caps
+
+    install_memory_caps()
     mx.reset_peak_memory()
 
     height = 512

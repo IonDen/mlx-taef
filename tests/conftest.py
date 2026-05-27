@@ -12,19 +12,22 @@ import pytest
 # Mirrors mlx-teacache v0.6.0 conftest.py:27-59 pattern. Prevents the kernel
 # watchdog panic documented in CLAUDE.md "Memory guardrails" rule on 32 GB
 # M-series Macs when a misrouted parity test loads a large model.
-def _install_mlx_memory_caps() -> None:
+#
+# The actual (wired_gb, memory_gb) installed is hardware-dependent: on a
+# 32 GB M1 Max it lands at (20, 22) per CLAUDE.md; on smaller CI runners
+# the helper clamps below the device's max_recommended_working_set_size.
+def _install_mlx_memory_caps() -> tuple[int, int]:
     try:
-        import mlx.core as mx
+        from mlx_taef._memory_caps import install_memory_caps
     except ImportError:  # pragma: no cover - MLX always present on Apple Silicon
-        return
+        return (0, 0)
     try:
-        mx.set_wired_limit(20 * 1024**3)
-        mx.set_memory_limit(22 * 1024**3)
+        return install_memory_caps()
     except Exception:  # pragma: no cover - older MLX / non-Metal env
-        return
+        return (0, 0)
 
 
-_install_mlx_memory_caps()
+INSTALLED_CAPS_GB = _install_mlx_memory_caps()
 
 
 CONVERTED_DIR = Path(__file__).parent / "converted"
