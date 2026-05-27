@@ -16,3 +16,4 @@ tests/reference/*.pt
 
 # hatch-vcs auto-generated
 src/mlx_taef/_version.py
+  docs/superpowers/
