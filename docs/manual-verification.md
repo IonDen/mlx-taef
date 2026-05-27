@@ -22,12 +22,14 @@ This validates that `LivePreviewCallback` produces recognizable previews during 
 
    model = Flux2Klein.from_pretrained("4bit")
    callback = LivePreviewCallback(
+       flux=model,             # auto-extracts Flux2VAE BN stats for exact color
        variant="taef2",
        every=5,
        save_to=Path("preview.png"),
-       latent_height=32,  # 512 / 16
+       latent_height=32,       # 512 / 16
        latent_width=32,
    )
+   assert callback.resolved_bn == "auto"   # confirms BN extraction succeeded
    model.callbacks.register(callback)
    model.generate_image(
        prompt="a red apple on a wooden table",
@@ -40,16 +42,21 @@ This validates that `LivePreviewCallback` produces recognizable previews during 
 
 3. Verify `preview.png` updates every 5 steps with progressively clearer images. The final preview should be recognizable as "red apple on a wooden table."
 
-## Known limitation
+## BN precedence
 
-Without passing `bn_mean` and `bn_var` from `Flux2VAE.bn.running_{mean,var}`, the preview uses identity BN — structure is correct but colors may shift. For exact previews:
+`LivePreviewCallback` resolves the FLUX.2 VAE BN stats in this order:
+
+1. **Explicit** — pass `bn_mean=...` and `bn_var=...`. Always wins. `callback.resolved_bn == "explicit"`.
+2. **Auto** — pass `flux=model` with `auto_bn=True` (default). The callback walks `model.vae.bn.running_mean` / `running_var` at construction time. `callback.resolved_bn == "auto"`.
+3. **Identity (fallback)** — no BN source resolved. Structure is correct, colors shift. `callback.resolved_bn == "none"`.
+
+The auto path is the default for v0.2.0 — the example above relies on it. Explicit overrides exist for integrations where you don't have the mflux instance handy (e.g. precomputed BN stats loaded from disk):
 
 ```python
-flux2_vae = model.vae
 callback = LivePreviewCallback(
-    ...,
-    bn_mean=flux2_vae.bn.running_mean,
-    bn_var=flux2_vae.bn.running_var,
+    bn_mean=precomputed_mean,
+    bn_var=precomputed_var,
+    ...
 )
 ```
 

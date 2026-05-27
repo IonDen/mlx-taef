@@ -9,8 +9,8 @@ Tiny AutoEncoders for diffusion latents on Apple Silicon, in pure MLX.
 `mlx-taef` is the first MLX port of the TAESD family — TAESD (SD1.x), TAESDXL (SDXL), TAEF1 (FLUX.1), TAEF2 (FLUX.2 Klein) — distilled mini-autoencoders that decode diffusion latents to RGB in milliseconds using a few-MB model instead of multi-GB full VAEs.
 
 Use it for:
-- **Live previews** during long generations on Mac — see each step refresh in <100 ms instead of waiting 30 s for the full VAE.
-- **Low-memory fallbacks** when the full VAE OOMs on 16 GB Macs (TAEF2 peaks at ~1 GB for 1024×1024 vs ~9.6 GB for the full Flux VAE).
+- **Live previews** during long generations on Mac — TAEF1 decodes a 512×512 preview in ~185 ms and TAEF2 in ~260 ms on M1 Max (vs 2 s for the full VAE). See [COMPARISON.md](COMPARISON.md) for the measured table and reproducer.
+- **Low-memory fallbacks** when the full VAE OOMs on 16 GB Macs (TAEF2 peaks at ~0.6 GB decode memory vs ~2.4 GB for the full FLUX.2 VAE on the same latent).
 - **Quick latent inspection** in notebooks and ML research.
 
 ```python
@@ -81,10 +81,11 @@ from mlx_taef.integrations.mflux import LivePreviewCallback
 
 model = Flux2Klein.from_pretrained("4bit")
 preview = LivePreviewCallback(
+    flux=model,            # auto-extracts the Flux2VAE BN stats for exact color
     variant="taef2",
     every=5,
     save_to="preview.png",
-    latent_height=32,  # 512 / 16
+    latent_height=32,      # 512 / 16
     latent_width=32,
 )
 model.callbacks.register(preview)
@@ -97,14 +98,14 @@ model.generate_image(
 )
 ```
 
-For exact value-space recovery, also pass `bn_mean=flux2_vae.bn.running_mean, bn_var=flux2_vae.bn.running_var` to the callback. Without them, previews show correct structure but colors may shift.
+Passing `flux=model` lets the callback auto-extract `model.vae.bn.running_mean` and `running_var` so TAEF2 previews are color-correct out of the box (`callback.resolved_bn == "auto"`). If you have a custom integration where `flux=` isn't convenient, pass `bn_mean=` and `bn_var=` explicitly — those take precedence (`resolved_bn == "explicit"`). Without either path you get identity-BN previews with correct structure but shifted colors (`resolved_bn == "none"`).
 
 See `docs/manual-verification.md` for the full verification recipe.
 
 ## Status
 
 - **v0.1.0 — initial public release on PyPI** (2026-05-13). All four variants, encoder + decoder, mflux integration, CI, 99 % honest coverage.
-- **v0.2.0** *(in progress)* — auto-bn extraction in `LivePreviewCallback`; subprocess-per-rep showcase bench (`scripts/run_showcase.py`); `COMPARISON.md` + committed JSON report; `ROADMAP.md`. See [`docs/superpowers/specs/2026-05-26-mlx-taef-v0.2.0-design.md`](docs/superpowers/specs/2026-05-26-mlx-taef-v0.2.0-design.md).
+- **v0.2.0** *(in progress)* — auto-bn extraction in `LivePreviewCallback(flux=...)`; per-step gallery mode (`numbered_frames=True`); subprocess-per-rep showcase bench (`scripts/run_showcase.py`); hardware-aware memory caps via `mlx_taef._memory_caps`; `COMPARISON.md` + committed JSON report; `ROADMAP.md`. See [`docs/superpowers/specs/2026-05-26-mlx-taef-v0.2.0-design.md`](docs/superpowers/specs/2026-05-26-mlx-taef-v0.2.0-design.md).
 
 Track future releases via the [PyPI history](https://pypi.org/project/mlx-taef/#history) or `gh release list -R IonDen/mlx-taef`.
 

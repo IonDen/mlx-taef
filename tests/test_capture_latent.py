@@ -43,7 +43,7 @@ def test_sha256_sidecar_is_correct(tmp_path: Path) -> None:
     assert content.startswith(expected_hash)
 
 
-def test_main_writes_safetensors_and_sidecar(tmp_path: Path) -> None:
+def test_main_writes_safetensors_and_sidecar_flux1(tmp_path: Path) -> None:
     """Heavy mflux path mocked; verify the orchestrator writes both files."""
     import mlx.core as mx
     from scripts import _capture_latent
@@ -75,3 +75,47 @@ def test_main_writes_safetensors_and_sidecar(tmp_path: Path) -> None:
     sha_path = tmp_path / "flux1_dev.safetensors.sha256"
     assert latent_path.exists()
     assert sha_path.exists()
+    # flux1-dev path stores latent + height + width but NOT bn_mean/bn_var.
+    saved = mx.load(str(latent_path))
+    assert set(saved.keys()) == {"latent", "height", "width"}
+
+
+def test_main_persists_bn_stats_for_flux2(tmp_path: Path) -> None:
+    """flux2-klein-base-4b path also writes bn_mean + bn_var so downstream
+    TAEF2 decoders can reproduce the color-correct output without
+    re-loading Flux2Klein."""
+    import mlx.core as mx
+    from scripts import _capture_latent
+
+    fake_latent = mx.zeros((1, 1024, 128))
+    fake_bn_mean = mx.zeros((128,))
+    fake_bn_var = mx.ones((128,))
+
+    def _fake_capture(**kwargs: object) -> dict[str, mx.array]:
+        return {
+            "latent": fake_latent,
+            "bn_mean": fake_bn_mean,
+            "bn_var": fake_bn_var,
+            "height": mx.array([kwargs["height"]], dtype=mx.int32),  # type: ignore[arg-type]
+            "width": mx.array([kwargs["width"]], dtype=mx.int32),  # type: ignore[arg-type]
+        }
+
+    with (
+        patch.object(_capture_latent, "_capture", side_effect=_fake_capture),
+        patch.object(_capture_latent, "_install_memory_caps"),
+    ):
+        exit_code = _capture_latent.main(
+            [
+                "--variant",
+                "flux2-klein-base-4b",
+                "--out-dir",
+                str(tmp_path),
+            ]
+        )
+    assert exit_code == 0
+    latent_path = tmp_path / "flux2_klein_base_4b.safetensors"
+    assert latent_path.exists()
+    saved = mx.load(str(latent_path))
+    assert {"latent", "bn_mean", "bn_var", "height", "width"} <= set(saved.keys())
+    assert saved["bn_mean"].shape == (128,)
+    assert saved["bn_var"].shape == (128,)

@@ -36,6 +36,16 @@ from scripts._caps import FULL_VAE_CAP_GB  # noqa: E402
 
 SENTINEL_PREFIX = "::BENCH_RESULT::"
 
+# Per-condition subprocess timeouts (seconds). Full-VAE workers cold-load
+# a multi-GB flux pipeline before they decode, plus possibly download
+# from HF on first run; 1200s leaves margin for those. Taef workers load
+# a ~4 MB decoder so 600s is generous.
+_SUBPROCESS_TIMEOUT_S = {
+    "taef1": 600,
+    "taef2": 600,
+    "vanilla_vae": 1200,
+}
+
 
 def _build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -96,7 +106,16 @@ def _parse_worker_stdout(stdout: str) -> dict[str, Any]:
             f"multiple sentinels in worker stdout (got {len(sentinel_lines)}, expected 1)"
         )
     payload_str = sentinel_lines[0][len(SENTINEL_PREFIX) :]
-    payload: dict[str, Any] = json.loads(payload_str)
+    try:
+        payload: dict[str, Any] = json.loads(payload_str)
+    except json.JSONDecodeError as e:
+        # Re-raise as TaefError so the orchestrator's TaefError funnel
+        # catches it and marks the rep failed instead of aborting the
+        # entire showcase run.
+        raise TaefError(
+            f"malformed sentinel JSON (probable partial flush): {e}; "
+            f"payload was {payload_str[:200]!r}"
+        ) from e
     return payload
 
 
@@ -128,10 +147,16 @@ def _run_one_rep(
     if cap_gb is not None:
         cmd.extend(["--applied-cap-gb", str(cap_gb)])
 
+    timeout_s = _SUBPROCESS_TIMEOUT_S.get(condition, 600)
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=600)
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=timeout_s)
     except subprocess.TimeoutExpired:
-        return {"condition": condition, "rep": rep, "status": "failed", "error": "timeout"}
+        return {
+            "condition": condition,
+            "rep": rep,
+            "status": "failed",
+            "error": f"timeout after {timeout_s}s",
+        }
 
     if proc.returncode != 0:
         # Cap rejected at startup, OOM, jetsam, etc. Parse stderr for hints.
@@ -159,9 +184,18 @@ def _run_orchestrator(
     reps: int,
     save_dir: Path,
     flux_variant: str = "flux2-klein-base-4b",
+    cap_gb_override: int | None = None,
 ) -> dict[str, Any]:
-    """Run all reps for one condition; aggregate."""
-    cap_gb = _resolve_cap_gb(condition=condition, flux_variant=flux_variant)
+    """Run all reps for one condition; aggregate.
+
+    `cap_gb_override` (when set) replaces the per-condition default cap
+    from `_resolve_cap_gb`. Used by `run_showcase.py --cap-gb` to let
+    operators try a different cap during reproduction.
+    """
+    if cap_gb_override is not None:
+        cap_gb: int | None = cap_gb_override
+    else:
+        cap_gb = _resolve_cap_gb(condition=condition, flux_variant=flux_variant)
     save_dir.mkdir(parents=True, exist_ok=True)
 
     successes: list[dict[str, Any]] = []
@@ -187,9 +221,13 @@ def _run_orchestrator(
 
     per_rep_seconds = [r["elapsed_s"] for r in successes]
     per_rep_peak = [r.get("peak_memory_gb", 0.0) for r in successes]
+    installed_caps = sorted(
+        {r.get("installed_cap_gb") for r in successes if r.get("installed_cap_gb") is not None}
+    )
     return {
         "condition": condition,
         "applied_cap_gb": cap_gb,
+        "installed_cap_gb": installed_caps[0] if len(installed_caps) == 1 else installed_caps,
         "reps": len(successes),
         "per_rep_seconds": per_rep_seconds,
         "median_seconds": statistics.median(per_rep_seconds),
@@ -202,31 +240,36 @@ def _run_orchestrator(
     }
 
 
-def _install_memory_caps(applied_cap_gb: int | None) -> None:
+def _install_memory_caps(applied_cap_gb: int | None) -> int:
     """Pin wired + soft memory caps before any model load.
 
     `applied_cap_gb` is the per-condition cap from `_resolve_cap_gb`
     (taef1=1, taef2=2, vanilla_vae=6 or 12). When provided it overrides
     the device-aware default. When None, falls back to the hardware
     ceiling clamp from `_memory_caps.install_memory_caps`.
+
+    Returns the wired-cap (in GB) actually installed — may be lower
+    than `applied_cap_gb` if the device's max_recommended_working_set
+    forced a clamp. 0 means no cap was installed (non-Metal env).
     """
     import mlx.core as mx
 
     from mlx_taef._memory_caps import compute_safe_caps_gb, install_memory_caps
 
     if applied_cap_gb is None:
-        install_memory_caps()
-        return
+        installed_wired_gb, _ = install_memory_caps()
+        return installed_wired_gb
 
     # Clamp the requested condition cap to fit the device too — same
     # reason: a 12 GB vae cap would raise on an 8 GB CI runner.
     device_wired_gb, _ = compute_safe_caps_gb()
     if device_wired_gb == 0:
-        return  # non-Metal env
+        return 0  # non-Metal env
     wired_gb = min(applied_cap_gb, device_wired_gb)
-    mem_gb = min(wired_gb + 2, max(device_wired_gb + 2, 22))
+    mem_gb = min(wired_gb + 2, 22)
     mx.set_wired_limit(wired_gb * 1024**3)
     mx.set_memory_limit(mem_gb * 1024**3)
+    return wired_gb
 
 
 def _decode_taef1(latent: Any, height: int, width: int) -> Any:
@@ -310,7 +353,7 @@ def _save_webp(image_uint8_nhwc: Any, target: Path) -> None:
 
 def _worker_main(args: argparse.Namespace) -> int:
     """Run one (condition, rep) inside this subprocess. Emit sentinel."""
-    _install_memory_caps(args.applied_cap_gb)
+    installed_cap_gb = _install_memory_caps(args.applied_cap_gb)
 
     import mlx.core as mx
 
@@ -353,6 +396,8 @@ def _worker_main(args: argparse.Namespace) -> int:
                 "elapsed_s": elapsed_s,
                 "peak_memory_gb": peak_gb,
                 "image_path": str(args.save_to),
+                "requested_cap_gb": args.applied_cap_gb,
+                "installed_cap_gb": installed_cap_gb,
             }
         )
     )
