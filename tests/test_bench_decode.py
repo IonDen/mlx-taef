@@ -185,3 +185,61 @@ def test_orchestrator_exits_nonzero_if_all_reps_fail() -> None:
                 reps=3,
                 save_dir=Path("/tmp"),
             )
+
+
+def test_cap_gb_override_threads_through_to_worker() -> None:
+    """`--cap-gb` on run_showcase must reach the worker via the orchestrator,
+    not get silently dropped (codex audit finding #5)."""
+    from scripts.bench_decode import _run_orchestrator
+
+    with patch("scripts.bench_decode._run_one_rep") as mock_rep:
+        mock_rep.return_value = {
+            "condition": "taef2",
+            "rep": 0,
+            "elapsed_s": 0.1,
+            "peak_memory_gb": 1.5,
+        }
+        result = _run_orchestrator(
+            latent_path=Path("/tmp/x.safetensors"),
+            condition="taef2",
+            reps=1,
+            save_dir=Path("/tmp"),
+            cap_gb_override=4,
+        )
+    assert result["applied_cap_gb"] == 4
+    # Verify _run_one_rep was called with the override, not the default (taef2=2)
+    _, kwargs = mock_rep.call_args
+    assert kwargs["cap_gb"] == 4
+
+
+def test_malformed_sentinel_json_marks_rep_failed_not_aborted() -> None:
+    """Codex audit / subprocess reviewer finding #2: a json.JSONDecodeError
+    in the worker's sentinel must NOT abort the entire orchestrator —
+    it should be re-raised as TaefError and turned into a failed-rep
+    record by _run_one_rep."""
+    import subprocess
+
+    from scripts.bench_decode import _parse_worker_stdout
+
+    from mlx_taef.errors import TaefError
+
+    # Direct test of _parse_worker_stdout
+    stdout = "some logs\n::BENCH_RESULT::{not json at all\nbye\n"
+    with pytest.raises(TaefError, match="malformed sentinel JSON"):
+        _parse_worker_stdout(stdout)
+
+    # And via _run_one_rep — make sure it's converted to a failed dict
+    from scripts.bench_decode import _run_one_rep
+
+    fake_proc = subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout, stderr="")
+    with patch("scripts.bench_decode.subprocess.run", return_value=fake_proc):
+        result = _run_one_rep(
+            latent_path=Path("/tmp/x"),
+            condition="taef2",
+            flux_variant="flux2-klein-base-4b",
+            rep=0,
+            save_to=Path("/tmp/out.webp"),
+            cap_gb=2,
+        )
+    assert result["status"] == "failed"
+    assert "malformed sentinel JSON" in result["error"]

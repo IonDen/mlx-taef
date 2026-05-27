@@ -110,11 +110,11 @@ def _try_extract_bn(flux: object) -> tuple[mx.array | None, mx.array | None]:
 
 
 class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
-    """mflux callback that writes a low-quality preview PNG every N iterations.
+    """mflux callback that writes a low-quality preview image every N iterations.
 
     Drops into `mflux.Flux2Klein.generate_image(callbacks=[...])`. On the
     iteration indices that match `every`, unpacks the in-flight latent, runs
-    TAEF2 decode (via `TAEF1` for FLUX.1), and writes a PIL PNG to disk.
+    TAEF2 decode (via `TAEF1` for FLUX.1), and writes a PIL image to disk.
 
     Args:
         flux: optional reference to the mflux model instance the callback will be
@@ -123,8 +123,17 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
             `variant="taef2"`. Required for auto-bn extraction (the mflux callback
             contract does not pass the flux instance at fire time).
         variant: 'taef1' (for FLUX.1 latents) or 'taef2' (for FLUX.2 Klein).
-        every: emit a preview every Nth iteration. Default 5.
-        save_to: filesystem path to write previews. Overwritten each emission.
+        every: emit a preview every Nth iteration. Default 5. When
+            `numbered_frames=True` this is forced to 1 so the gallery
+            captures every step.
+        save_to: filesystem path to write previews. In single-frame mode
+            (default) it's overwritten each emission. In numbered-frame
+            mode it's used as a template — `step{NN}` is inserted before
+            the extension and `saved_paths` lists every written file.
+        numbered_frames: when True, emit one image per step into a
+            gallery (`<stem>_step00.<ext>`, `<stem>_step01.<ext>`, …)
+            instead of overwriting a single path. Used by the v0.2.0
+            showcase to build a per-step gallery.
         latent_height: latent spatial height; for 512x512 image with FLUX.2 Klein, this is 32.
         latent_width: latent spatial width.
         bn_mean: optional BN running_mean for TAEF2 (see `unpack_flux2_latent`).
@@ -139,6 +148,7 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
         variant: str = "taef2",
         every: int = 5,
         save_to: str | Path = "preview.png",
+        numbered_frames: bool = False,
         latent_height: int = 32,
         latent_width: int = 32,
         bn_mean: mx.array | None = None,
@@ -153,12 +163,16 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
             raise ValueError(f"variant must be 'taef1' or 'taef2', got {variant!r}")
         self.flux = flux
         self.auto_bn = auto_bn
-        self.every = every
+        # Numbered-frame mode emits every step (galleries capture progression);
+        # caller's `every` is honored only in single-frame mode.
+        self.numbered_frames = numbered_frames
+        self.every = 1 if numbered_frames else every
         self.save_to = Path(save_to)
         self.latent_height = latent_height
         self.latent_width = latent_width
         self.bn_mean = bn_mean
         self.bn_var = bn_var
+        self.saved_paths: list[Path] = []
         # Resolve BN source. Precedence:
         #   explicit (user passed bn_mean + bn_var)
         #     > auto (auto_bn=True + variant=="taef2" + flux.vae.bn extractable)
@@ -193,7 +207,7 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
         config: object,
         time_steps: object,
     ) -> None:
-        """Decode latent + save PNG every Nth iteration (counted by our own iter, not `t`)."""
+        """Decode latent + save image every Nth iteration (counted by our own iter, not `t`)."""
         idx = self._iter
         self._iter += 1
         if idx % self.every != 0:
@@ -212,13 +226,28 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
             unpacked = mx.transpose(latents, (0, 2, 3, 1)) if latents.shape[1] == 16 else latents
 
         img = self.model.decode_image(unpacked)
-        self._save_png(img[0])
+        target = self._resolve_target(idx)
+        self._save_image(img[0], target)
+        self.saved_paths.append(target)
 
-    def _save_png(self, img_nhwc_uint8: mx.array) -> None:
+    def _resolve_target(self, idx: int) -> Path:
+        """Return the output path for emission index `idx`.
+
+        Single-frame mode → `self.save_to` (overwritten).
+        Numbered-frame mode → `<stem>_step{NN}<suffix>` next to save_to.
+        """
+        if not self.numbered_frames:
+            return self.save_to
+        return self.save_to.with_name(f"{self.save_to.stem}_step{idx:02d}{self.save_to.suffix}")
+
+    def _save_image(self, img_nhwc_uint8: mx.array, target: Path) -> None:
         from PIL import Image
 
         arr = np.array(img_nhwc_uint8)
-        Image.fromarray(arr).save(self.save_to)
+        # Lazy mkdir for numbered-frame galleries where the target dir
+        # may not exist yet.
+        target.parent.mkdir(parents=True, exist_ok=True)
+        Image.fromarray(arr).save(target)
 
 
 __all__ = ["LivePreviewCallback", "unpack_flux2_latent"]

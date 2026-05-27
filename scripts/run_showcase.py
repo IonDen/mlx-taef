@@ -65,7 +65,37 @@ def _build_argparser() -> argparse.ArgumentParser:
         default=None,
         help="Override the per-condition wired memory cap (GB).",
     )
+    parser.add_argument(
+        "--no-trash-prior",
+        action="store_true",
+        help=(
+            "Don't move existing _artifacts/showcase/ to ~/.Trash before "
+            "starting. By default, prior bench output is preserved in "
+            "Trash with a dated suffix per the CLAUDE.md 'never rm' rule."
+        ),
+    )
     return parser
+
+
+def _move_prior_artifacts_to_trash(artifacts_dir: Path) -> Path | None:
+    """Move an existing artifacts dir to ~/.Trash with a dated tag.
+
+    Returns the new Trash path on success, None if there was nothing to
+    move. Mirrors the CLAUDE.md 'never rm' guardrail — re-running the
+    bench would otherwise silently overwrite multi-minute prior work.
+    """
+    if not artifacts_dir.exists():
+        return None
+    trash = Path.home() / ".Trash"
+    if not trash.exists():
+        # Unusual on macOS; just leave the dir in place and warn.
+        logger.warning("~/.Trash not found; leaving prior artifacts in place at %s", artifacts_dir)
+        return None
+    stamp = datetime.datetime.now().strftime("%Y-%m-%d-%H%M%S")
+    target = trash / f"mlx-taef-showcase-{stamp}"
+    artifacts_dir.rename(target)
+    logger.info("moved prior artifacts to %s", target)
+    return target
 
 
 # ---------------------------------------------------------------------------
@@ -92,7 +122,7 @@ def _vs_vae_scenario(
     from scripts.bench_decode import _run_orchestrator
 
     latent = _FIXTURE_DIR / latent_name
-    _check_latent_sha(latent)
+    integrity = _check_latent_sha(latent)
     save_dir = _ARTIFACTS_DIR / taef_condition
     save_dir.mkdir(parents=True, exist_ok=True)
 
@@ -105,6 +135,7 @@ def _vs_vae_scenario(
         reps=taef_reps,
         save_dir=save_dir / "taef",
         flux_variant=flux_variant,
+        cap_gb_override=args.cap_gb,
     )
     vae_result = _run_orchestrator(
         latent_path=latent,
@@ -112,6 +143,7 @@ def _vs_vae_scenario(
         reps=vae_reps,
         save_dir=save_dir / "vae",
         flux_variant=flux_variant,
+        cap_gb_override=args.cap_gb,
     )
 
     # SSIM: cross-product of taef webps vs vae webps (the visual delta).
@@ -128,6 +160,7 @@ def _vs_vae_scenario(
 
     return {
         "status": "ok",
+        "fixture_integrity": integrity,
         "taef": taef_result,
         "vanilla_vae": vae_result,
         **ssim,
@@ -162,70 +195,6 @@ def _run_combined(args: argparse.Namespace) -> dict[str, Any]:
     return _live_generation(args=args, with_teacache=True, scenario_dir="combined")
 
 
-class _GalleryPreviewCallback:
-    """In-loop callback that saves a TAEF2 preview every step with sequence number.
-
-    Closely mirrors LivePreviewCallback but writes numbered PNG files instead
-    of overwriting a single path — so the final gallery shows progression.
-    """
-
-    def __init__(
-        self,
-        *,
-        flux: object,
-        save_dir: Path,
-        prefix: str,
-        latent_height: int,
-        latent_width: int,
-    ) -> None:
-        from mlx_taef.api import TAEF2
-        from mlx_taef.integrations.mflux import _try_extract_bn
-
-        self.taef = TAEF2.from_pretrained(include_encoder=False)
-        bn_mean, bn_var = _try_extract_bn(flux)
-        if bn_mean is None or bn_var is None:
-            raise RuntimeError(
-                "could not extract Flux2VAE BN stats from the flux instance — "
-                "preview gallery would be color-shifted."
-            )
-        self.bn_mean = bn_mean
-        self.bn_var = bn_var
-        self.latent_height = latent_height
-        self.latent_width = latent_width
-        self.save_dir = save_dir
-        self.save_dir.mkdir(parents=True, exist_ok=True)
-        self.prefix = prefix
-        self.saved_paths: list[Path] = []
-        self._iter = 0
-
-    def call_in_loop(
-        self,
-        t: object,
-        seed: object,
-        prompt: object,
-        latents: object,
-        config: object,
-        time_steps: object,
-    ) -> None:
-        import numpy as np
-        from PIL import Image
-
-        from mlx_taef.integrations.mflux import unpack_flux2_latent
-
-        unpacked = unpack_flux2_latent(
-            latents,  # type: ignore[arg-type]
-            latent_height=self.latent_height,
-            latent_width=self.latent_width,
-            bn_mean=self.bn_mean,
-            bn_var=self.bn_var,
-        )
-        img = self.taef.decode_image(unpacked)
-        target = self.save_dir / f"{self.prefix}_step{self._iter:02d}.webp"
-        Image.fromarray(np.array(img[0])).save(target, "WEBP", quality=92)
-        self.saved_paths.append(target)
-        self._iter += 1
-
-
 def _live_generation(
     *, args: argparse.Namespace, with_teacache: bool, scenario_dir: str
 ) -> dict[str, Any]:
@@ -238,10 +207,20 @@ def _live_generation(
     save_dir.mkdir(parents=True, exist_ok=True)
 
     # Memory cap — live generation needs the full Flux2Klein 4B in memory.
-    # Use the device-aware helper so this works on smaller CI runners too.
-    from mlx_taef._memory_caps import install_memory_caps
+    # `--cap-gb` (when set) overrides the device-aware default for
+    # reproducing the showcase on machines with different ceilings.
+    from mlx_taef._memory_caps import compute_safe_caps_gb, install_memory_caps
 
-    install_memory_caps()
+    applied_cap_gb: int | None = None
+    if args.cap_gb is not None:
+        device_wired_gb, _ = compute_safe_caps_gb()
+        wired_gb = min(args.cap_gb, device_wired_gb) if device_wired_gb else args.cap_gb
+        mem_gb = min(wired_gb + 2, 22)
+        mx.set_wired_limit(wired_gb * 1024**3)
+        mx.set_memory_limit(mem_gb * 1024**3)
+        applied_cap_gb = wired_gb
+    else:
+        applied_cap_gb, _ = install_memory_caps()
     mx.reset_peak_memory()
 
     height = 512
@@ -260,10 +239,14 @@ def _live_generation(
 
         handle = apply_teacache(flux)
 
-    callback = _GalleryPreviewCallback(
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    callback = LivePreviewCallback(
         flux=flux,
-        save_dir=save_dir,
-        prefix=scenario_dir,
+        variant="taef2",
+        every=1,
+        numbered_frames=True,
+        save_to=save_dir / f"{scenario_dir}.webp",
         latent_height=height // 16,
         latent_width=width // 16,
     )
@@ -300,6 +283,7 @@ def _live_generation(
         "scenario_dir": str(save_dir),
         "elapsed_s": elapsed_s,
         "peak_memory_gb": peak_gb,
+        "applied_cap_gb": applied_cap_gb,
         "num_steps": num_steps,
         "guidance": guidance,
         "seed": seed,
@@ -326,7 +310,13 @@ _SCENARIO_DISPATCH = {
 
 
 def _build_hardware_metadata() -> dict[str, Any]:
-    """Collect hardware + version metadata for the report header."""
+    """Collect hardware + version metadata for the report header.
+
+    On macOS we query `sysctl` for the chip model and total memory so
+    the report records "Apple M1 Max" / 34 GB instead of the useless
+    `platform.processor() == "arm"`. Also records the git SHA so the
+    benchmark is tied to an exact commit.
+    """
 
     def _safe_version(pkg: str) -> str | None:
         try:
@@ -335,25 +325,81 @@ def _build_hardware_metadata() -> dict[str, Any]:
             return None
 
     return {
-        "chip": platform.processor() or "unknown",  # filled by user / CI if specific
+        "chip": _detect_chip_model(),
         "ram_gb": _detect_ram_gb(),
         "machine": platform.machine(),
         "os": f"{platform.system()} {platform.release()}",
+        "git_sha": _detect_git_sha(),
         "mlx_taef_version": _safe_version("mlx-taef") or "0.0.0+dev",
-        "mlx_teacache_version": _safe_version("mlx-teacache"),  # may be None
+        "mlx_teacache_version": _safe_version("mlx-teacache"),
         "mflux_version": _safe_version("mflux") or "unknown",
+        "mlx_version": _safe_version("mlx") or "unknown",
+        "python_version": platform.python_version(),
         "quantize": 4,
         "dtype": "bf16",
     }
 
 
-def _detect_ram_gb() -> int:
-    try:
-        import psutil
+def _detect_chip_model() -> str:
+    """Return e.g. 'Apple M1 Max' on macOS, fallback to platform.processor()."""
+    import subprocess as _subp
 
-        return round(psutil.virtual_memory().total / 1024**3)
-    except Exception:  # pragma: no cover
+    if platform.system() != "Darwin":
+        return platform.processor() or "unknown"
+    try:
+        result = _subp.run(
+            ["sysctl", "-n", "machdep.cpu.brand_string"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except (OSError, _subp.SubprocessError):  # pragma: no cover
+        pass
+    return platform.processor() or "unknown"
+
+
+def _detect_ram_gb() -> int:
+    """Return total system RAM in GB. macOS via sysctl, fallback to 0."""
+    import subprocess as _subp
+
+    if platform.system() != "Darwin":
         return 0
+    try:
+        result = _subp.run(
+            ["sysctl", "-n", "hw.memsize"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            return round(int(result.stdout.strip()) / 1024**3)
+    except (OSError, ValueError, _subp.SubprocessError):  # pragma: no cover
+        pass
+    return 0
+
+
+def _detect_git_sha() -> str | None:
+    """Return the current git commit SHA or None if not in a repo."""
+    import subprocess as _subp
+
+    try:
+        result = _subp.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+            cwd=Path(__file__).resolve().parent.parent,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except (OSError, _subp.SubprocessError):  # pragma: no cover
+        pass
+    return None
 
 
 def _load_report(path: Path) -> dict[str, Any]:
@@ -375,8 +421,15 @@ def _write_report(path: Path, report: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _check_latent_sha(latent: Path) -> None:
-    """Verify the .sha256 sidecar matches. Warn on mismatch; raise if missing."""
+def _check_latent_sha(latent: Path) -> dict[str, str]:
+    """Verify the .sha256 sidecar matches; raise if missing latent.
+
+    Returns a status dict the orchestrator records under
+    `report["fixture_integrity"][<latent_stem>]`. Possible values:
+    - {"status": "ok"} — hash matches
+    - {"status": "no_sidecar"} — no .sha256 file present, skipped check
+    - {"status": "mismatch", "expected": ..., "actual": ...} — drift
+    """
     if not latent.exists():
         raise FixtureLatentMissingError(
             f"showcase latent missing at {latent}; run "
@@ -385,7 +438,7 @@ def _check_latent_sha(latent: Path) -> None:
     sidecar = latent.with_suffix(latent.suffix + ".sha256")
     if not sidecar.exists():
         logger.warning("no .sha256 sidecar at %s; skipping integrity check", sidecar)
-        return
+        return {"status": "no_sidecar"}
     expected = sidecar.read_text().split()[0]
     actual = hashlib.sha256(latent.read_bytes()).hexdigest()
     if expected != actual:
@@ -395,6 +448,8 @@ def _check_latent_sha(latent: Path) -> None:
             expected[:12],
             actual[:12],
         )
+        return {"status": "mismatch", "expected": expected, "actual": actual}
+    return {"status": "ok"}
 
 
 # ---------------------------------------------------------------------------
@@ -440,11 +495,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_argparser()
     args = parser.parse_args(argv)
 
+    trashed = None
+    if not args.no_trash_prior:
+        trashed = _move_prior_artifacts_to_trash(_ARTIFACTS_DIR)
+
     report: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "generated_at": datetime.datetime.now(datetime.UTC).isoformat(),
         "hardware": _build_hardware_metadata(),
         "isolation": "subprocess-per-rep",
+        "prior_artifacts_moved_to": str(trashed) if trashed else None,
         "scenarios": {},
     }
 

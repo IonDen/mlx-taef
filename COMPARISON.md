@@ -10,7 +10,7 @@ Visual showcase of what mlx-taef does on real generations. Every number on this 
 - Quantization: int4 (mflux `quantize=4`), activation dtype bf16
 - All conditions ran in isolated subprocesses with `mx.set_wired_limit` set per the cap column
 
-## Ecosystem positioning
+## Where this fits
 
 - TAEF2's upstream model card markets it as a *real-time previewing* tool for FLUX.2 generation ([huggingface.co/madebyollin/taef2](https://huggingface.co/madebyollin/taef2)).
 - That card explicitly notes: *"Unlike TAEF1, TAEF2's architecture isn't properly integrated into Diffusers yet. So for now you'll want some wrapper code"* — this is the gap mlx-taef fills on the MLX side.
@@ -34,7 +34,7 @@ Same FLUX.2 Klein base 4B latent, two different decoders. Both produce a 512×51
 
 **TAEF2 is ~8.3× faster, with ~4× lower peak decode memory.** SSIM(TAEF2, Vanilla) = **0.616** (15/15 pairs).
 
-That 0.616 is below the 0.75 starting threshold from the spec, and it's worth being explicit about why: TAEF2 is a 4 MB preview decoder. The full FLUX.2 VAE is ~340 MB. TAEF2 keeps the structure (apple, table, color) and loses fine detail (specular highlight, micro-texture, exact hue). That's the deliberate trade. If you need 0.95+ fidelity, use the full VAE — but expect to pay 2 GB of GPU memory and 2 seconds per preview.
+That 0.616 is below the 0.75 starting threshold from the spec, and it's worth being explicit about why: TAEF2 is a 4 MB preview decoder. The full FLUX.2 VAE is ~340 MB. TAEF2 keeps the structure (apple, table, color) and loses fine detail (specular highlight, micro-texture, exact hue). That's the deliberate trade. If you need 0.95+ fidelity, use the full VAE, but expect to pay 2 GB of GPU memory and 2 seconds per preview.
 
 The first bench run validates the threshold; from v0.2.1 forward `scripts/diff_showcase_report.py` will lock the floor at `ssim_median - 0.05` (so 0.566 here) to catch regressions.
 
@@ -67,7 +67,7 @@ One full FLUX.2 Klein base 4B generation, 4 inference steps, seed=42, prompt "a 
 |---|---|---|---|---|
 | ![s0](_artifacts/showcase/live_preview/live_preview_step00.webp) | ![s1](_artifacts/showcase/live_preview/live_preview_step01.webp) | ![s2](_artifacts/showcase/live_preview/live_preview_step02.webp) | ![s3](_artifacts/showcase/live_preview/live_preview_step03.webp) | ![final](_artifacts/showcase/live_preview/live_preview_final.webp) |
 
-This is what users actually see during generation: a progression from noise to a recognizable image, decoded with TAEF2 at each step at a small fraction of the full VAE cost.
+That's the live-preview loop in practice: noise resolves into a recognizable image, and each step's preview costs a fraction of a full VAE decode.
 
 ### `combined` — mflux + TAEF2 previews + mlx-teacache step-skipping
 
@@ -109,6 +109,6 @@ Wall-time on M1 Max: ~6–8 min for all 4 scenarios with both latents already ca
 
 Every number on this page ties to a measurement in the committed JSON at `_artifacts/showcase_report.json`. No hand-waved performance numbers in v0.2.0+ docs.
 
-The headline `~8.3×` and `~10.8×` numbers are for the decoder step *in isolation*, on the same latent, in cold subprocesses. They are NOT whole-generation speedups — for that, look at the `combined` scenario, which shows what users see when they pair TAEF previews with TeaCache step-skipping. The decoder speedup matters most for live previews, where every step's preview is a separate decode and the savings compound.
+The headline `~8.3×` and `~10.8×` numbers are for the decoder step *in isolation*, on the same latent, in cold subprocesses. They are NOT whole-generation speedups — for that, look at the `combined` scenario, which shows what users see when they pair TAEF previews with TeaCache step-skipping. The decoder speedup matters most for live previews — every step is a separate decode, and you pay it once per step.
 
-SSIM thresholds: the 0.75 figure in the spec was a starting heuristic. The first bench run validates it; the regression check locks the floor at `ssim_median - 0.05` from v0.2.1 forward. TAEF2's 0.616 is genuinely lower than that heuristic — that's a signal of upstream TAEF2's preview-grade fidelity, not a regression in mlx-taef's port.
+SSIM thresholds: the 0.75 figure in the spec was a starting heuristic. The first bench run validates it; the regression check locks the floor at `ssim_median - 0.05` from v0.2.1 forward. TAEF2's 0.616 is genuinely lower than that heuristic. That's a signal of upstream TAEF2's preview-grade fidelity, not a regression in mlx-taef's port.

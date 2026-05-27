@@ -1,12 +1,17 @@
 r"""Machine-enforced regression checker for two showcase reports.
 
-Exits non-zero if any condition's median wall-clock drifts more than
-the tolerance or SSIM drops more than the tolerance.
+Exits non-zero if any wall-clock metric drifts more than the tolerance
+or any SSIM drops more than the tolerance. Schema follows the actual
+output of `scripts/run_showcase.py` (NOT the early-spec sketch):
+
+    scenarios.<name>.{taef,vanilla_vae}.median_seconds  # taef*_vs_vae
+    scenarios.<name>.ssim_median                        # taef*_vs_vae
+    scenarios.<name>.elapsed_s                          # live_preview, combined
 
 Usage:
-    uv run python scripts/diff_showcase_report.py old.json new.json
-    uv run python scripts/diff_showcase_report.py old.json new.json \
-        --wallclock-tolerance 0.10 --ssim-tolerance 0.05
+    uv run python scripts/run_showcase.py --report new.json
+    uv run python scripts/diff_showcase_report.py \
+        _artifacts/showcase_report.json new.json
 """
 
 from __future__ import annotations
@@ -17,6 +22,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# Condition keys inside a `taef*_vs_vae` scenario whose `median_seconds`
+# we compare. Keep this list narrow so we don't accidentally compare
+# unrelated dict-shaped fields.
+_VS_VAE_CONDITION_KEYS = ("taef", "vanilla_vae", "taef1", "taef2")
+
 
 def diff_reports(
     old: dict[str, Any],
@@ -25,21 +35,29 @@ def diff_reports(
     wallclock_tolerance: float = 0.10,
     ssim_tolerance: float = 0.05,
 ) -> list[dict[str, Any]]:
-    """Return a list of regression records; empty list means no regression."""
+    """Return a list of regression records; empty list means no regression.
+
+    Checks (per scenario):
+      - For `taef*_vs_vae`: each known condition's `median_seconds`, plus
+        scenario-level `ssim_median`.
+      - For `live_preview` / `combined`: scenario-level `elapsed_s`.
+    """
     regressions: list[dict[str, Any]] = []
     old_scenarios = old.get("scenarios", {})
     new_scenarios = new.get("scenarios", {})
+
     for scenario, new_data in new_scenarios.items():
         old_data = old_scenarios.get(scenario, {})
 
-        # Wall-clock per condition
-        old_conditions = old_data.get("conditions", {})
-        new_conditions = new_data.get("conditions", {})
-        for cond, new_cond in new_conditions.items():
-            old_cond = old_conditions.get(cond, {})
+        # taef*_vs_vae conditions → median_seconds per condition
+        for cond in _VS_VAE_CONDITION_KEYS:
+            new_cond = new_data.get(cond)
+            old_cond = old_data.get(cond)
+            if not isinstance(new_cond, dict) or not isinstance(old_cond, dict):
+                continue
             old_med = old_cond.get("median_seconds")
             new_med = new_cond.get("median_seconds")
-            if old_med is None or new_med is None:
+            if old_med is None or new_med is None or old_med <= 0:
                 continue
             drift = (new_med - old_med) / old_med
             if drift > wallclock_tolerance:
@@ -54,12 +72,35 @@ def diff_reports(
                     }
                 )
 
-        # SSIM
-        old_perc = old_data.get("perceptual", {})
-        new_perc = new_data.get("perceptual", {})
-        old_ssim = old_perc.get("ssim_median")
-        new_ssim = new_perc.get("ssim_median")
-        if old_ssim is not None and new_ssim is not None and (old_ssim - new_ssim) > ssim_tolerance:
+        # Live scenarios → scenario-level elapsed_s
+        old_elapsed = old_data.get("elapsed_s")
+        new_elapsed = new_data.get("elapsed_s")
+        if (
+            isinstance(old_elapsed, (int, float))
+            and isinstance(new_elapsed, (int, float))
+            and old_elapsed > 0
+        ):
+            drift = (new_elapsed - old_elapsed) / old_elapsed
+            if drift > wallclock_tolerance:
+                regressions.append(
+                    {
+                        "kind": "wallclock-drift",
+                        "scenario": scenario,
+                        "condition": "(scenario)",
+                        "old_seconds": old_elapsed,
+                        "new_seconds": new_elapsed,
+                        "drift_pct": drift * 100,
+                    }
+                )
+
+        # SSIM at scenario level (taef*_vs_vae only — live scenarios have no SSIM)
+        old_ssim = old_data.get("ssim_median")
+        new_ssim = new_data.get("ssim_median")
+        if (
+            isinstance(old_ssim, (int, float))
+            and isinstance(new_ssim, (int, float))
+            and (old_ssim - new_ssim) > ssim_tolerance
+        ):
             regressions.append(
                 {
                     "kind": "ssim-drop",
