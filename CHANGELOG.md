@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] — 2026-05-27
+
+Discoverability sweep. No runtime behavior changed; this release is a docs + metadata patch.
+
+### Added
+- `LICENSE` file at the repo root (MIT). The pyproject already declared `license = "MIT"` but the file itself was never committed, so GitHub's license auto-detect returned null and the README badge URL 404'd. Fixed.
+- `examples/` directory with three runnable scripts:
+  - `decode_flux_latent.py` — load a committed showcase latent, decode with TAEF2, write `out.webp`. Non-mflux use case.
+  - `mflux_live_preview.py` — Flux2Klein + LivePreviewCallback with `flux=model` auto-bn. The headline integration.
+  - `mflux_combined_with_teacache.py` — same as live_preview, also wrapped with `apply_teacache`. Combined-use story.
+- README "Which library do I need?" section directly under the intro. Three-paragraph decision tree that converts arrivals from need-based searches.
+
+### Changed
+- PyPI `description` aligned with the GitHub repo description: now names live previews + low-memory decode + FLUX & SD targets instead of the previous generic "TAESD family on Apple MLX" framing.
+- PyPI `keywords` expanded 6 → 14 (added `apple-silicon`, `diffusion`, `mflux`, `taef`, `taef1`, `taef2`, `tiny-autoencoder`, `vae`, `latent-preview`) so need-based PyPI search returns this package.
+- PyPI `project.urls` adds `Source`, `Comparison`, and `Roadmap` entries pointing at the committed docs on `main`.
+
+### Fixed
+- PyPI `Documentation` URL removed (was pointing at `ionden.github.io/mlx-taef`, which returns HTTP 404). Replaced with the new `Source` / `Comparison` / `Roadmap` URLs that all resolve.
+- README badge `License: MIT` now resolves (was 404 because the LICENSE file was missing — see Added above).
+
 ## [0.2.1] — 2026-05-27
 
 Docs-only patch. No runtime behavior changed.
