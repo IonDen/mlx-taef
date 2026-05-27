@@ -60,8 +60,6 @@ def unpack_flux2_latent(
     Returns:
         NHWC tensor of shape (B, latent_height*2, latent_width*2, 32) — ready
         for `TAEF2.decode()`.
-
-    See `notes/mflux-latent-layout.md` for the analysis behind this transform.
     """
     b, _, c = packed.shape
     if c != 128:

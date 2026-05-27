@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] — 2026-05-27
+
+Docs-only patch. No runtime behavior changed.
+
+### Fixed
+- README Status row now says "v0.2.0 — released on PyPI" instead of "v0.2.0 (in progress)" — the v0.2.0 PR landed before the tag pushed, leaving the row stale.
+- README + ROADMAP no longer link to internal working-state documents. The Status row and Released row now stand on their own one-line summary instead of pointing readers at maintainer-only spec files that wouldn't render for someone browsing only the published surface.
+- ROADMAP v0.2.0 row marked as released (2026-05-27).
+- `unpack_flux2_latent` docstring no longer references a maintainer working note. Users were seeing the broken pointer in IDE tooltips when hovering the function in VS Code.
+
 ## [0.2.0] — 2026-05-27
 
 Substantial release. Auto-bn extraction makes FLUX.2 live previews color-correct by default; the showcase bench publishes measured timings + perceptual fidelity numbers anyone can reproduce.

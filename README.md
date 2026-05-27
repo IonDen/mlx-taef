@@ -105,7 +105,7 @@ See `docs/manual-verification.md` for the full verification recipe.
 ## Status
 
 - **v0.1.0 — initial public release on PyPI** (2026-05-13). All four variants, encoder + decoder, mflux integration, CI, 99 % honest coverage.
-- **v0.2.0** *(in progress)* — auto-bn extraction in `LivePreviewCallback(flux=...)`; per-step gallery mode (`numbered_frames=True`); subprocess-per-rep showcase bench (`scripts/run_showcase.py`); hardware-aware memory caps via `mlx_taef._memory_caps`; `COMPARISON.md` + committed JSON report; `ROADMAP.md`. See [`docs/superpowers/specs/2026-05-26-mlx-taef-v0.2.0-design.md`](docs/superpowers/specs/2026-05-26-mlx-taef-v0.2.0-design.md).
+- **v0.2.0 — released on PyPI** (2026-05-27). Auto-bn extraction in `LivePreviewCallback(flux=...)`; per-step gallery mode (`numbered_frames=True`); subprocess-per-rep showcase bench (`scripts/run_showcase.py`); hardware-aware memory caps via `mlx_taef._memory_caps`; [COMPARISON.md](COMPARISON.md) + committed JSON report; [ROADMAP.md](ROADMAP.md).
 
 Track future releases via the [PyPI history](https://pypi.org/project/mlx-taef/#history) or `gh release list -R IonDen/mlx-taef`.
 
