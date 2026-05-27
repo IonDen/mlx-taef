@@ -8,9 +8,6 @@ Sentinel contract (deliberate tightening of mlx-teacache template):
   JSON one-liner.
 - Multiple sentinels in one worker's stdout raise TaefError.
 - Missing sentinel raises TaefError.
-
-See docs/superpowers/specs/2026-05-26-mlx-taef-v0.2.0-design.md
-Section 3 for the full design.
 """
 
 from __future__ import annotations
