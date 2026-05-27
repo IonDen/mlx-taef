@@ -12,7 +12,10 @@ Pre-reqs (run once per release-train):
     scripts/_capture_latent.py --variant flux2-klein-base-4b
 
 Usage:
-    uv run python scripts/run_showcase.py --scenario all --reps 3 \\
+    # Reproduce the committed report (per-condition defaults: 5 TAEF reps,
+    # 3 vanilla-VAE reps). Override --reps only if you knowingly want a
+    # different protocol than the one tied to the headline numbers.
+    uv run python scripts/run_showcase.py --scenario all \\
         --report _artifacts/showcase_report.json
 """
 
