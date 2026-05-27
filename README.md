@@ -22,6 +22,14 @@ img = taef.decode(latents)                  # NHWC float in [0, 1]
 img_uint8 = taef.decode_image(latents)      # uint8 NHWC ready for PIL
 ```
 
+## Which library do I need?
+
+**You want live previews or low-memory FLUX decode?** You're in the right place. `mlx-taef` decodes diffusion latents to RGB in ~260 ms (TAEF2) or ~185 ms (TAEF1) on M1 Max — vs ~2 seconds for the full VAE, with ~4× less peak memory. Drops into mflux via `LivePreviewCallback`.
+
+**You want FLUX generation itself to be faster on Apple Silicon?** You want [`mlx-teacache`](https://github.com/IonDen/mlx-teacache) — it skips redundant denoising steps when the schedule is cacheable (measured 1.44× on FLUX.1-dev at 25 steps).
+
+**You want both: faster generation AND live previews?** Use them together — they compose cleanly. mflux 4-step Klein + TeaCache + TAEF2 previews = 1.30× wall-clock and 26% less peak memory vs vanilla.
+
 ## Install
 
 From PyPI:
