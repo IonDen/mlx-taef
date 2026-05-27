@@ -4,7 +4,7 @@ A non-binding sketch of where the library is headed. Each item lists status, eff
 
 ## Released
 
-- **v0.2.0** *(in progress)* — `LivePreviewCallback` auto-bn extraction for taef2; `COMPARISON.md` + `scripts/run_showcase.py` measured showcase (4 scenarios); subprocess-per-rep `scripts/bench_decode.py`; per-variant `memory_cap_hint_gb` + `FULL_VAE_CAP_GB`; session-level `tests/conftest.py` MLX cap; `ROADMAP.md`; cross-process MLX non-determinism caveat in `docs/manual-verification.md`; Trove classifier alignment; `showcase` runtime extra. See `docs/superpowers/specs/2026-05-26-mlx-taef-v0.2.0-design.md` for the design.
+- **v0.2.0** (2026-05-27) — `LivePreviewCallback` auto-bn extraction for taef2; [COMPARISON.md](COMPARISON.md) + `scripts/run_showcase.py` measured showcase (4 scenarios); subprocess-per-rep `scripts/bench_decode.py`; per-variant `memory_cap_hint_gb` + `FULL_VAE_CAP_GB`; session-level `tests/conftest.py` MLX cap; cross-process MLX non-determinism caveat in [docs/manual-verification.md](docs/manual-verification.md); Trove classifier alignment; `showcase` runtime extra.
 - **v0.1.1** (2026-05-13) — sha256 sidecars on committed fixtures; SSIM ≥ 0.75 perceptual contract on roundtrip; release workflow ships a GitHub Release on tag push.
 - **v0.1.0** (2026-05-13) — initial public release. 4 variants (TAESD, TAESDXL, TAEF1, TAEF2) with one consistent API. mflux `LivePreviewCallback`. 99-100% coverage.
 
