@@ -112,8 +112,8 @@ Every number on this page ties to a measurement in the committed JSON at `_artif
 
 The headline `~8.3×` and `~10.8×` numbers are for the decoder step *in isolation*, on the same latent, in cold subprocesses. They are NOT whole-generation speedups — for that, look at the `combined` scenario, which shows what users see when they pair TAEF previews with TeaCache step-skipping. The decoder speedup matters most for live previews — every step is a separate decode, and you pay it once per step.
 
+SSIM thresholds: the 0.75 figure in the spec was a starting heuristic. The first bench run validates it; the regression check locks the floor at `ssim_median - 0.05` from v0.2.1 forward. TAEF2's 0.616 is genuinely lower than that heuristic. That's a signal of upstream TAEF2's preview-grade fidelity, not a regression in mlx-taef's port.
+
 ---
 
 By Denis Ineshin · [ineshin.space](https://ineshin.space)
-
-SSIM thresholds: the 0.75 figure in the spec was a starting heuristic. The first bench run validates it; the regression check locks the floor at `ssim_median - 0.05` from v0.2.1 forward. TAEF2's 0.616 is genuinely lower than that heuristic. That's a signal of upstream TAEF2's preview-grade fidelity, not a regression in mlx-taef's port.
