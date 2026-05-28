@@ -18,6 +18,16 @@ from mlx_taef.variants import (
 CONVERTED_DIR = Path(__file__).parent / "converted"
 REF_DIR = Path(__file__).parent / "reference"
 
+# Primary decode parity tolerance. Pixel values are in [0, 1] and pass through
+# zero, so a relative tolerance is undefined near zero (measured maxrel explodes
+# to ~3.0 at near-black pixels) — we gate on absolute tolerance only. Measured
+# worst maxabs across all 4 variants x 5 fixtures is ~1.1e-5 (MLX-Metal fp32 vs
+# the PyTorch fp32 reference); 1e-4 clears that ~9x for cross-hardware fp32
+# reduction-order noise while still failing a +0.05 brightness shift by ~500x.
+# See mlx-taef-0001: a cosine-only gate (cos > 0.999) is DC-dominated on
+# mid-gray images and accepts brightness/contrast/noise regressions.
+DECODE_ATOL = 1e-4
+
 
 def _cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
     af, bf = a.flatten().astype(np.float64), b.flatten().astype(np.float64)
@@ -85,7 +95,7 @@ def test_variant_decode_against_committed_reference(
     cls: type[Taef],
     config: TaesdVariantConfig,
 ) -> None:
-    """Tier 2 parity for each variant: cosine sim > 0.999 on 5 fixtures."""
+    """Tier 2 parity for each variant: absolute pixel tolerance on 5 fixtures."""
     weights_path = CONVERTED_DIR / f"{variant_name}_decoder.safetensors"
     model = cls.from_pretrained_local(weights_path)
     for i in range(5):
@@ -94,8 +104,36 @@ def test_variant_decode_against_committed_reference(
             mx.load(str(REF_DIR / f"{variant_name}_decoded_{i:03d}.safetensors"))["image"]
         )
         out = np.array(model.decode(latent))
-        sim = _cosine_sim(out, ref)
-        # Cosine similarity > 0.999 = numerically equivalent for our purposes.
-        # Reference fixtures are PyTorch fp32 outputs; MLX runs fp32 by default.
-        # Values in [0, 1], so cosine sim is tighter than atol on raw magnitudes.
-        assert sim > 0.999, f"{variant_name} fixture {i}: cos_sim={sim:.6f}"
+        # Absolute pixel tolerance is the gate (see DECODE_ATOL). Cosine
+        # similarity is reported on failure as a secondary, scale-insensitive
+        # diagnostic, not as the pass/fail criterion.
+        np.testing.assert_allclose(
+            out,
+            ref,
+            atol=DECODE_ATOL,
+            rtol=0,
+            err_msg=f"{variant_name} fixture {i}: cos_sim={_cosine_sim(out, ref):.6f}",
+        )
+
+
+def test_decode_parity_gate_rejects_brightness_shift() -> None:
+    """The decode gate must reject a +0.05 brightness shift (mlx-taef-0001).
+
+    Regression guard for the gate's strength: a +0.05 shift produces cosine
+    similarity ~0.9996 (it sailed through the old `cos > 0.999` gate) but a
+    maxabs of 0.05 — 500x the DECODE_ATOL=1e-4 bound. If someone later loosens
+    the tolerance toward 0.05, this test catches it before a real brightness /
+    scale / dropped-bias regression can slip past parity.
+    """
+    model = TAEF2.from_pretrained_local(CONVERTED_DIR / "taef2_decoder.safetensors")
+    latent = mx.load(str(REF_DIR / "taef2_latent_000.safetensors"))["latent"]
+    ref = np.array(mx.load(str(REF_DIR / "taef2_decoded_000.safetensors"))["image"])
+    out = np.array(model.decode(latent))
+
+    # The true output clears the gate ...
+    np.testing.assert_allclose(out, ref, atol=DECODE_ATOL, rtol=0)
+    # ... but a +0.05-shifted reference must not.
+    shifted_ref = np.clip(ref + 0.05, 0.0, 1.0)
+    assert _cosine_sim(out, shifted_ref) > 0.999  # old gate would have passed this
+    with pytest.raises(AssertionError):
+        np.testing.assert_allclose(out, shifted_ref, atol=DECODE_ATOL, rtol=0)
