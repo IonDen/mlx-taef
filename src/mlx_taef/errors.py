@@ -3,6 +3,7 @@
 Hierarchy:
     TaefError                              base for all package-rooted errors
     ├── SchemaVersionError                 unknown JSON schema_version
+    ├── ConversionError                    HF->MLX conversion dropped/mis-shaped a param
     ├── MlxTeacacheNotInstalledError       (+ ImportError) optional dep missing
     └── FixtureLatentMissingError          (+ FileNotFoundError) showcase fixture absent
 """
@@ -19,6 +20,16 @@ class SchemaVersionError(TaefError):
 
     Future schema bumps add adapters; raising rather than silently
     misinterpreting fields keeps the diff workflow honest.
+    """
+
+
+class ConversionError(TaefError):
+    """Raised when HF->MLX conversion fails to reproduce the model's parameters.
+
+    Covers two silent-failure paths: an expected parameter that no source key
+    produced (would load at random init) and a produced parameter whose shape
+    disagrees with the model (would be accepted verbatim). Both yield a
+    usable-looking but numerically wrong model, so conversion raises instead.
     """
 
 

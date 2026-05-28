@@ -70,14 +70,17 @@ class Taef(nn.Module):  # type: ignore[misc,name-defined]
             A loaded `Taef` instance ready for `decode()`.
         """
         instance = cls()
+        # Load each submodule with strict=True so a dropped or wrong-shaped weight
+        # raises instead of leaving a parameter at random init (silently-wrong
+        # image). Loading per-submodule — rather than the whole instance — keeps
+        # decoder-only loading valid: the encoder simply stays at init when no
+        # encoder_path is given, instead of tripping a top-level strict check on
+        # the (legitimately absent) encoder parameters.
         d_weights = cast("dict[str, mx.array]", mx.load(str(decoder_path)))
-        weights_list: list[tuple[str, mx.array]] = [
-            (f"decoder.{k}", v) for k, v in d_weights.items()
-        ]
-        if encoder_path is not None and hasattr(instance, "encoder"):
+        instance.decoder.load_weights(list(d_weights.items()), strict=True)
+        if encoder_path is not None:
             e_weights = cast("dict[str, mx.array]", mx.load(str(encoder_path)))
-            weights_list.extend((f"encoder.{k}", v) for k, v in e_weights.items())
-        instance.load_weights(weights_list, strict=False)
+            instance.encoder.load_weights(list(e_weights.items()), strict=True)
         if dtype is not mx.float32:
             instance.set_dtype(dtype)
         instance.eval()

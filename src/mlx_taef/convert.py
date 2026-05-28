@@ -13,6 +13,7 @@ import numpy as np
 from huggingface_hub import hf_hub_download
 from safetensors.numpy import load_file as safetensors_load_numpy
 
+from mlx_taef.errors import ConversionError
 from mlx_taef.model import make_decoder
 from mlx_taef.variants import TaesdVariantConfig
 
@@ -150,7 +151,44 @@ def _build_mlx_state_dict(
         ):
             arr = np.transpose(arr, (0, 2, 3, 1)).copy()
         converted[dst_key] = mx.array(arr)
+    _verify_conversion_coverage(converted, expected_shapes)
     return converted
+
+
+def _verify_conversion_coverage(
+    converted: dict[str, mx.array],
+    expected_shapes: dict[str, tuple[int, ...]],
+) -> None:
+    """Raise if the conversion dropped an expected param or produced a wrong shape.
+
+    Extra *source* keys are dropped silently by `_build_mlx_state_dict` (e.g.
+    Diffusers-only keys the MLX module doesn't have) — that is intentional. What
+    must never happen silently is the reverse: an expected model parameter that
+    no source key produced (it would load at random init) or a produced
+    parameter whose shape disagrees with the model (it would be accepted
+    verbatim). Both yield a usable-looking but numerically wrong model.
+
+    Args:
+        converted: the MLX-keyed dict produced by the conversion loop.
+        expected_shapes: dotted-key -> shape for every model parameter.
+
+    Raises:
+        ConversionError: if any expected key is missing or any shape mismatches.
+    """
+    missing = sorted(set(expected_shapes) - set(converted))
+    mismatched = sorted(
+        f"{k}: got {tuple(converted[k].shape)}, expected {expected_shapes[k]}"
+        for k in converted
+        if tuple(converted[k].shape) != expected_shapes[k]
+    )
+    if not missing and not mismatched:
+        return
+    parts: list[str] = []
+    if missing:
+        parts.append(f"missing {len(missing)} expected parameter(s): {missing}")
+    if mismatched:
+        parts.append(f"shape mismatch on {len(mismatched)} parameter(s): {mismatched}")
+    raise ConversionError("HF->MLX conversion is incomplete — " + "; ".join(parts))
 
 
 def _flatten_module_param_shapes(module: Any, prefix: str = "") -> dict[str, tuple[int, ...]]:

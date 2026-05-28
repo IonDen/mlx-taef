@@ -7,7 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `ConversionError` (exported from `mlx_taef`) and a convert-time coverage + shape
+  check in the HF→MLX weight converter. A conversion that fails to produce an
+  expected model parameter, or produces one whose shape disagrees with the model,
+  now raises and names the offending keys instead of silently writing an
+  incomplete or wrong weights file.
+
 ### Changed
+- `from_pretrained_local` now loads each submodule with `strict=True`. A weights
+  file that is missing a parameter, or carries a wrong-shaped one, raises at load
+  time instead of leaving the parameter at random init (a silently-wrong image).
+  Loading is done per submodule so decoder-only loading (no `encoder_path`) stays
+  valid — the encoder simply remains at init, as before.
 - End-to-end decode and encode parity tests now gate on an absolute pixel/latent
   tolerance (`np.testing.assert_allclose`) instead of cosine similarity > 0.999.
   On the `[0, 1]` images these decoders produce, cosine similarity is DC-dominated

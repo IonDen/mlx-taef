@@ -1,11 +1,13 @@
 """Tests for HF -> MLX weight conversion."""
 
+import re
 from pathlib import Path
 
 import mlx.core as mx
 import numpy as np
 import pytest
 
+from mlx_taef import TAEF2
 from mlx_taef.convert import (
     _build_mlx_state_dict,
     _flatten_module_param_shapes,
@@ -14,6 +16,7 @@ from mlx_taef.convert import (
     convert_hf_decoder_to_mlx,
     convert_hf_encoder_to_mlx,
 )
+from mlx_taef.errors import ConversionError
 from mlx_taef.model import make_decoder, make_encoder
 from mlx_taef.variants import ALL_VARIANTS, TAEF2_CONFIG
 
@@ -76,10 +79,46 @@ def test_build_mlx_state_dict_transposes_4d_conv_weights() -> None:
     assert tuple(out["layers.1.weight"].shape) == (2, 3, 3, 3)
 
 
-def test_build_mlx_state_dict_skips_unmapped_keys() -> None:
-    sd = {"some.extra.key": np.zeros((2, 2))}
+def test_build_mlx_state_dict_drops_extra_source_keys() -> None:
+    """Extra source keys (e.g. Diffusers-only) are dropped as long as every
+    expected param is still produced — dropping unused keys is not an error."""
+    sd = {
+        "0.weight": np.zeros((2, 2), dtype=np.float32),  # -> layers.0.weight (expected)
+        "some.extra.key": np.zeros((2, 2), dtype=np.float32),  # unmapped, dropped
+    }
     out = _build_mlx_state_dict(sd, expected_shapes={"layers.0.weight": (2, 2)})
-    assert out == {}
+    assert set(out) == {"layers.0.weight"}
+
+
+def test_build_mlx_state_dict_raises_on_missing_expected_key() -> None:
+    """A source dict that fails to produce an expected param raises at convert
+    time, naming the missing key — instead of silently dropping it."""
+    sd = {"0.weight": np.zeros((2, 2), dtype=np.float32)}  # -> layers.0.weight
+    expected = {"layers.0.weight": (2, 2), "layers.1.bias": (4,)}  # layers.1.bias absent
+    with pytest.raises(ConversionError, match=re.escape("layers.1.bias")):
+        _build_mlx_state_dict(sd, expected_shapes=expected)
+
+
+def test_build_mlx_state_dict_raises_on_wrong_shape() -> None:
+    """A produced param whose shape disagrees with the model raises at convert
+    time, naming the key and both shapes — instead of accepting it verbatim."""
+    sd = {"0.weight": np.zeros((5, 5), dtype=np.float32)}  # -> layers.0.weight, wrong shape
+    expected = {"layers.0.weight": (2, 2)}
+    with pytest.raises(ConversionError, match=re.escape("layers.0.weight")):
+        _build_mlx_state_dict(sd, expected_shapes=expected)
+
+
+def test_from_pretrained_local_raises_on_incomplete_decoder(tmp_path: Path) -> None:
+    """from_pretrained_local loads with strict=True: a decoder file missing a
+    parameter must raise rather than leave it at random init (silently wrong)."""
+    full = mx.load(str(Path(__file__).parent / "converted" / "taef2_decoder.safetensors"))
+    dropped_key = next(k for k in full if k.endswith(".weight"))
+    incomplete = {k: v for k, v in full.items() if k != dropped_key}
+    incomplete_path = tmp_path / "incomplete_decoder.safetensors"
+    mx.save_safetensors(str(incomplete_path), dict(incomplete))
+    # MLX load_weights(strict=True) raises ValueError("Missing N parameters: ...").
+    with pytest.raises(ValueError, match="Missing"):
+        TAEF2.from_pretrained_local(incomplete_path)
 
 
 def test_flatten_module_param_shapes_walks_nested_sequentials() -> None:
