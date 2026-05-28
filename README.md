@@ -125,4 +125,9 @@ MIT. Mirrors upstream [madebyollin/taesd](https://github.com/madebyollin/taesd) 
 
 - [madebyollin](https://github.com/madebyollin) for the upstream TAESD-family models and weights.
 - [Apple ML Explore](https://github.com/ml-explore/mlx) for MLX.
+
+---
+
+By Denis Ineshin · [ineshin.space](https://ineshin.space)
+
 - [filipstrand/mflux](https://github.com/filipstrand/mflux) for the MLX-native FLUX runner this library integrates with.

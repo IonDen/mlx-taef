@@ -42,4 +42,9 @@ The mlx-taef integration cost for each is roughly: half-day of code (new variant
 1. **Active items first.** Items under `## Active` are committed. Finish current Active item before pulling the next in.
 2. **Future improvements next.** Items under `## Future improvements` are pre-vetted improvement ideas. Each can be lifted into an Active release.
 3. **Known-upstream variants are a menu, not a queue.** Pick from it based on community demand + bench cost.
+
+---
+
+By Denis Ineshin · [ineshin.space](https://ineshin.space)
+
 4. **Out of scope is durable.** Re-opening an item there requires evidence that the original reasoning no longer holds.
