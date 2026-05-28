@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- End-to-end decode and encode parity tests now gate on an absolute pixel/latent
+  tolerance (`np.testing.assert_allclose`) instead of cosine similarity > 0.999.
+  On the `[0, 1]` images these decoders produce, cosine similarity is DC-dominated
+  and brightness/scale-insensitive — a +0.05 brightness shift scored cosine 0.9996
+  and passed the old gate. The new gates are `atol=1e-4` for decode (measured worst
+  maxabs ~1.1e-5) and `atol=1e-3` for encode (measured worst ~2.4e-4 on taef1);
+  both use `rtol=0` because the values pass through zero. A regression test now
+  asserts the decode gate rejects a +0.05 shift.
+
 ## [0.2.2] — 2026-05-27
 
 Discoverability sweep. No runtime behavior changed; this release is a docs + metadata patch.

@@ -19,6 +19,15 @@ from mlx_taef.variants import (
 CONVERTED_DIR = Path(__file__).parent / "converted"
 REF_DIR = Path(__file__).parent / "reference"
 
+# Primary encode parity tolerance. Latents span ~±4.6 and pass through zero, so
+# (as with decode) a relative tolerance is undefined near zero — gate on atol.
+# Measured worst maxabs across the 4 variants is ~2.4e-4 (taef1; MLX-Metal fp32
+# vs PyTorch fp32). 1e-3 is the small-model full-forward fp32 tolerance and
+# clears the worst fixture ~4x for cross-hardware reduction-order noise. Note
+# the encode worst (2.4e-4) is an order of magnitude looser than decode's
+# (1.1e-5), so the two paths carry separate tolerances. See mlx-taef-0001.
+ENCODE_ATOL = 1e-3
+
 
 def _cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
     af, bf = a.flatten().astype(np.float64), b.flatten().astype(np.float64)
@@ -47,7 +56,7 @@ def test_variant_encode_parity(
     cls: type[Taef],
     config: TaesdVariantConfig,
 ) -> None:
-    """Encoded latents must match PyTorch reference at cosine similarity > 0.999."""
+    """Encoded latents must match the PyTorch reference within ENCODE_ATOL."""
     model = cls.from_pretrained_local(
         decoder_path=CONVERTED_DIR / f"{variant_name}_decoder.safetensors",
         encoder_path=CONVERTED_DIR / f"{variant_name}_encoder.safetensors",
@@ -55,12 +64,15 @@ def test_variant_encode_parity(
     src = _load_source_image()
     expected = np.array(mx.load(str(REF_DIR / f"{variant_name}_encoded_001.safetensors"))["latent"])
     actual = np.array(model.encode(src))
-    sim = _cosine_sim(actual, expected)
-    # Cosine similarity > 0.999 = numerically equivalent for our purposes.
-    # Reference fixtures are PyTorch fp32 outputs; MLX runs fp32 by default
-    # (overridden to fp16 only in perf tests). Latent values can be large
-    # (roughly ±3), so cosine sim is more stable than a raw atol here.
-    assert sim > 0.999, f"{variant_name}: encode cos_sim={sim:.6f}"
+    # Absolute latent tolerance is the gate (see ENCODE_ATOL). Cosine similarity
+    # is reported on failure as a secondary, scale-insensitive diagnostic.
+    np.testing.assert_allclose(
+        actual,
+        expected,
+        atol=ENCODE_ATOL,
+        rtol=0,
+        err_msg=f"{variant_name}: encode cos_sim={_cosine_sim(actual, expected):.6f}",
+    )
 
 
 def test_taef2_encode_shape_matches_8x_downsample() -> None:
