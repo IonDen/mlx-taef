@@ -57,4 +57,4 @@ jobs:
             --cov=mlx_taef \
             --cov-report=term-missing \
             --cov-fail-under=95 \
-            -m "not benchmark and not network and not slow and not integration"
+            -m "not benchmark and not network"

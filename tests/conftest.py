@@ -30,6 +30,58 @@ def _install_mlx_memory_caps() -> tuple[int, int]:
 INSTALLED_CAPS_GB = _install_mlx_memory_caps()
 
 
+# Collection gating: keep a bare `pytest` fast and offline. Tests carrying these
+# markers do real I/O (network) or minutes of perf measurement (benchmark), so a
+# developer running `uv run pytest` with no flags should not pay for them — they
+# are skipped unless the matching opt-in flag is passed. Each tuple is
+# (marker, opt-in flag, short description).
+GATED_MARKERS: tuple[tuple[str, str, str], ...] = (
+    ("network", "--run-network", "real HF downloads"),
+    ("benchmark", "--run-benchmark", "perf timings, slow and noisy"),
+)
+
+
+def _markers_to_skip(enabled_flags: set[str]) -> list[tuple[str, str]]:
+    """Pure decision: which (marker, skip-reason) pairs to skip given opt-in flags.
+
+    Separated from the pytest hook so the gating policy is unit-testable without
+    a live pytest session.
+
+    Args:
+        enabled_flags: the opt-in flags present on this invocation (e.g.
+            ``{"--run-network"}``).
+
+    Returns:
+        ``(marker, reason)`` pairs whose tests should be skipped this run.
+    """
+    return [
+        (marker, f"requires {flag} ({desc})")
+        for marker, flag, desc in GATED_MARKERS
+        if flag not in enabled_flags
+    ]
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Register the opt-in flags for the gated markers."""
+    for marker, flag, desc in GATED_MARKERS:
+        parser.addoption(
+            flag,
+            action="store_true",
+            default=False,
+            help=f"run `{marker}`-marked tests ({desc}); skipped by default",
+        )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Skip gated tests unless their opt-in flag was passed, so a bare run is fast+offline."""
+    enabled = {flag for _marker, flag, _desc in GATED_MARKERS if config.getoption(flag)}
+    for marker, reason in _markers_to_skip(enabled):
+        skip = pytest.mark.skip(reason=reason)
+        for item in items:
+            if marker in item.keywords:
+                item.add_marker(skip)
+
+
 CONVERTED_DIR = Path(__file__).parent / "converted"
 REF_DIR = Path(__file__).parent / "reference"
 

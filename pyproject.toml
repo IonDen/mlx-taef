@@ -179,11 +179,8 @@ addopts = "-ra --strict-markers --strict-config"
 testpaths = ["tests"]
 xfail_strict = true
 markers = [
-  "slow: tests >1s",
-  "gpu: requires Metal GPU",
-  "network: requires network access (skipped in CI)",
-  "benchmark: perf test (skipped in CI)",
-  "integration: needs real model checkpoint",
+  "network: real network I/O (HF downloads); skipped by default, opt in with --run-network",
+  "benchmark: perf timing test; skipped by default, opt in with --run-benchmark",
 ]
 
 [tool.coverage.run]
