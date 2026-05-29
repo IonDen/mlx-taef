@@ -4,6 +4,7 @@ A non-binding sketch of where the library is headed. Each item lists status, eff
 
 ## Released
 
+- **v0.2.3** (2026-05-29) — strict weight loading: `from_pretrained_local` raises on an incomplete or wrong-shaped weights file instead of loading a silently-wrong model (new `ConversionError`); the HF→MLX converter validates parameter coverage and shapes at convert time; end-to-end parity tests gate on an absolute pixel/latent tolerance instead of cosine similarity; a bare `pytest` skips network and benchmark tests by default, with `--run-network` / `--run-benchmark` opt-ins.
 - **v0.2.0** (2026-05-27) — `LivePreviewCallback` auto-bn extraction for taef2; [COMPARISON.md](COMPARISON.md) + `scripts/run_showcase.py` measured showcase (4 scenarios); subprocess-per-rep `scripts/bench_decode.py`; per-variant `memory_cap_hint_gb` + `FULL_VAE_CAP_GB`; session-level `tests/conftest.py` MLX cap; cross-process MLX non-determinism caveat in [docs/manual-verification.md](docs/manual-verification.md); Trove classifier alignment; `showcase` runtime extra.
 - **v0.1.1** (2026-05-13) — sha256 sidecars on committed fixtures; SSIM ≥ 0.75 perceptual contract on roundtrip; release workflow ships a GitHub Release on tag push.
 - **v0.1.0** (2026-05-13) — initial public release. 4 variants (TAESD, TAESDXL, TAEF1, TAEF2) with one consistent API. mflux `LivePreviewCallback`. 99-100% coverage.
