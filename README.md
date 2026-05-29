@@ -114,6 +114,7 @@ See `docs/manual-verification.md` for the full verification recipe.
 
 - **v0.1.0 — initial public release on PyPI** (2026-05-13). All four variants, encoder + decoder, mflux integration, CI, 99 % honest coverage.
 - **v0.2.0 — released on PyPI** (2026-05-27). Auto-bn extraction in `LivePreviewCallback(flux=...)`; per-step gallery mode (`numbered_frames=True`); subprocess-per-rep showcase bench (`scripts/run_showcase.py`); hardware-aware memory caps via `mlx_taef._memory_caps`; [COMPARISON.md](COMPARISON.md) + committed JSON report; [ROADMAP.md](ROADMAP.md).
+- **v0.2.3 — released on PyPI** (2026-05-29). Weight loading is now strict: `from_pretrained_local` raises on an incomplete or wrong-shaped weights file instead of loading a silently-wrong model, and the HF→MLX converter checks parameter coverage and shapes at convert time (new `ConversionError`). The end-to-end parity tests now gate on an absolute pixel tolerance rather than cosine similarity. A bare `pytest` skips the network and benchmark tests by default (`--run-network` / `--run-benchmark` to opt in).
 
 Track future releases via the [PyPI history](https://pypi.org/project/mlx-taef/#history) or `gh release list -R IonDen/mlx-taef`.
 
