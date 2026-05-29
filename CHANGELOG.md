@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   maxabs ~1.1e-5) and `atol=1e-3` for encode (measured worst ~2.4e-4 on taef1);
   both use `rtol=0` because the values pass through zero. A regression test now
   asserts the decode gate rejects a +0.05 shift.
+- A bare `pytest` (or `uv run pytest`) now skips the `network` and `benchmark`
+  tests by default, so a local run is fast and offline and matches what CI runs.
+  Opt back in with `--run-network` (real HF downloads) or `--run-benchmark` (perf
+  timings). Previously the only deselection lived in the CI invocation, so a bare
+  local run attempted the real downloads and the benchmark timings.
+
+### Removed
+- Unused `slow`, `gpu`, and `integration` pytest markers, which were registered
+  but applied to zero tests. `network` and `benchmark` remain.
 
 ## [0.2.2] — 2026-05-27
 
