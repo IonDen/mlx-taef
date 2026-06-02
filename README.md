@@ -1,5 +1,9 @@
 # mlx-taef
 
+<p align="center">
+  <img src="docs/assets/mlx-taef-logo.png" alt="mlx-taef" width="100%">
+</p>
+
 [![PyPI version](https://img.shields.io/pypi/v/mlx-taef.svg)](https://pypi.org/project/mlx-taef/)
 [![Python versions](https://img.shields.io/pypi/pyversions/mlx-taef.svg)](https://pypi.org/project/mlx-taef/)
 [![License: MIT](https://img.shields.io/pypi/l/mlx-taef.svg)](https://github.com/IonDen/mlx-taef/blob/main/LICENSE)
