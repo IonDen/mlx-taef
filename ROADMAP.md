@@ -11,7 +11,7 @@ A non-binding sketch of where the library is headed. Each item lists status, eff
 
 ## Active
 
-(Empty after v0.2.0 ships.)
+(Empty.)
 
 ## Future improvements (no fixed release target)
 
@@ -22,7 +22,7 @@ A non-binding sketch of where the library is headed. Each item lists status, eff
 
 ## Known-upstream variants, not yet supported
 
-These exist in upstream [`madebyollin/taesd`](https://github.com/madebyollin/taesd) but are not in mlx-taef as of v0.2.0. Each requires its own integration + calibration cycle.
+These exist in upstream [`madebyollin/taesd`](https://github.com/madebyollin/taesd) but are not in mlx-taef as of v0.2.3. Each requires its own integration + calibration cycle.
 
 - **TAESD3** — for Stable Diffusion 3 / 3.5.
 - **TAESANA** — for Sana (the `f32` arch_variant placeholder in `variants.py` is reserved for this).
