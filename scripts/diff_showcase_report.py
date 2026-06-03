@@ -1,12 +1,17 @@
 r"""Machine-enforced regression checker for two showcase reports.
 
-Exits non-zero if any wall-clock metric drifts more than the tolerance
-or any SSIM drops more than the tolerance. Schema follows the actual
-output of `scripts/run_showcase.py` (NOT the early-spec sketch):
+Exits non-zero if any wall-clock or peak-memory metric drifts more than the
+tolerance, any SSIM drops more than the tolerance, the TeaCache skip count
+drops, or a baseline metric/block disappears from the new report. Schema
+follows the actual output of `scripts/run_showcase.py` (NOT the early-spec
+sketch):
 
-    scenarios.<name>.{taef,vanilla_vae}.median_seconds  # taef*_vs_vae
-    scenarios.<name>.ssim_median                        # taef*_vs_vae
-    scenarios.<name>.elapsed_s                          # live_preview, combined
+    scenarios.<name>.{taef,vanilla_vae}.median_seconds         # taef*_vs_vae
+    scenarios.<name>.{taef,vanilla_vae}.median_peak_memory_gb  # taef*_vs_vae
+    scenarios.<name>.ssim_median                               # taef*_vs_vae
+    scenarios.<name>.elapsed_s                                 # live_preview, combined
+    scenarios.<name>.peak_memory_gb                            # live_preview, combined
+    scenarios.combined.teacache.skipped_count                  # combined
 
 Usage:
     uv run python scripts/run_showcase.py --report new.json
@@ -86,23 +91,30 @@ def diff_reports(
                     )
             old_mem = old_cond.get("median_peak_memory_gb")
             new_mem = new_cond.get("median_peak_memory_gb")
-            if (
-                isinstance(old_mem, (int, float))
-                and isinstance(new_mem, (int, float))
-                and old_mem > 0
-            ):
-                mem_drift = (new_mem - old_mem) / old_mem
-                if mem_drift > memory_tolerance:
+            if isinstance(old_mem, (int, float)) and old_mem > 0:
+                if not isinstance(new_mem, (int, float)):
                     regressions.append(
                         {
-                            "kind": "peak-memory-drift",
+                            "kind": "peak-memory-missing",
                             "scenario": scenario,
                             "condition": cond,
                             "old_gb": old_mem,
                             "new_gb": new_mem,
-                            "drift_pct": mem_drift * 100,
                         }
                     )
+                else:
+                    mem_drift = (new_mem - old_mem) / old_mem
+                    if mem_drift > memory_tolerance:
+                        regressions.append(
+                            {
+                                "kind": "peak-memory-drift",
+                                "scenario": scenario,
+                                "condition": cond,
+                                "old_gb": old_mem,
+                                "new_gb": new_mem,
+                                "drift_pct": mem_drift * 100,
+                            }
+                        )
 
         # Live scenarios → scenario-level elapsed_s
         old_elapsed = old_data.get("elapsed_s")
@@ -128,41 +140,56 @@ def diff_reports(
         # Scenario-level peak_memory_gb (live_preview / combined)
         old_peak = old_data.get("peak_memory_gb")
         new_peak = new_data.get("peak_memory_gb")
-        if (
-            isinstance(old_peak, (int, float))
-            and isinstance(new_peak, (int, float))
-            and old_peak > 0
-        ):
-            mem_drift = (new_peak - old_peak) / old_peak
-            if mem_drift > memory_tolerance:
+        if isinstance(old_peak, (int, float)) and old_peak > 0:
+            if not isinstance(new_peak, (int, float)):
                 regressions.append(
                     {
-                        "kind": "peak-memory-drift",
+                        "kind": "peak-memory-missing",
                         "scenario": scenario,
                         "condition": "(scenario)",
                         "old_gb": old_peak,
                         "new_gb": new_peak,
-                        "drift_pct": mem_drift * 100,
                     }
                 )
+            else:
+                mem_drift = (new_peak - old_peak) / old_peak
+                if mem_drift > memory_tolerance:
+                    regressions.append(
+                        {
+                            "kind": "peak-memory-drift",
+                            "scenario": scenario,
+                            "condition": "(scenario)",
+                            "old_gb": old_peak,
+                            "new_gb": new_peak,
+                            "drift_pct": mem_drift * 100,
+                        }
+                    )
 
         # TeaCache skipped_count floor: a drop below the baseline count means
         # the integration stopped skipping steps (the combined scenario).
         old_skipped = (old_data.get("teacache") or {}).get("skipped_count")
         new_skipped = (new_data.get("teacache") or {}).get("skipped_count")
-        if (
-            isinstance(old_skipped, int)
-            and isinstance(new_skipped, int)
-            and new_skipped < old_skipped
-        ):
-            regressions.append(
-                {
-                    "kind": "skipped-count-drop",
-                    "scenario": scenario,
-                    "old_skipped": old_skipped,
-                    "new_skipped": new_skipped,
-                }
-            )
+        if isinstance(old_skipped, int) and not isinstance(old_skipped, bool):
+            if not isinstance(new_skipped, int) or isinstance(new_skipped, bool):
+                # The teacache block / skipped_count field disappeared (the
+                # TeaCache wiring removed outright) — worse than a 1 -> 0 drop.
+                regressions.append(
+                    {
+                        "kind": "skipped-count-missing",
+                        "scenario": scenario,
+                        "old_skipped": old_skipped,
+                        "new_skipped": new_skipped,
+                    }
+                )
+            elif new_skipped < old_skipped:
+                regressions.append(
+                    {
+                        "kind": "skipped-count-drop",
+                        "scenario": scenario,
+                        "old_skipped": old_skipped,
+                        "new_skipped": new_skipped,
+                    }
+                )
 
         # SSIM at scenario level (taef*_vs_vae only — live scenarios have no SSIM)
         old_ssim = old_data.get("ssim_median")

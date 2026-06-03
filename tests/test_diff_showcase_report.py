@@ -295,3 +295,52 @@ def test_self_diff_with_zeroed_skipped_count_finds_regression() -> None:
     regressions = diff_reports(old, new)
     flagged = [r for r in regressions if r["kind"] == "skipped-count-drop"]
     assert flagged, f"expected a skipped-count-drop, got {regressions}"
+
+
+# --- the metric/block disappearing entirely is the worst regression and must
+#     also be flagged (not just a worse number) ---
+
+
+def test_skipped_count_block_removed_flagged() -> None:
+    """Losing the whole teacache block (the TeaCache wiring removed outright) is
+    a worse regression than 1 -> 0, and must not pass silently."""
+    from scripts.diff_showcase_report import diff_reports
+
+    old = _make_combined_report(skipped_count=1)
+    new = _make_combined_report(skipped_count=1)
+    del new["scenarios"]["combined"]["teacache"]
+
+    regressions = diff_reports(old, new)
+    flagged = [r for r in regressions if r["kind"] == "skipped-count-missing"]
+    assert len(flagged) == 1, f"expected a skipped-count-missing, got {regressions}"
+    assert flagged[0]["scenario"] == "combined"
+
+
+def test_peak_memory_field_removed_flagged_for_condition() -> None:
+    """A baseline that reports median_peak_memory_gb against a new report that
+    dropped it should fail loud (the headline metric vanished)."""
+    from scripts.diff_showcase_report import diff_reports
+
+    old = _make_vs_vae_report(median_seconds=0.10, ssim_median=0.85)
+    new = _make_vs_vae_report(median_seconds=0.10, ssim_median=0.85)
+    del new["scenarios"]["taef2_vs_vae"]["taef"]["median_peak_memory_gb"]
+
+    regressions = diff_reports(old, new)
+    flagged = [
+        r for r in regressions if r["kind"] == "peak-memory-missing" and r["condition"] == "taef"
+    ]
+    assert len(flagged) == 1, f"expected a peak-memory-missing on taef, got {regressions}"
+
+
+def test_peak_memory_field_removed_flagged_for_scenario() -> None:
+    from scripts.diff_showcase_report import diff_reports
+
+    old = _make_live_report(elapsed_s=10.0)
+    new = _make_live_report(elapsed_s=10.0)
+    del new["scenarios"]["live_preview"]["peak_memory_gb"]
+
+    regressions = diff_reports(old, new)
+    flagged = [r for r in regressions if r["kind"] == "peak-memory-missing"]
+    assert len(flagged) == 1
+    assert flagged[0]["scenario"] == "live_preview"
+    assert flagged[0]["condition"] == "(scenario)"

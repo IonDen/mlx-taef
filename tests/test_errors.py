@@ -80,7 +80,7 @@ def test_verify_conversion_coverage_raises_on_missing_param() -> None:
     from mlx_taef.convert import _verify_conversion_coverage
     from mlx_taef.errors import ConversionError
 
-    with pytest.raises(ConversionError, match="missing"):
+    with pytest.raises(ConversionError, match=r"missing \d+ expected parameter"):
         _verify_conversion_coverage({}, {"decoder.weight": (4, 4)})
 
 
@@ -131,5 +131,9 @@ def test_mlx_teacache_not_installed_default_message_mentions_install_path() -> N
     from mlx_taef.errors import MlxTeacacheNotInstalledError
 
     e = MlxTeacacheNotInstalledError()
-    assert "pip install" in str(e) or "uv add" in str(e)
-    assert "mlx-teacache" in str(e)
+    msg = str(e)
+    # both install hints are in the default message; assert both so dropping
+    # one is caught (an `or` could not detect a single hint going missing).
+    assert "pip install" in msg
+    assert "uv add" in msg
+    assert "mlx-teacache" in msg
