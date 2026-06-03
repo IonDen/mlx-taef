@@ -15,7 +15,13 @@ from pathlib import Path
 from typing import Any
 
 
-def _make_vs_vae_report(median_seconds: float, ssim_median: float) -> dict[str, Any]:
+def _make_vs_vae_report(
+    median_seconds: float,
+    ssim_median: float,
+    *,
+    taef_peak_gb: float = 0.59,
+    vae_peak_gb: float = 2.37,
+) -> dict[str, Any]:
     """Build a report shaped like run_showcase.py's `taef2_vs_vae` output."""
     return {
         "schema_version": 1,
@@ -26,12 +32,12 @@ def _make_vs_vae_report(median_seconds: float, ssim_median: float) -> dict[str, 
                 "taef": {
                     "condition": "taef2",
                     "median_seconds": median_seconds,
-                    "median_peak_memory_gb": 0.59,
+                    "median_peak_memory_gb": taef_peak_gb,
                 },
                 "vanilla_vae": {
                     "condition": "vanilla_vae",
                     "median_seconds": median_seconds * 8,  # vae is slower
-                    "median_peak_memory_gb": 2.37,
+                    "median_peak_memory_gb": vae_peak_gb,
                 },
                 "ssim_per_pair": [ssim_median],
                 "ssim_median": ssim_median,
@@ -40,7 +46,7 @@ def _make_vs_vae_report(median_seconds: float, ssim_median: float) -> dict[str, 
     }
 
 
-def _make_live_report(elapsed_s: float) -> dict[str, Any]:
+def _make_live_report(elapsed_s: float, *, peak_memory_gb: float = 10.0) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "generated_at": "2026-05-26T00:00:00Z",
@@ -48,7 +54,29 @@ def _make_live_report(elapsed_s: float) -> dict[str, Any]:
             "live_preview": {
                 "status": "ok",
                 "elapsed_s": elapsed_s,
-                "peak_memory_gb": 10.0,
+                "peak_memory_gb": peak_memory_gb,
+            },
+        },
+    }
+
+
+def _make_combined_report(
+    *,
+    elapsed_s: float = 8.0,
+    peak_memory_gb: float = 7.9,
+    skipped_count: int = 1,
+) -> dict[str, Any]:
+    """Build a report shaped like run_showcase.py's `combined` scenario,
+    which carries the TeaCache `skipped_count` the integration headline depends on."""
+    return {
+        "schema_version": 1,
+        "generated_at": "2026-05-26T00:00:00Z",
+        "scenarios": {
+            "combined": {
+                "status": "ok",
+                "elapsed_s": elapsed_s,
+                "peak_memory_gb": peak_memory_gb,
+                "teacache": {"skipped_count": skipped_count},
             },
         },
     }
@@ -160,3 +188,110 @@ def test_self_diff_with_skewed_taef_value_finds_regression() -> None:
     regressions = diff_reports(old, new, wallclock_tolerance=0.10)
     flagged = [r for r in regressions if r.get("condition") == "taef"]
     assert flagged, f"expected a wallclock regression on taef, got {regressions}"
+
+
+# --- peak memory (the headline 5-7x memory win — must be guarded) ---
+
+
+def test_peak_memory_drift_above_threshold_flagged_for_taef() -> None:
+    """taef's peak decode memory creeping up past tolerance is a regression of
+    the library's headline claim, so the differ must flag it."""
+    from scripts.diff_showcase_report import diff_reports
+
+    old = _make_vs_vae_report(median_seconds=0.10, ssim_median=0.85, taef_peak_gb=0.59)
+    new = _make_vs_vae_report(median_seconds=0.10, ssim_median=0.85, taef_peak_gb=0.59 * 1.2)
+
+    regressions = diff_reports(old, new, memory_tolerance=0.10)
+    flagged = [
+        r for r in regressions if r["kind"] == "peak-memory-drift" and r["condition"] == "taef"
+    ]
+    assert len(flagged) == 1, f"expected a peak-memory-drift on taef, got {regressions}"
+
+
+def test_peak_memory_within_tolerance_reports_no_regression() -> None:
+    from scripts.diff_showcase_report import diff_reports
+
+    old = _make_vs_vae_report(median_seconds=0.10, ssim_median=0.85, taef_peak_gb=0.59)
+    new = _make_vs_vae_report(median_seconds=0.10, ssim_median=0.85, taef_peak_gb=0.59 * 1.05)
+
+    regressions = diff_reports(old, new, memory_tolerance=0.10)
+    assert [r for r in regressions if r["kind"] == "peak-memory-drift"] == []
+
+
+def test_peak_memory_drift_flagged_for_live_scenario() -> None:
+    """Live/combined scenarios carry scenario-level peak_memory_gb."""
+    from scripts.diff_showcase_report import diff_reports
+
+    old = _make_live_report(elapsed_s=10.0, peak_memory_gb=10.0)
+    new = _make_live_report(elapsed_s=10.0, peak_memory_gb=12.0)  # 20% up
+
+    regressions = diff_reports(old, new, memory_tolerance=0.10)
+    flagged = [r for r in regressions if r["kind"] == "peak-memory-drift"]
+    assert len(flagged) == 1
+    assert flagged[0]["scenario"] == "live_preview"
+    assert flagged[0]["condition"] == "(scenario)"
+
+
+# --- TeaCache skipped_count floor (combined integration must keep skipping) ---
+
+
+def test_skipped_count_drop_to_zero_flagged_for_combined() -> None:
+    """A TeaCache integration regression that stops skipping steps drops
+    combined.teacache.skipped_count to 0; the differ must flag it."""
+    from scripts.diff_showcase_report import diff_reports
+
+    old = _make_combined_report(skipped_count=1)
+    new = _make_combined_report(skipped_count=0)
+
+    regressions = diff_reports(old, new)
+    flagged = [r for r in regressions if r["kind"] == "skipped-count-drop"]
+    assert len(flagged) == 1, f"expected a skipped-count-drop, got {regressions}"
+    assert flagged[0]["scenario"] == "combined"
+
+
+def test_skipped_count_held_or_increased_reports_no_regression() -> None:
+    from scripts.diff_showcase_report import diff_reports
+
+    old = _make_combined_report(skipped_count=1)
+    for new_count in (1, 2):
+        new = _make_combined_report(skipped_count=new_count)
+        regressions = diff_reports(old, new)
+        assert [r for r in regressions if r["kind"] == "skipped-count-drop"] == []
+
+
+def test_self_diff_with_skewed_peak_memory_finds_regression() -> None:
+    """Integration: perturb the committed report's taef peak memory and verify
+    the differ catches it (proves it inspects the real median_peak_memory_gb)."""
+    from scripts.diff_showcase_report import diff_reports
+
+    report_path = Path(__file__).parent.parent / "_artifacts" / "showcase_report.json"
+    if not report_path.exists():
+        import pytest
+
+        pytest.skip(f"no committed showcase report at {report_path}")
+
+    old = json.loads(report_path.read_text())
+    new = json.loads(report_path.read_text())
+    new["scenarios"]["taef2_vs_vae"]["taef"]["median_peak_memory_gb"] *= 1.5
+    regressions = diff_reports(old, new)
+    flagged = [r for r in regressions if r["kind"] == "peak-memory-drift"]
+    assert flagged, f"expected a peak-memory regression, got {regressions}"
+
+
+def test_self_diff_with_zeroed_skipped_count_finds_regression() -> None:
+    """Integration: zero out the committed report's combined skipped_count and
+    verify the differ flags the TeaCache integration regression."""
+    from scripts.diff_showcase_report import diff_reports
+
+    report_path = Path(__file__).parent.parent / "_artifacts" / "showcase_report.json"
+    if not report_path.exists():
+        import pytest
+
+        pytest.skip(f"no committed showcase report at {report_path}")
+
+    old = json.loads(report_path.read_text())
+    new = json.loads(report_path.read_text())
+    new["scenarios"]["combined"]["teacache"]["skipped_count"] = 0
+    regressions = diff_reports(old, new)
+    flagged = [r for r in regressions if r["kind"] == "skipped-count-drop"]
+    assert flagged, f"expected a skipped-count-drop, got {regressions}"

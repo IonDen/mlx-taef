@@ -34,13 +34,23 @@ def diff_reports(
     *,
     wallclock_tolerance: float = 0.10,
     ssim_tolerance: float = 0.05,
+    memory_tolerance: float = 0.10,
 ) -> list[dict[str, Any]]:
     """Return a list of regression records; empty list means no regression.
 
     Checks (per scenario):
-      - For `taef*_vs_vae`: each known condition's `median_seconds`, plus
-        scenario-level `ssim_median`.
-      - For `live_preview` / `combined`: scenario-level `elapsed_s`.
+      - For `taef*_vs_vae`: each known condition's `median_seconds` and
+        `median_peak_memory_gb`, plus scenario-level `ssim_median`.
+      - For `live_preview` / `combined`: scenario-level `elapsed_s` and
+        `peak_memory_gb`.
+      - For any scenario carrying `teacache.skipped_count` (the `combined`
+        scenario): a floor — a drop below the baseline count is flagged, so a
+        TeaCache integration regression that stops skipping steps cannot pass
+        silently.
+
+    Peak memory is the library's headline win (a few-MB decoder vs the full
+    VAE), so a memory regression is gated with the same drift shape as
+    wall-clock.
     """
     regressions: list[dict[str, Any]] = []
     old_scenarios = old.get("scenarios", {})
@@ -49,7 +59,7 @@ def diff_reports(
     for scenario, new_data in new_scenarios.items():
         old_data = old_scenarios.get(scenario, {})
 
-        # taef*_vs_vae conditions → median_seconds per condition
+        # taef*_vs_vae conditions → median_seconds + median_peak_memory_gb per condition
         for cond in _VS_VAE_CONDITION_KEYS:
             new_cond = new_data.get(cond)
             old_cond = old_data.get(cond)
@@ -57,20 +67,42 @@ def diff_reports(
                 continue
             old_med = old_cond.get("median_seconds")
             new_med = new_cond.get("median_seconds")
-            if old_med is None or new_med is None or old_med <= 0:
-                continue
-            drift = (new_med - old_med) / old_med
-            if drift > wallclock_tolerance:
-                regressions.append(
-                    {
-                        "kind": "wallclock-drift",
-                        "scenario": scenario,
-                        "condition": cond,
-                        "old_seconds": old_med,
-                        "new_seconds": new_med,
-                        "drift_pct": drift * 100,
-                    }
-                )
+            if (
+                isinstance(old_med, (int, float))
+                and isinstance(new_med, (int, float))
+                and old_med > 0
+            ):
+                drift = (new_med - old_med) / old_med
+                if drift > wallclock_tolerance:
+                    regressions.append(
+                        {
+                            "kind": "wallclock-drift",
+                            "scenario": scenario,
+                            "condition": cond,
+                            "old_seconds": old_med,
+                            "new_seconds": new_med,
+                            "drift_pct": drift * 100,
+                        }
+                    )
+            old_mem = old_cond.get("median_peak_memory_gb")
+            new_mem = new_cond.get("median_peak_memory_gb")
+            if (
+                isinstance(old_mem, (int, float))
+                and isinstance(new_mem, (int, float))
+                and old_mem > 0
+            ):
+                mem_drift = (new_mem - old_mem) / old_mem
+                if mem_drift > memory_tolerance:
+                    regressions.append(
+                        {
+                            "kind": "peak-memory-drift",
+                            "scenario": scenario,
+                            "condition": cond,
+                            "old_gb": old_mem,
+                            "new_gb": new_mem,
+                            "drift_pct": mem_drift * 100,
+                        }
+                    )
 
         # Live scenarios → scenario-level elapsed_s
         old_elapsed = old_data.get("elapsed_s")
@@ -92,6 +124,45 @@ def diff_reports(
                         "drift_pct": drift * 100,
                     }
                 )
+
+        # Scenario-level peak_memory_gb (live_preview / combined)
+        old_peak = old_data.get("peak_memory_gb")
+        new_peak = new_data.get("peak_memory_gb")
+        if (
+            isinstance(old_peak, (int, float))
+            and isinstance(new_peak, (int, float))
+            and old_peak > 0
+        ):
+            mem_drift = (new_peak - old_peak) / old_peak
+            if mem_drift > memory_tolerance:
+                regressions.append(
+                    {
+                        "kind": "peak-memory-drift",
+                        "scenario": scenario,
+                        "condition": "(scenario)",
+                        "old_gb": old_peak,
+                        "new_gb": new_peak,
+                        "drift_pct": mem_drift * 100,
+                    }
+                )
+
+        # TeaCache skipped_count floor: a drop below the baseline count means
+        # the integration stopped skipping steps (the combined scenario).
+        old_skipped = (old_data.get("teacache") or {}).get("skipped_count")
+        new_skipped = (new_data.get("teacache") or {}).get("skipped_count")
+        if (
+            isinstance(old_skipped, int)
+            and isinstance(new_skipped, int)
+            and new_skipped < old_skipped
+        ):
+            regressions.append(
+                {
+                    "kind": "skipped-count-drop",
+                    "scenario": scenario,
+                    "old_skipped": old_skipped,
+                    "new_skipped": new_skipped,
+                }
+            )
 
         # SSIM at scenario level (taef*_vs_vae only — live scenarios have no SSIM)
         old_ssim = old_data.get("ssim_median")
@@ -121,6 +192,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("new", type=Path)
     parser.add_argument("--wallclock-tolerance", type=float, default=0.10)
     parser.add_argument("--ssim-tolerance", type=float, default=0.05)
+    parser.add_argument("--memory-tolerance", type=float, default=0.10)
     args = parser.parse_args(argv)
 
     old = json.loads(args.old.read_text())
@@ -131,6 +203,7 @@ def main(argv: list[str] | None = None) -> int:
         new,
         wallclock_tolerance=args.wallclock_tolerance,
         ssim_tolerance=args.ssim_tolerance,
+        memory_tolerance=args.memory_tolerance,
     )
     if not regressions:
         print("No regressions detected.")
