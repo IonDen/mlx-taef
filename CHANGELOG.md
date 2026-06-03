@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] — 2026-06-03
+
+Internal hardening only. No change to the library API, runtime behavior, or the
+published wheel; every change is in the test suite and developer tooling
+(`scripts/`), neither of which ships in the package.
+
+### Changed
+- The showcase regression gate (`scripts/diff_showcase_report.py`) now also guards
+  the headline peak-memory metric and the TeaCache `skipped_count`, and flags a
+  baseline metric or block disappearing from a new report rather than only a worse
+  number (new `--memory-tolerance`, default 0.10). Previously a memory regression or
+  a dropped skip count passed the gate silently.
+
+### Tests
+- The error tests drive real bad inputs through each package error's raise site
+  (`ConversionError`, `SchemaVersionError`, `FixtureLatentMissingError`) instead of
+  only asserting the class hierarchy, and the bench harness's `_resolve_cap_gb`
+  unknown-condition guard gained the raise test it was missing. Each new
+  raise-condition test was mutation-verified.
+
 ## [0.2.3] — 2026-05-29
 
 ### Added
