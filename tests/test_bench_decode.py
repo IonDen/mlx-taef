@@ -144,6 +144,17 @@ def test_orchestrator_dispatch_per_condition_cap_split() -> None:
     assert _resolve_cap_gb(condition="vanilla_vae", flux_variant="flux2-klein-base-4b") == 12
 
 
+def test_resolve_cap_gb_raises_on_unknown_condition() -> None:
+    """The success paths are covered above; the unknown-condition guard at the
+    bottom of _resolve_cap_gb must raise TaefError, not fall through / return None."""
+    from scripts.bench_decode import _resolve_cap_gb
+
+    from mlx_taef.errors import TaefError
+
+    with pytest.raises(TaefError, match="unknown condition"):
+        _resolve_cap_gb(condition="totally-bogus")
+
+
 def test_orchestrator_records_failed_rep_and_continues() -> None:
     """When a worker subprocess fails, the rep is recorded with the
     error and the orchestrator moves on."""
