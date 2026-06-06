@@ -9,6 +9,7 @@ from mlx_taef.errors import (
     MlxTeacacheNotInstalledError,
     SchemaVersionError,
     TaefError,
+    UnknownKernelError,
 )
 from mlx_taef.variants import get_memory_cap_hint
 
@@ -23,6 +24,7 @@ __all__ = [
     "SchemaVersionError",
     "Taef",
     "TaefError",
+    "UnknownKernelError",
     "get_memory_cap_hint",
 ]
 
