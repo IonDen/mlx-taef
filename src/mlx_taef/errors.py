@@ -5,7 +5,8 @@ Hierarchy:
     ├── SchemaVersionError                 unknown JSON schema_version
     ├── ConversionError                    HF->MLX conversion dropped/mis-shaped a param
     ├── MlxTeacacheNotInstalledError       (+ ImportError) optional dep missing
-    └── FixtureLatentMissingError          (+ FileNotFoundError) showcase fixture absent
+    ├── FixtureLatentMissingError          (+ FileNotFoundError) showcase fixture absent
+    └── UnknownKernelError                 (+ KeyError) name not in the kernel registry
 """
 
 from __future__ import annotations
@@ -53,3 +54,7 @@ class MlxTeacacheNotInstalledError(TaefError, ImportError):
 
 class FixtureLatentMissingError(TaefError, FileNotFoundError):
     """Raised when a showcase scenario's fixture latent file is missing."""
+
+
+class UnknownKernelError(TaefError, KeyError):
+    """Raised when a kernel name is not in the registry."""

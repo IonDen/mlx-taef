@@ -137,3 +137,10 @@ def test_mlx_teacache_not_installed_default_message_mentions_install_path() -> N
     assert "pip install" in msg
     assert "uv add" in msg
     assert "mlx-teacache" in msg
+
+
+def test_unknown_kernel_error_hierarchy():
+    from mlx_taef.errors import TaefError, UnknownKernelError
+
+    assert issubclass(UnknownKernelError, TaefError)
+    assert issubclass(UnknownKernelError, KeyError)
