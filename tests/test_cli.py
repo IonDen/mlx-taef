@@ -55,3 +55,21 @@ def test_cli_bench_prints_decode_time(capsys: pytest.CaptureFixture[str]) -> Non
     assert rc == 0
     captured = capsys.readouterr()
     assert "decode median:" in captured.out
+
+
+def test_cli_sources_choices_from_registry_not_all_variants() -> None:
+    """Migration target: choices come from KERNELS; the legacy ALL_VARIANTS import is gone."""
+    import mlx_taef.cli as c
+
+    assert not hasattr(c, "ALL_VARIANTS")
+    assert hasattr(c, "KERNELS")
+
+
+def test_cli_convert_variant_choices_include_all_kernels(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit):
+        main(["convert", "--variant", "not-a-variant", "--dst", "/tmp/x.safetensors"])
+    err = capsys.readouterr().err
+    for name in ("taesd", "taesdxl", "taef1", "taef2"):
+        assert name in err

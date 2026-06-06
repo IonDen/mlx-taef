@@ -7,7 +7,7 @@ from pathlib import Path
 
 import mlx.core as mx
 
-from mlx_taef.variants import ALL_VARIANTS
+from mlx_taef.kernels import KERNELS
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    variant_names = [v.name for v in ALL_VARIANTS]
+    variant_names = sorted(KERNELS)
 
     p_convert = sub.add_parser("convert", help="Download upstream weights and convert to MLX")
     p_convert.add_argument("--variant", required=True, choices=variant_names)
@@ -45,8 +45,9 @@ def main(argv: list[str] | None = None) -> int:
 
 def _cmd_convert(args: argparse.Namespace) -> int:  # pragma: no cover
     from mlx_taef.convert import convert_hf_decoder_to_mlx, convert_hf_encoder_to_mlx
+    from mlx_taef.variants import VARIANTS
 
-    config = next(v for v in ALL_VARIANTS if v.name == args.variant)
+    config = VARIANTS[args.variant]
     if args.role == "encoder":
         convert_hf_encoder_to_mlx(out_path=args.dst, config=config)
     else:
@@ -69,11 +70,10 @@ def _cmd_bench(args: argparse.Namespace) -> int:  # pragma: no cover
 
     cls_by_name = {"taesd": TAESD, "taesdxl": TAESDXL, "taef1": TAEF1, "taef2": TAEF2}
     cls = cls_by_name[args.variant]
-    config = next(v for v in ALL_VARIANTS if v.name == args.variant)
 
     model = cls.from_pretrained(include_encoder=False)
     # 1024x1024 image with 8x downsample = 128x128 latent
-    latent = mx.random.normal((1, 128, 128, config.latent_channels)).astype(mx.float16)
+    latent = mx.random.normal((1, 128, 128, cls._kernel.latent.channels)).astype(mx.float16)
     mx.eval(latent)
 
     # Warm-up
