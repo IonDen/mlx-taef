@@ -132,30 +132,14 @@ def make_decoder(config: TaesdVariantConfig) -> nn.Sequential:  # type: ignore[n
     Returns:
         `nn.Sequential` decoder ready for weight loading.
     """
-    mb = config.use_midblock_gn
-    layers: list[nn.Module] = [  # type: ignore[name-defined]
-        Clamp(),
-        make_conv(config.latent_channels, 64),
-        nn.ReLU(),  # type: ignore[attr-defined]
-        Block(64, 64, use_midblock_gn=mb),
-        Block(64, 64, use_midblock_gn=mb),
-        Block(64, 64, use_midblock_gn=mb),
-        nn.Upsample(scale_factor=2, mode="nearest"),  # type: ignore[attr-defined]
-        make_conv(64, 64, bias=False),
-        Block(64, 64),
-        Block(64, 64),
-        Block(64, 64),
-        nn.Upsample(scale_factor=2, mode="nearest"),  # type: ignore[attr-defined]
-        make_conv(64, 64, bias=False),
-        Block(64, 64),
-        Block(64, 64),
-        Block(64, 64),
-        nn.Upsample(scale_factor=2, mode="nearest"),  # type: ignore[attr-defined]
-        make_conv(64, 64, bias=False),
-        Block(64, 64),
-        make_conv(64, 3),
-    ]
-    return nn.Sequential(*layers)  # type: ignore[attr-defined]
+    from mlx_taef.kernels._arch import build_arch
+
+    return build_arch(
+        "taesd2d",
+        role="decoder",
+        latent_channels=config.latent_channels,
+        midblock_gn=config.use_midblock_gn,
+    )
 
 
 def make_encoder(config: TaesdVariantConfig) -> nn.Sequential:  # type: ignore[name-defined]
@@ -173,25 +157,14 @@ def make_encoder(config: TaesdVariantConfig) -> nn.Sequential:  # type: ignore[n
     Returns:
         `nn.Sequential` encoder ready for weight loading.
     """
-    mb = config.use_midblock_gn
-    layers: list[nn.Module] = [  # type: ignore[name-defined]
-        make_conv(3, 64),
-        Block(64, 64),
-        make_conv(64, 64, stride=2, bias=False),
-        Block(64, 64),
-        Block(64, 64),
-        Block(64, 64),
-        make_conv(64, 64, stride=2, bias=False),
-        Block(64, 64),
-        Block(64, 64),
-        Block(64, 64),
-        make_conv(64, 64, stride=2, bias=False),
-        Block(64, 64, use_midblock_gn=mb),
-        Block(64, 64, use_midblock_gn=mb),
-        Block(64, 64, use_midblock_gn=mb),
-        make_conv(64, config.latent_channels),
-    ]
-    return nn.Sequential(*layers)  # type: ignore[attr-defined]
+    from mlx_taef.kernels._arch import build_arch
+
+    return build_arch(
+        "taesd2d",
+        role="encoder",
+        latent_channels=config.latent_channels,
+        midblock_gn=config.use_midblock_gn,
+    )
 
 
 __all__ = ["Block", "Clamp", "make_conv", "make_decoder", "make_encoder"]
