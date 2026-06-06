@@ -211,7 +211,7 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
         if idx % self.every != 0:
             return  # pragma: no cover
 
-        if self.model._config.name == "taef2":
+        if self.model._kernel.name == "taef2":
             unpacked = unpack_flux2_latent(
                 latents,
                 latent_height=self.latent_height,
