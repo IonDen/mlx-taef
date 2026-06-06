@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-06-06
+
+Internal refactor. No change to the public API or to decoded output: `TAESD`,
+`TAESDXL`, `TAEF1`, `TAEF2`, `from_pretrained` / `from_pretrained_local`,
+`get_memory_cap_hint`, and imports from `mlx_taef.variants` all behave as before. The
+existing parity and SSIM fixtures gate the change bit-for-bit.
+
+### Changed
+- Each variant is now a composable model **kernel** (`mlx_taef.kernels`): a frozen
+  `ModelKernel` built from an `ArchSpec`, a `ConversionStrategy` (which owns the whole
+  HF→MLX conversion), a `LatentSpec`, a `WeightSource`, and an optional `MfluxBinding`.
+  Adding a model is now a self-contained kernel entry instead of edits spread across
+  `variants.py`, `api.py`, and `convert.py`. `variants.py` remains as a back-compat shim.
+- The converted-weights cache is keyed on the weight source (repo, filename, role)
+  rather than the variant name, so two models that share upstream weights share one cache
+  entry. Caches written by 0.2.x are ignored and rebuilt once on first run after upgrade.
+
+### Fixed
+- The mflux `LivePreviewCallback` FLUX.1 path. mflux hands the callback a packed
+  `(B, N, 64)` latent during the denoise loop; the previous code expected an already
+  unpacked `(B, 16, H, W)` and let the packed latent fall through to the decoder, so
+  FLUX.1 live previews came out wrong. The callback now unpacks per model via the kernel
+  binding, reproducing mflux's own `unpack_latents`, with a test that pins the result
+  against that function.
+
 ## [0.2.4] — 2026-06-03
 
 Internal hardening only. No change to the library API, runtime behavior, or the
