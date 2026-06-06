@@ -47,8 +47,11 @@ def unpack_flux2_latent(
     from mlx_taef.kernels.flux import unpack_flux2_latent as _kernel_unpack
 
     ctx = UnpackContext(
-        latent_height=latent_height, latent_width=latent_width,
-        bn_mean=bn_mean, bn_var=bn_var, bn_eps=bn_eps,
+        latent_height=latent_height,
+        latent_width=latent_width,
+        bn_mean=bn_mean,
+        bn_var=bn_var,
+        bn_eps=bn_eps,
     )
     return _kernel_unpack(packed, ctx)
 
