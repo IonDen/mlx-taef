@@ -107,6 +107,7 @@ exclude = [
   ".github/",
   ".hypothesis/",
   ".pre-commit-config.yaml",
+  "docs/superpowers/",
   "notes/",
   "tests/_third_party/",
   "tests/converted/",

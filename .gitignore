@@ -16,4 +16,6 @@ tests/reference/*.pt
 
 # hatch-vcs auto-generated
 src/mlx_taef/_version.py
-  docs/superpowers/
+
+# working-state docs (specs/plans/reviews) live at the workspace root, never here
+docs/superpowers/
