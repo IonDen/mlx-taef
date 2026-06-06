@@ -52,8 +52,11 @@ def test_flux1_callback_end_to_end_writes_preview(monkeypatch, tmp_path):
 
     lh = lw = 8
     cb = LivePreviewCallback(
-        variant="taef1", every=1, save_to=tmp_path / "p.png",
-        latent_height=lh, latent_width=lw,
+        variant="taef1",
+        every=1,
+        save_to=tmp_path / "p.png",
+        latent_height=lh,
+        latent_width=lw,
     )
     packed = mx.random.normal((1, lh * lw, 64))
     cb.call_in_loop(t=0, seed=0, prompt="x", latents=packed, config=None, time_steps=None)
