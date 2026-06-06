@@ -37,52 +37,20 @@ def unpack_flux2_latent(
     bn_var: mx.array | None = None,
     bn_eps: float = 1e-4,
 ) -> mx.array:
-    """Unpack mflux's packed FLUX.2 latent into NHWC `(B, lH*2, lW*2, 32)` for TAEF2.
+    """Back-compat keyword API for the FLUX.2 unpack; delegates to the kernel unpack.
 
-    Mirrors mflux's `Flux2VAE.decode_packed_latents` preprocessing:
-    1. BN denormalize: latents = packed * sqrt(var + eps) + mean  (128-channel stats)
-    2. Unpatchify: (B, 128, lH, lW) -> (B, 32, lH*2, lW*2)
-    3. NCHW -> NHWC transpose.
-
-    Without `bn_mean`/`bn_var`, the helper assumes identity BN (correct shape,
-    slight value offset). Preview structure will still be visible but colors
-    may shift. For exact preview, pass the BN stats from the loaded Flux2VAE.
-
-    Args:
-        packed: in-loop latent from mflux, shape (B, lH*lW, 128).
-        latent_height: latent spatial height (image_height // 16).
-        latent_width: latent spatial width.
-        bn_mean: optional BN running_mean for exact value recovery (128 elements).
-        bn_var: optional BN running_var for exact value recovery (128 elements).
-        bn_eps: BN epsilon. Matches mflux's Flux2BatchNormStats default of 1e-4,
-            verified at mflux 0.17.5.
-
-    Returns:
-        NHWC tensor of shape (B, latent_height*2, latent_width*2, 32) — ready
-        for `TAEF2.decode()`.
+    The canonical implementation now lives in `mlx_taef.kernels.flux.unpack_flux2_latent`
+    with the `(latent, UnpackContext)` signature; this wrapper preserves the original
+    keyword call shape for existing callers.
     """
-    b, _, c = packed.shape
-    if c != 128:
-        raise ValueError(f"Expected 128-channel packed latent, got {c}")
+    from mlx_taef.kernels import UnpackContext
+    from mlx_taef.kernels.flux import unpack_flux2_latent as _kernel_unpack
 
-    # Step 1: reshape and transpose to NCHW: (B, lH*lW, 128) -> (B, lH, lW, 128) -> (B, 128, lH, lW)
-    latents = packed.reshape(b, latent_height, latent_width, c).transpose(0, 3, 1, 2)
-
-    # Step 2: BN denormalize
-    if bn_mean is not None and bn_var is not None:
-        mean = bn_mean.reshape(1, -1, 1, 1)
-        std = mx.sqrt(bn_var.reshape(1, -1, 1, 1) + bn_eps)
-        latents = latents * std + mean
-    # else: identity BN (mean=0, var=1)
-
-    # Step 3: Unpatchify (B, 128, lH, lW) -> (B, 32, lH*2, lW*2)
-    batch, _, h, w = latents.shape
-    latents = latents.reshape(batch, 32, 2, 2, h, w)
-    latents = latents.transpose(0, 1, 4, 2, 5, 3)
-    latents = latents.reshape(batch, 32, h * 2, w * 2)
-
-    # Step 4: NCHW -> NHWC for TAEF2
-    return latents.transpose(0, 2, 3, 1)
+    ctx = UnpackContext(
+        latent_height=latent_height, latent_width=latent_width,
+        bn_mean=bn_mean, bn_var=bn_var, bn_eps=bn_eps,
+    )
+    return _kernel_unpack(packed, ctx)
 
 
 def _try_extract_bn(flux: object) -> tuple[mx.array | None, mx.array | None]:
@@ -211,19 +179,18 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
         if idx % self.every != 0:
             return  # pragma: no cover
 
-        if self.model._kernel.name == "taef2":
-            unpacked = unpack_flux2_latent(
-                latents,
-                latent_height=self.latent_height,
-                latent_width=self.latent_width,
-                bn_mean=self.bn_mean,
-                bn_var=self.bn_var,
-            )
-        else:  # pragma: no cover
-            # TAEF1 / FLUX.1: latents come in NCHW (B, 16, H, W). Transpose to NHWC.
-            unpacked = mx.transpose(latents, (0, 2, 3, 1)) if latents.shape[1] == 16 else latents
+        from mlx_taef.kernels import UnpackContext
 
-        img = self.model.decode_image(unpacked)
+        binding = self.model._kernel.integration
+        if binding is None:
+            raise ValueError(f"kernel {self.model._kernel.name!r} has no mflux binding")
+        ctx = UnpackContext(
+            latent_height=self.latent_height,
+            latent_width=self.latent_width,
+            bn_mean=self.bn_mean,
+            bn_var=self.bn_var,
+        )
+        img = self.model.decode_image(binding.unpack(latents, ctx))
         target = self._resolve_target(idx)
         self._save_image(img[0], target)
         self.saved_paths.append(target)
