@@ -1,41 +1,21 @@
-"""Variant configurations for the TAESD-family of tiny autoencoders.
+"""Back-compat shim. The source of truth moved to `mlx_taef.kernels`.
 
-Field reference:
-- `key_format`: "upstream" means the HF safetensors uses upstream Sequential keys
-  like "0.weight", "1.weight"; "diffusers" means the HF safetensors uses Diffusers
-  VAE keys like "encoder.layers.0.weight" and requires a +1 decoder index offset.
-- `arch_variant`: None | "flux_2" | "f32". "flux_2" enables midblock_gn pool
-  branches in three blocks of encoder and decoder. "f32" is reserved for
-  TAESANA (future).
-- `latent_magnitude`, `latent_shift`: from upstream TAESD.scale_latents /
-  unscale_latents.
-- `hf_filename` (Diffusers single-file format) vs `hf_decoder_filename` /
-  `hf_encoder_filename` (upstream two-file format) — depends on the actual
-  repo layout for each variant.
+Reconstructs the legacy `TaesdVariantConfig` view + `*_CONFIG` constants, `ALL_VARIANTS`,
+`VARIANTS`, and `get_memory_cap_hint` from the kernel registry so existing imports keep
+working. New code should import from `mlx_taef.kernels`.
 """
 
 import logging
 from dataclasses import dataclass
+
+from mlx_taef.kernels import KERNELS, MIDBLOCK_GN, ModelKernel
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class TaesdVariantConfig:
-    """Configuration for a single TAESD-family variant.
-
-    Attributes:
-        name: short identifier like "taef2".
-        latent_channels: latent channel count (4 for SD1/SDXL, 16 for FLUX.1, 32 for FLUX.2 Klein).
-        arch_variant: None for the standard arch, "flux_2" for TAEF2's midblock_gn, "f32" for TAESANA.
-        key_format: "upstream" (Sequential keys) or "diffusers" (requires remap).
-        hf_repo: e.g. "madebyollin/taef2".
-        hf_filename: filename within hf_repo when key_format == "diffusers" (single file).
-        hf_decoder_filename: decoder filename when key_format == "upstream".
-        hf_encoder_filename: encoder filename when key_format == "upstream".
-        latent_magnitude: scale factor for scale_latents/unscale_latents.
-        latent_shift: shift factor for scale_latents/unscale_latents.
-    """
+    """Legacy variant config view (derived from a ModelKernel)."""
 
     name: str
     latent_channels: int
@@ -55,51 +35,27 @@ class TaesdVariantConfig:
         return self.arch_variant == "flux_2"
 
 
-TAESD_CONFIG = TaesdVariantConfig(
-    name="taesd",
-    latent_channels=4,
-    arch_variant=None,
-    key_format="upstream",
-    hf_repo="madebyollin/taesd",
-    hf_filename=None,
-    hf_decoder_filename="taesd_decoder.safetensors",
-    hf_encoder_filename="taesd_encoder.safetensors",
-)
+def _from_kernel(k: ModelKernel) -> TaesdVariantConfig:
+    is_diffusers = k.source.filename is not None
+    return TaesdVariantConfig(
+        name=k.name,
+        latent_channels=k.latent.channels,
+        arch_variant="flux_2" if MIDBLOCK_GN.get(k.name, False) else None,
+        key_format="diffusers" if is_diffusers else "upstream",
+        hf_repo=k.source.repo,
+        hf_filename=k.source.filename,
+        hf_decoder_filename=k.source.decoder_filename,
+        hf_encoder_filename=k.source.encoder_filename,
+        latent_magnitude=k.latent.magnitude,
+        latent_shift=k.latent.shift,
+        memory_cap_hint_gb=k.memory_cap_hint_gb,
+    )
 
-TAESDXL_CONFIG = TaesdVariantConfig(
-    name="taesdxl",
-    latent_channels=4,
-    arch_variant=None,
-    key_format="upstream",
-    hf_repo="madebyollin/taesdxl",
-    hf_filename=None,
-    hf_decoder_filename="taesdxl_decoder.safetensors",
-    hf_encoder_filename="taesdxl_encoder.safetensors",
-)
 
-TAEF1_CONFIG = TaesdVariantConfig(
-    name="taef1",
-    latent_channels=16,
-    arch_variant=None,
-    key_format="diffusers",
-    hf_repo="madebyollin/taef1",
-    hf_filename="diffusion_pytorch_model.safetensors",
-    hf_decoder_filename=None,
-    hf_encoder_filename=None,
-    memory_cap_hint_gb=1,
-)
-
-TAEF2_CONFIG = TaesdVariantConfig(
-    name="taef2",
-    latent_channels=32,
-    arch_variant="flux_2",
-    key_format="diffusers",
-    hf_repo="madebyollin/taef2",
-    hf_filename="taef2.safetensors",
-    hf_decoder_filename=None,
-    hf_encoder_filename=None,
-    memory_cap_hint_gb=2,
-)
+TAESD_CONFIG = _from_kernel(KERNELS["taesd"])
+TAESDXL_CONFIG = _from_kernel(KERNELS["taesdxl"])
+TAEF1_CONFIG = _from_kernel(KERNELS["taef1"])
+TAEF2_CONFIG = _from_kernel(KERNELS["taef2"])
 
 ALL_VARIANTS: tuple[TaesdVariantConfig, ...] = (
     TAESD_CONFIG,
@@ -107,7 +63,6 @@ ALL_VARIANTS: tuple[TaesdVariantConfig, ...] = (
     TAEF1_CONFIG,
     TAEF2_CONFIG,
 )
-
 VARIANTS: dict[str, TaesdVariantConfig] = {v.name: v for v in ALL_VARIANTS}
 
 
