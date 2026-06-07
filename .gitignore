@@ -17,8 +17,9 @@ tests/reference/*.pt
 # hatch-vcs auto-generated
 src/mlx_taef/_version.py
 
-# working-state docs (specs/plans/reviews) live at the workspace root, never here
+# working-state (specs/plans/reviews + scratch notes) lives at the workspace root, never here
 docs/superpowers/
+notes/
 
 # per-repo Claude guidance — local-only working state, never committed
 /CLAUDE.md
