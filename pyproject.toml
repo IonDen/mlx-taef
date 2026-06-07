@@ -108,7 +108,6 @@ exclude = [
   ".hypothesis/",
   ".pre-commit-config.yaml",
   "docs/superpowers/",
-  "notes/",
   "tests/_third_party/",
   "tests/converted/",
   "tests/reference/",
@@ -152,7 +151,6 @@ convention = "google"
 "tests/**/*.py" = ["D", "ANN", "S101"]
 "tests/_third_party/**/*.py" = ["ALL"]
 "examples/**/*.py" = ["D", "ANN"]
-"notes/**/*.py" = ["D", "ANN", "RUF", "RET"]
 
 [tool.ruff.format]
 docstring-code-format = true
