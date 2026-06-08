@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] — 2026-06-08
+
+Hardening patch. No public API shape changes; the one new symbol is `MfluxNotInstalledError`.
+The existing parity and SSIM fixtures gate the change bit-for-bit.
+
+### Added
+- `MfluxNotInstalledError` — raised when `mlx_taef.integrations.mflux` is imported
+  without mflux installed. Subclasses both `TaefError` and `ImportError`, so
+  `except ImportError` keeps working and `except TaefError` now catches it too.
+
+### Changed
+- `decode()` / `decode_image()` raise `TaefError` when called before decoder weights
+  are loaded (for example on a directly constructed `TAEF2()`), and `encode()` raises
+  when the model was loaded without an encoder — instead of running a random-init module
+  and returning garbage. Normal `from_pretrained` / `from_pretrained_local` usage is
+  unaffected.
+- A latent with the wrong channel count in `decode()`, or a non-RGB image in `encode()`,
+  now raises `ValueError` naming the variant and the expected vs actual channel count,
+  rather than an opaque MLX conv shape error.
+
+### Fixed
+- The error-class docstring no longer references an exception symbol that never existed.
+  Every exception exported from the package root is now either raised by importable code
+  or documented as raised by the bundled showcase tooling.
+
 ## [0.3.0] — 2026-06-06
 
 Internal refactor. No change to the public API or to decoded output: `TAESD`,
