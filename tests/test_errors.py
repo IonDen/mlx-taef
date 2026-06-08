@@ -12,15 +12,10 @@ structure + default-message companion only; when a real raise site lands, a
 condition test belongs here next to the others.
 """
 
-from __future__ import annotations
-
 import json
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 # --- structure: the hierarchy must hold (a base-class change reds these) ---
 

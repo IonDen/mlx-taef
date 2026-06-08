@@ -4,8 +4,6 @@ Heavy MLX paths are mocked at the network boundary. Output-path logic and
 sha256-sidecar generation run for real against tmp_path.
 """
 
-from __future__ import annotations
-
 import hashlib
 from pathlib import Path
 from unittest.mock import patch

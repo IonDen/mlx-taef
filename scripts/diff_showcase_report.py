@@ -19,8 +19,6 @@ Usage:
         _artifacts/showcase_report.json new.json
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 import sys

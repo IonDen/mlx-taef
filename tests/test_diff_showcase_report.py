@@ -8,8 +8,6 @@ diverged from real output — the regression bug it masked is the reason
 this file was rewritten.
 """
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 from typing import Any

@@ -14,8 +14,6 @@ Usage:
     uv run python scripts/_capture_latent.py --variant flux2-klein-base-4b
 """
 
-from __future__ import annotations
-
 import argparse
 import hashlib
 import sys

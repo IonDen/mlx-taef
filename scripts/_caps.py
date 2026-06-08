@@ -7,8 +7,6 @@ variant `memory_cap_hint_gb` from `mlx_taef.variants`; full-VAE workers
 use this constant.
 """
 
-from __future__ import annotations
-
 # Per-flux-variant cap for the full-VAE baseline workers.
 # Klein-base-4b full VAE peaks at ~9.6 GB on M1 Max; 12 GB gives headroom.
 # Flux.1-dev VAE is smaller (~4-5 GB observed); 6 GB is adequate.

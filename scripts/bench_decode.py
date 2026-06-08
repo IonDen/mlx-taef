@@ -10,8 +10,6 @@ Sentinel contract (deliberate tightening of mlx-teacache template):
 - Missing sentinel raises TaefError.
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 import statistics

@@ -4,8 +4,6 @@ MLX-heavy paths mocked at the network/model-load boundary. Sentinel
 parsing, JSON schema, dispatch table run for real.
 """
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 from unittest.mock import patch
