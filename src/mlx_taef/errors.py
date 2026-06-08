@@ -13,6 +13,7 @@ SchemaVersionError and FixtureLatentMissingError are raised only by the bundled
 showcase tooling (`scripts/run_showcase.py`), not by importable package code.
 """
 
+
 class TaefError(Exception):
     """Base for all mlx-taef package-rooted errors."""
 

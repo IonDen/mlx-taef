@@ -77,7 +77,9 @@ def test_cli_convert_variant_choices_include_all_kernels(
         assert name in err
 
 
-def test_cli_convert_routes_role_to_correct_converter(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_cli_convert_routes_role_to_correct_converter(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Offline: fake the converters and verify --role encoder/decoder dispatch is correct."""
     from mlx_taef.variants import VARIANTS
 
