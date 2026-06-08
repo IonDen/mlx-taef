@@ -120,3 +120,15 @@ def test_missing_latent_raises_fixture_latent_missing(tmp_path: Path) -> None:
     missing = tmp_path / "does_not_exist.safetensors"
     with pytest.raises(FixtureLatentMissingError):
         _check_latent_sha(missing)
+
+
+def test_import_apply_teacache_raises_package_error_when_missing(monkeypatch) -> None:
+    import sys
+
+    from mlx_taef.errors import MlxTeacacheNotInstalledError
+
+    monkeypatch.setitem(sys.modules, "mlx_teacache", None)  # forces ImportError
+    from scripts.run_showcase import _import_apply_teacache
+
+    with pytest.raises(MlxTeacacheNotInstalledError):
+        _import_apply_teacache()

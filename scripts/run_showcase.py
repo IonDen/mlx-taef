@@ -41,12 +41,25 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from mlx_taef.errors import FixtureLatentMissingError, SchemaVersionError  # noqa: E402
+from mlx_taef.errors import (  # noqa: E402
+    FixtureLatentMissingError,
+    MlxTeacacheNotInstalledError,
+    SchemaVersionError,
+)
 
 logger = logging.getLogger("mlx_taef.showcase")
 
 
 SCHEMA_VERSION = 1
+
+
+def _import_apply_teacache() -> Any:
+    """Import mflux-teacache's apply_teacache, or raise the package-rooted error."""
+    try:
+        from mlx_teacache import apply_teacache
+    except ImportError as e:
+        raise MlxTeacacheNotInstalledError() from e
+    return apply_teacache
 
 
 def _build_argparser() -> argparse.ArgumentParser:
@@ -238,8 +251,7 @@ def _live_generation(
     teacache_stats: dict[str, Any] | None = None
     handle = None
     if with_teacache:
-        from mlx_teacache import apply_teacache
-
+        apply_teacache = _import_apply_teacache()
         handle = apply_teacache(flux)
 
     from mlx_taef.integrations.mflux import LivePreviewCallback

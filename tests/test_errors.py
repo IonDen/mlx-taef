@@ -69,6 +69,7 @@ def test_errors_reexported_from_package_root_by_identity() -> None:
     assert mlx_taef.ConversionError is errors.ConversionError
     assert mlx_taef.MlxTeacacheNotInstalledError is errors.MlxTeacacheNotInstalledError
     assert mlx_taef.FixtureLatentMissingError is errors.FixtureLatentMissingError
+    assert mlx_taef.MfluxNotInstalledError is errors.MfluxNotInstalledError
 
 
 # --- raise conditions: a real bad input drives the real raise site ---
@@ -144,3 +145,30 @@ def test_unknown_kernel_error_hierarchy():
 
     assert issubclass(UnknownKernelError, TaefError)
     assert issubclass(UnknownKernelError, KeyError)
+
+
+def test_mflux_not_installed_error_is_taef_and_import_error() -> None:
+    from mlx_taef.errors import MfluxNotInstalledError, TaefError
+
+    assert issubclass(MfluxNotInstalledError, TaefError)
+    assert issubclass(MfluxNotInstalledError, ImportError)
+    assert "mflux" in str(MfluxNotInstalledError())
+
+
+def test_mflux_not_installed_error_exported_from_root() -> None:
+    import mlx_taef
+    from mlx_taef import errors
+
+    assert "MfluxNotInstalledError" in mlx_taef.__all__
+    assert mlx_taef.MfluxNotInstalledError is errors.MfluxNotInstalledError
+
+
+def test_no_docstring_references_a_nonexistent_exception() -> None:
+    import mlx_taef.errors as errmod
+
+    blob = errmod.__doc__ or ""
+    for name in dir(errmod):
+        obj = getattr(errmod, name)
+        if isinstance(obj, type):
+            blob += obj.__doc__ or ""
+    assert "TaefMfluxNotInstalledError" not in blob
