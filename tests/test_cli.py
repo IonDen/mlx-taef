@@ -73,3 +73,27 @@ def test_cli_convert_variant_choices_include_all_kernels(
     err = capsys.readouterr().err
     for name in ("taesd", "taesdxl", "taef1", "taef2"):
         assert name in err
+
+
+def test_cli_convert_routes_role_to_correct_converter(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Offline: fake the converters and verify --role encoder/decoder dispatch is correct."""
+    from mlx_taef.variants import VARIANTS
+
+    calls: list[tuple[str, Path, object]] = []
+
+    def fake_enc(*, out_path: Path, config: object) -> None:
+        calls.append(("encoder", out_path, config))
+
+    def fake_dec(*, out_path: Path, config: object) -> None:
+        calls.append(("decoder", out_path, config))
+
+    monkeypatch.setattr("mlx_taef.convert.convert_hf_encoder_to_mlx", fake_enc)
+    monkeypatch.setattr("mlx_taef.convert.convert_hf_decoder_to_mlx", fake_dec)
+
+    out = tmp_path / "out.safetensors"
+    assert main(["convert", "--variant", "taef1", "--role", "encoder", "--dst", str(out)]) == 0
+    assert calls == [("encoder", out, VARIANTS["taef1"])]
+
+    calls.clear()
+    assert main(["convert", "--variant", "taef1", "--role", "decoder", "--dst", str(out)]) == 0
+    assert calls == [("decoder", out, VARIANTS["taef1"])]

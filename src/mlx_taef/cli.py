@@ -34,7 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     p_bench.add_argument("--variant", default="taef2", choices=variant_names)
 
     args = parser.parse_args(argv)
-    if args.cmd == "convert":  # pragma: no cover
+    if args.cmd == "convert":
         return _cmd_convert(args)
     if args.cmd == "info":
         return _cmd_info(args)
@@ -43,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     return 1  # pragma: no cover
 
 
-def _cmd_convert(args: argparse.Namespace) -> int:  # pragma: no cover
+def _cmd_convert(args: argparse.Namespace) -> int:
     from mlx_taef.convert import convert_hf_decoder_to_mlx, convert_hf_encoder_to_mlx
     from mlx_taef.variants import VARIANTS
 

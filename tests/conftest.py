@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+pytest_plugins = ["pytester"]
+
 
 # Install MLX memory caps at module-import time (NOT pytest_configure) so
 # the cap lands before pytest's collection imports any worker module.
