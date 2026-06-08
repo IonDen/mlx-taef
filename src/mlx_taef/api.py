@@ -108,6 +108,13 @@ class Taef(nn.Module):  # type: ignore[misc,name-defined]
                 "decode() called before decoder weights were loaded. Build the model "
                 "with from_pretrained() or from_pretrained_local(decoder_path=...)."
             )
+        expected = self._kernel.latent.channels
+        actual = latents.shape[-1]
+        if actual != expected:
+            raise ValueError(
+                f"{self._kernel.name}.decode expects latents with {expected} channels "
+                f"(NHWC, channel-last), got {actual}. Shape: {tuple(latents.shape)}."
+            )
         return mx.clip(self.decoder(latents), 0.0, 1.0)
 
     def decode_image(self, latents: mx.array) -> mx.array:
@@ -121,6 +128,12 @@ class Taef(nn.Module):  # type: ignore[misc,name-defined]
                 "encode() called on a model loaded without an encoder. Load with "
                 "include_encoder=True (from_pretrained) or pass encoder_path= to "
                 "from_pretrained_local()."
+            )
+        actual = image.shape[-1]
+        if actual != 3:
+            raise ValueError(
+                f"{self._kernel.name}.encode expects an RGB image with 3 channels "
+                f"(NHWC, channel-last), got {actual}. Shape: {tuple(image.shape)}."
             )
         return cast("mx.array", self.encoder(image))
 
