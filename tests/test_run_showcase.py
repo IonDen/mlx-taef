@@ -1,14 +1,9 @@
 """Plumbing tests for scripts/run_showcase.py."""
 
-from __future__ import annotations
-
 import json
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def test_argparse_scenario_choices() -> None:

@@ -6,8 +6,6 @@ Tests cover the happy path (real device) and the clamping branches
 via `mx.device_info` patching.
 """
 
-from __future__ import annotations
-
 from unittest.mock import patch
 
 from mlx_taef._memory_caps import (

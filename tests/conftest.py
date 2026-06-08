@@ -1,7 +1,5 @@
 """Shared pytest fixtures + session-level MLX memory caps."""
 
-from __future__ import annotations
-
 from pathlib import Path
 
 import pytest
