@@ -2,11 +2,15 @@
 
 Hierarchy:
     TaefError                              base for all package-rooted errors
-    ├── SchemaVersionError                 unknown JSON schema_version
     ├── ConversionError                    HF->MLX conversion dropped/mis-shaped a param
-    ├── MlxTeacacheNotInstalledError       (+ ImportError) optional dep missing
-    ├── FixtureLatentMissingError          (+ FileNotFoundError) showcase fixture absent
-    └── UnknownKernelError                 (+ KeyError) name not in the kernel registry
+    ├── MfluxNotInstalledError             (+ ImportError) mflux integration dep missing
+    ├── MlxTeacacheNotInstalledError       (+ ImportError) showcase teacache dep missing
+    ├── UnknownKernelError                 (+ KeyError) name not in the kernel registry
+    ├── SchemaVersionError                 raised by the bundled showcase tooling
+    └── FixtureLatentMissingError          (+ FileNotFoundError) bundled showcase tooling
+
+SchemaVersionError and FixtureLatentMissingError are raised only by the bundled
+showcase tooling (`scripts/run_showcase.py`), not by importable package code.
 """
 
 from __future__ import annotations
@@ -34,11 +38,28 @@ class ConversionError(TaefError):
     """
 
 
+class MfluxNotInstalledError(TaefError, ImportError):
+    """Raised when `mlx_taef.integrations.mflux` is imported but mflux is absent.
+
+    Subclasses TaefError (so `except TaefError` catches it) and ImportError (so
+    `except ImportError` keeps working).
+    """
+
+    def __init__(self, message: str | None = None) -> None:
+        """Initialize with a default install-hint message if none is given."""
+        if message is None:
+            message = (
+                "mflux is required for mlx_taef.integrations.mflux. "
+                "Install with: pip install 'mlx-taef[mflux]'."
+            )
+        super().__init__(message)
+
+
 class MlxTeacacheNotInstalledError(TaefError, ImportError):
     """Raised when a scenario requires `mlx_teacache` but it is not installed.
 
-    Mirrors the v0.1.0 `TaefMfluxNotInstalledError` pattern (package-rooted
-    error chained from a clear install hint).
+    Package-rooted error chained from a clear install hint; mirrors
+    `MfluxNotInstalledError`.
     """
 
     def __init__(self, message: str | None = None) -> None:

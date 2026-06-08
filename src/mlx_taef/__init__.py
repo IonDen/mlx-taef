@@ -6,6 +6,7 @@ from mlx_taef.api import TAEF1, TAEF2, TAESD, TAESDXL, Taef
 from mlx_taef.errors import (
     ConversionError,
     FixtureLatentMissingError,
+    MfluxNotInstalledError,
     MlxTeacacheNotInstalledError,
     SchemaVersionError,
     TaefError,
@@ -20,6 +21,7 @@ __all__ = [
     "TAESDXL",
     "ConversionError",
     "FixtureLatentMissingError",
+    "MfluxNotInstalledError",
     "MlxTeacacheNotInstalledError",
     "SchemaVersionError",
     "Taef",

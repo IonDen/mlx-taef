@@ -13,15 +13,14 @@ from pathlib import Path
 import mlx.core as mx
 import numpy as np
 
+from mlx_taef.errors import MfluxNotInstalledError
+
 try:
     from mflux.callbacks.callback import (  # type: ignore[import-untyped,import-not-found]
         InLoopCallback,
     )
 except ImportError as e:  # pragma: no cover
-    raise ImportError(
-        "mflux is required for mlx_taef.integrations.mflux. "
-        "Install with: pip install 'mlx-taef[mflux]'"
-    ) from e
+    raise MfluxNotInstalledError() from e
 
 from mlx_taef.api import TAEF1, TAEF2, Taef
 
