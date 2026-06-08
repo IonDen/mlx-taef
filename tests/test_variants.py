@@ -120,8 +120,14 @@ def test_conftest_installed_session_wired_cap() -> None:
         f"compute_safe_caps_gb returns {expected_wired_gb} GB"
     )
 
-    # mx.set_wired_limit returns the PREVIOUS limit; calling it with the
-    # value we expect to be currently installed proves the cap is in place.
+    # mx.set_wired_limit returns the PREVIOUS limit and has no getter. On a warm
+    # session this round-trip is a near-no-op confirmation (conftest already
+    # installed expected_bytes in this process); the load-bearing assertion is the
+    # INSTALLED_CAPS_GB check above. Restore in finally so the test leaves no net
+    # change to process-global wired state even if the assertion fails.
     expected_bytes = expected_wired_gb * 1024**3
     previous = mx.set_wired_limit(expected_bytes)
-    assert previous == expected_bytes
+    try:
+        assert previous == expected_bytes
+    finally:
+        mx.set_wired_limit(previous)
