@@ -11,6 +11,7 @@ from typing import cast
 import mlx.core as mx
 import mlx.nn as nn
 
+from mlx_taef.errors import TaefError
 from mlx_taef.kernels import KERNELS, MIDBLOCK_GN, ModelKernel
 from mlx_taef.kernels._arch import build_arch
 
@@ -21,10 +22,14 @@ class Taef(nn.Module):  # type: ignore[misc,name-defined]
     """Base class for TAESD-family models. Subclasses set `_kernel`."""
 
     _kernel: ModelKernel
+    _decoder_loaded: bool
+    _encoder_loaded: bool
 
     def __init__(self) -> None:
         """Build decoder + encoder from `self._kernel`."""
         super().__init__()
+        self._decoder_loaded = False
+        self._encoder_loaded = False
         ch = self._kernel.latent.channels
         mbgn = MIDBLOCK_GN.get(self._kernel.name, False)
         self.decoder = build_arch(
@@ -65,9 +70,11 @@ class Taef(nn.Module):  # type: ignore[misc,name-defined]
         instance = cls()
         d_weights = cast("dict[str, mx.array]", mx.load(str(decoder_path)))
         instance.decoder.load_weights(list(d_weights.items()), strict=True)
+        instance._decoder_loaded = True
         if encoder_path is not None:
             e_weights = cast("dict[str, mx.array]", mx.load(str(encoder_path)))
             instance.encoder.load_weights(list(e_weights.items()), strict=True)
+            instance._encoder_loaded = True
         if dtype is not mx.float32:
             instance.set_dtype(dtype)
         instance.eval()
@@ -96,6 +103,11 @@ class Taef(nn.Module):  # type: ignore[misc,name-defined]
 
     def decode(self, latents: mx.array) -> mx.array:
         """Decode raw latents (NHWC) to image (NHWC, [0, 1] float)."""
+        if not self._decoder_loaded:
+            raise TaefError(
+                "decode() called before decoder weights were loaded. Build the model "
+                "with from_pretrained() or from_pretrained_local(decoder_path=...)."
+            )
         return mx.clip(self.decoder(latents), 0.0, 1.0)
 
     def decode_image(self, latents: mx.array) -> mx.array:
@@ -104,6 +116,12 @@ class Taef(nn.Module):  # type: ignore[misc,name-defined]
 
     def encode(self, image: mx.array) -> mx.array:
         """Encode an NHWC RGB image (B,H,W,3) in [0,1] to a latent (B,H/8,W/8,channels)."""
+        if not self._encoder_loaded:
+            raise TaefError(
+                "encode() called on a model loaded without an encoder. Load with "
+                "include_encoder=True (from_pretrained) or pass encoder_path= to "
+                "from_pretrained_local()."
+            )
         return cast("mx.array", self.encoder(image))
 
     def scale_latents(self, raw: mx.array) -> mx.array:
