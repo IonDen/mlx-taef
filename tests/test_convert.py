@@ -68,15 +68,21 @@ def test_sequential_key_to_mlx_nested_sequential() -> None:
 
 
 def test_build_mlx_state_dict_transposes_4d_conv_weights() -> None:
-    # NCHW conv weight (out=2, in=3, kH=3, kW=3)
-    nchw = np.zeros((2, 3, 3, 3), dtype=np.float32)
-    nchw[0, 0, 0, 0] = 1.0
+    # Asymmetric NCHW conv weight (out=2, in=3, kH=5, kW=7) with a single sentinel.
+    nchw = np.zeros((2, 3, 5, 7), dtype=np.float32)
+    nchw[0, 1, 2, 3] = 42.0
     sd = {"1.weight": nchw}
-    # Expected NHWC shape: (out=2, kH=3, kW=3, in=3) == (2, 3, 3, 3)
-    expected = {"layers.1.weight": (2, 3, 3, 3)}
+    # Expected NHWC shape: (out, kH, kW, in) = (2, 5, 7, 3).
+    expected = {"layers.1.weight": (2, 5, 7, 3)}
+
     out = _build_mlx_state_dict(sd, expected_shapes=expected)
-    assert "layers.1.weight" in out
-    assert tuple(out["layers.1.weight"].shape) == (2, 3, 3, 3)
+    w = np.array(out["layers.1.weight"])
+
+    # Shape and exact permutation order are both pinned, so deleting the
+    # np.transpose(..., (0, 2, 3, 1)) in convert.py reds this test.
+    assert w.shape == (2, 5, 7, 3)
+    assert w[0, 2, 3, 1] == 42.0
+    assert np.array_equal(w, np.transpose(nchw, (0, 2, 3, 1)))
 
 
 def test_build_mlx_state_dict_drops_extra_source_keys() -> None:
