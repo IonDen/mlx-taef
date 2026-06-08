@@ -47,9 +47,8 @@ def test_taef2_decoder_uses_midblock_gn_only_in_first_three_blocks():
 
 
 def test_taesd_decoder_has_no_midblock_gn():
-    """Standard (non-flux_2) arch has no midblock_gn anywhere."""
+    """Standard (non-flux_2) arch has no midblock_gn in any Block."""
     decoder = make_decoder(TAESD_CONFIG)
-    for i, layer in enumerate(decoder.layers):
-        # Only Block layers have a 'pool' attribute
-        if hasattr(layer, "pool"):
-            assert layer.pool is None, f"Layer {i} unexpectedly has midblock_gn"
+    blocks = [layer for layer in decoder.layers if hasattr(layer, "pool")]
+    assert len(blocks) == 10, f"expected 10 Block layers, found {len(blocks)}"
+    assert all(b.pool is None for b in blocks), "no TAESD Block should have a midblock_gn pool"

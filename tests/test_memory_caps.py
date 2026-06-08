@@ -88,10 +88,9 @@ def test_install_memory_caps_does_not_raise_on_small_ceiling() -> None:
     assert memory_gb > wired_gb
     set_wired.assert_called_once()
     set_mem.assert_called_once()
-    # The bytes passed must be strictly < the 8 GB ceiling (else the
-    # real set_wired_limit would have raised).
+    # The bytes passed must match exactly what compute_safe_caps_gb returned.
     (called_wired_bytes,) = set_wired.call_args.args
-    assert called_wired_bytes < eight
+    assert called_wired_bytes == wired_gb * 1024**3
 
 
 def test_install_memory_caps_no_op_on_non_metal_env() -> None:

@@ -12,6 +12,11 @@ from PIL import Image
 from mlx_taef import TAEF2
 
 
+@pytest.fixture(autouse=True)
+def _seed_mlx() -> None:
+    mx.random.seed(0)
+
+
 @pytest.fixture(scope="module")
 def taef2(converted_dir: Path) -> TAEF2:
     return TAEF2.from_pretrained_local(converted_dir / "taef2_decoder.safetensors")

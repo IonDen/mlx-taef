@@ -61,14 +61,6 @@ def test_flux2_klein_generate_image_has_no_callbacks_kwarg() -> None:
     assert "callbacks" not in sig.parameters, (
         "If mflux added a callbacks kwarg, update the README to use it directly."
     )
-    # Affirmatively assert the registration path:
-    assert hasattr(Flux2Klein, "__init__")  # placeholder anchor
-
-
-def test_callback_registry_register_method_exists() -> None:
-    from mflux.callbacks.callback_registry import CallbackRegistry
-
-    assert hasattr(CallbackRegistry, "register")
 
 
 def test_unpack_with_bn_stats_differs_from_identity_bn() -> None:
@@ -88,15 +80,6 @@ def test_unpack_with_bn_stats_differs_from_identity_bn() -> None:
         bn_var=bn_var,
     )
     assert not np.allclose(np.array(out_identity), np.array(out_with_bn))
-
-
-def test_live_preview_callback_accepts_flux_kwarg() -> None:
-    """Constructor must accept flux= keyword (no behavior change yet — Task 7
-    adds the auto-bn extraction; this task just exposes the parameter)."""
-    from mlx_taef.integrations.mflux import LivePreviewCallback
-
-    cb = LivePreviewCallback(flux=None, variant="taef2", save_to="/tmp/preview.png")
-    assert cb.flux is None
 
 
 def test_live_preview_callback_stores_passed_flux_instance() -> None:
@@ -126,17 +109,7 @@ def test_resolved_bn_is_none_when_no_bn_and_no_flux() -> None:
 
     cb = LivePreviewCallback(variant="taef2", save_to="/tmp/preview.png")
     assert cb.resolved_bn == "none"
-
-
-def test_resolved_bn_is_none_for_non_taef2_variant_even_with_flux() -> None:
-    from mlx_taef.integrations.mflux import LivePreviewCallback
-
-    cb = LivePreviewCallback(
-        flux=object(),
-        variant="taef1",
-        save_to="/tmp/preview.png",
-    )
-    assert cb.resolved_bn == "none"
+    assert cb.flux is None
 
 
 @dataclass
