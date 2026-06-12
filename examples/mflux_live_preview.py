@@ -65,7 +65,8 @@ def main() -> None:
     # Load the pre-quantized 4-bit model from HF; model_config describes the architecture
     # (layer counts, attention dims) without re-downloading the original BFL weights.
     model = Flux2Klein(
-        model_path="Runpod/FLUX.2-klein-4B-mflux-4bit",
+        quantize=4, 
+        # model_path="Runpod/FLUX.2-klein-4B-mflux-4bit",
         model_config=ModelConfig.flux2_klein_base_4b(),
     )
 
