@@ -77,6 +77,34 @@ def test_cli_convert_variant_choices_include_all_kernels(
         assert name in err
 
 
+def test_cli_convert_excludes_zimage_choice(capsys: pytest.CaptureFixture[str]) -> None:
+    """convert routes through the legacy shim; zimage (no distinct weights) must not be offered.
+
+    Use an invalid value that ISN'T 'zimage' so argparse doesn't echo 'zimage' as the rejected
+    value — then the only way 'zimage' could appear is in the listed valid choices, which it must not.
+    """
+    with pytest.raises(SystemExit):
+        main(["convert", "--variant", "not-a-variant", "--dst", "/tmp/x.safetensors"])
+    err = capsys.readouterr().err
+    assert "zimage" not in err  # zimage is not among convert's valid choices
+    for name in ("taesd", "taesdxl", "taef1", "taef2"):
+        assert name in err
+
+
+def test_cli_bench_includes_zimage_choice(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        main(["bench", "--variant", "not-a-variant"])
+    assert "zimage" in capsys.readouterr().err
+
+
+def test_bench_cls_by_name_covers_every_kernel() -> None:
+    """Behavioral guard: the bench class map must cover all KERNELS (no KeyError, no Phase-3 drop)."""
+    from mlx_taef.cli import _BENCH_CLS_BY_NAME
+    from mlx_taef.kernels import KERNELS
+
+    assert set(_BENCH_CLS_BY_NAME) == set(KERNELS)
+
+
 def test_cli_convert_routes_role_to_correct_converter(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
