@@ -3,6 +3,8 @@
 Provides:
 - `unpack_flux2_latent`: convert mflux's packed FLUX.2 latents to TAEF2-compatible NHWC.
 - `LivePreviewCallback`: drop-in mflux callback that writes preview PNGs every N steps.
+  Supports FLUX.1 (``variant='taef1'``), FLUX.2 Klein (``variant='taef2'``), and Z-Image /
+  Z-Image-Turbo (``variant='zimage'``, reuses TAEF1 weights).
 
 Install with: `pip install "mlx-taef[mflux]"`.
 """
@@ -22,7 +24,7 @@ try:
 except ImportError as e:  # pragma: no cover
     raise MfluxNotInstalledError() from e
 
-from mlx_taef.api import TAEF1, TAEF2, Taef
+from mlx_taef.api import TAEF1, TAEF2, Taef, ZImage
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +84,8 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
 
     Drops into `mflux.Flux2Klein.generate_image(callbacks=[...])`. On the
     iteration indices that match `every`, unpacks the in-flight latent, runs
-    TAEF2 decode (via `TAEF1` for FLUX.1), and writes a PIL image to disk.
+    the kernel's decode (TAEF2 for FLUX.2; TAEF1 for FLUX.1 and Z-Image), and
+    writes a PIL image to disk.
 
     Args:
         flux: optional reference to the mflux model instance the callback will be
@@ -90,7 +93,8 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
             mflux; intended to be a `Flux2Klein` instance when `auto_bn=True` and
             `variant="taef2"`. Required for auto-bn extraction (the mflux callback
             contract does not pass the flux instance at fire time).
-        variant: 'taef1' (for FLUX.1 latents) or 'taef2' (for FLUX.2 Klein).
+        variant: 'taef1' (FLUX.1), 'taef2' (FLUX.2 Klein), or 'zimage' (Z-Image /
+            Z-Image-Turbo, which reuses TAEF1's weights).
         every: emit a preview every Nth iteration. Default 5. When
             `numbered_frames=True` this is forced to 1 so the gallery
             captures every step.
@@ -127,8 +131,10 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
             self.model: Taef = TAEF1.from_pretrained(include_encoder=False)
         elif variant == "taef2":
             self.model = TAEF2.from_pretrained(include_encoder=False)
-        else:  # pragma: no cover
-            raise ValueError(f"variant must be 'taef1' or 'taef2', got {variant!r}")
+        elif variant == "zimage":
+            self.model = ZImage.from_pretrained(include_encoder=False)
+        else:
+            raise ValueError(f"variant must be 'taef1', 'taef2', or 'zimage', got {variant!r}")
         self.flux = flux
         self.auto_bn = auto_bn
         # Numbered-frame mode emits every step (galleries capture progression);
