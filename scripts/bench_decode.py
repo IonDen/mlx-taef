@@ -38,6 +38,7 @@ SENTINEL_PREFIX = "::BENCH_RESULT::"
 _SUBPROCESS_TIMEOUT_S = {
     "taef1": 600,
     "taef2": 600,
+    "zimage": 600,
     "vanilla_vae": 1200,
 }
 
@@ -48,7 +49,7 @@ def _build_argparser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--condition",
         required=True,
-        choices=["taef1", "taef2", "vanilla_vae"],
+        choices=["taef1", "taef2", "zimage", "vanilla_vae"],
         help="Which decoder to run.",
     )
     parser.add_argument(
@@ -78,6 +79,11 @@ def _resolve_cap_gb(*, condition: str, flux_variant: str = "flux2-klein-base-4b"
     """Per-condition cap policy. See spec Section 3 'Per-condition cap policy'."""
     if condition in ("taef1", "taef2"):
         return get_memory_cap_hint(condition)
+    if condition == "zimage":
+        # Route via the registry — the legacy shim raises on "zimage".
+        from mlx_taef.kernels import KERNELS
+
+        return KERNELS["zimage"].memory_cap_hint_gb
     if condition == "vanilla_vae":
         return FULL_VAE_CAP_GB[flux_variant]
     raise TaefError(f"unknown condition: {condition!r}")
@@ -298,6 +304,37 @@ def _decode_taef2(latent: Any, height: int, width: int, bn_mean: Any, bn_var: An
     return taef.decode_image(unpacked)
 
 
+def _decode_zimage(latent: Any, height: int, width: int) -> Any:
+    """Packed Z-Image in-loop latent (16, 1, h, w) → NHWC uint8 (1, H, W, 3) via ZImage TAEF.
+
+    Returns `decode_image()` directly — it already produces uint8 NHWC.
+    Do NOT pass through `_decoded_to_uint8_nhwc` (that helper is for full-VAE NCHW [-1,1]
+    tensors and would transpose/renormalize uint8 into garbage).
+    """
+    from mlx_taef import ZImage
+    from mlx_taef.kernels import UnpackContext
+    from mlx_taef.kernels.zimage import unpack_zimage_latent
+
+    taef = ZImage.from_pretrained(include_encoder=False)
+    ctx = UnpackContext(latent_height=height // 8, latent_width=width // 8)
+    return taef.decode_image(unpack_zimage_latent(latent, ctx))  # already uint8 NHWC (1,H,W,3)
+
+
+def _decode_full_vae_zimage(latent: Any, height: int, width: int) -> Any:
+    """Packed Z-Image latent → full mflux Z-Image VAE decode → NHWC uint8 image."""
+    import mlx.core as mx
+    from mflux.models.common.config.model_config import ModelConfig
+    from mflux.models.common.vae.vae_util import VAEUtil
+    from mflux.models.z_image.latent_creator.z_image_latent_creator import ZImageLatentCreator
+    from mflux.models.z_image.variants.z_image import ZImage as MfluxZImage
+
+    model = MfluxZImage(quantize=4, model_config=ModelConfig.z_image_turbo())
+    unpacked = ZImageLatentCreator.unpack_latents(latent, height, width)
+    decoded = VAEUtil.decode(vae=model.vae, latent=unpacked, tiling_config=None)
+    mx.eval(decoded)
+    return _decoded_to_uint8_nhwc(decoded)
+
+
 def _decode_full_vae_flux1(latent: Any, height: int, width: int) -> Any:
     """Packed → full FLUX.1 VAE decode → NHWC uint8 image."""
     from mflux.models.flux.latent_creator.flux_latent_creator import FluxLatentCreator
@@ -367,11 +404,15 @@ def _worker_main(args: argparse.Namespace) -> int:
         if bn_mean is None or bn_var is None:
             raise TaefError("taef2 condition requires bn_mean+bn_var in the latent safetensors")
         image = _decode_taef2(latent, height, width, bn_mean, bn_var)
+    elif args.condition == "zimage":
+        image = _decode_zimage(latent, height, width)
     elif args.condition == "vanilla_vae":
         if args.flux_variant == "flux1-dev":
             image = _decode_full_vae_flux1(latent, height, width)
         elif args.flux_variant == "flux2-klein-base-4b":
             image = _decode_full_vae_flux2(latent, height, width)
+        elif args.flux_variant == "z-image-turbo":
+            image = _decode_full_vae_zimage(latent, height, width)
         else:  # pragma: no cover
             raise TaefError(f"unknown flux_variant: {args.flux_variant!r}")
     else:  # pragma: no cover

@@ -221,6 +221,30 @@ def test_cap_gb_override_threads_through_to_worker() -> None:
     assert kwargs["cap_gb"] == 4
 
 
+def test_resolve_cap_gb_zimage_uses_registry_hint() -> None:
+    from scripts.bench_decode import _resolve_cap_gb
+
+    assert _resolve_cap_gb(condition="zimage") == 1  # KERNELS["zimage"].memory_cap_hint_gb
+
+
+def test_decode_zimage_returns_uint8_nhwc(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression guard: _decode_zimage must return decode_image() directly (uint8 NHWC),
+    NOT pass it through _decoded_to_uint8_nhwc (which would transpose/renormalize to garbage)."""
+    from pathlib import Path
+
+    import mlx.core as mx
+    from scripts.bench_decode import _decode_zimage
+
+    from mlx_taef import ZImage
+
+    weights = Path("tests/converted/taef1_decoder.safetensors")
+    real = ZImage.from_pretrained_local(weights)
+    monkeypatch.setattr(ZImage, "from_pretrained", classmethod(lambda cls, **kw: real))
+    out = _decode_zimage(mx.zeros((16, 1, 8, 8)), 64, 64)
+    assert out.shape == (1, 64, 64, 3)
+    assert out.dtype == mx.uint8
+
+
 def test_malformed_sentinel_json_marks_rep_failed_not_aborted() -> None:
     """Codex audit / subprocess reviewer finding #2: a json.JSONDecodeError
     in the worker's sentinel must NOT abort the entire orchestrator —

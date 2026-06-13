@@ -13,4 +13,6 @@ use this constant.
 FULL_VAE_CAP_GB: dict[str, int] = {
     "flux1-dev": 6,
     "flux2-klein-base-4b": 12,
+    # Z-Image full-model peak measured at 2.03 GB; 4 GB gives ~2 GB headroom.
+    "z-image-turbo": 4,
 }
