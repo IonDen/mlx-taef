@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-06-13T16:16:29.750153+00:00",
+  "hardware": {
+    "chip": "Apple M1 Max",
+    "ram_gb": 32,
+    "machine": "arm64",
+    "os": "Darwin 25.5.0",
+    "git_sha": "65cab0e3f0087eabbdfc71a617f98e5c28f6eff6",
+    "mlx_taef_version": "0.3.1.dev3+g9b3226393",
+    "mlx_teacache_version": "0.6.1",
+    "mflux_version": "0.17.5",
+    "mlx_version": "0.31.2",
+    "python_version": "3.13.12",
+    "quantize": 4,
+    "dtype": "bf16"
+  },
+  "isolation": "subprocess-per-rep",
+  "prior_artifacts_moved_to": null,
+  "scenarios": {
+    "zimage_vs_vae": {
+      "status": "ok",
+      "fixture_integrity": {
+        "status": "ok"
+      },
+      "taef": {
+        "condition": "zimage",
+        "applied_cap_gb": 1,
+        "installed_cap_gb": 1,
+        "reps": 5,
+        "per_rep_seconds": [
+          0.06304962499416433,
+          0.062298833014210686,
+          0.06190320898895152,
+          0.061267082986887544,
+          0.06789775000652298
+        ],
+        "median_seconds": 0.062298833014210686,
+        "min_seconds": 0.061267082986887544,
+        "max_seconds": 0.06789775000652298,
+        "per_rep_peak_memory_gb": [
+          0.5460954159498215,
+          0.5460954159498215,
+          0.5460954159498215,
+          0.5460954159498215,
+          0.5460954159498215
+        ],
+        "median_peak_memory_gb": 0.5460954159498215,
+        "image_path": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/zimage/taef/zimage_rep4.webp",
+        "per_rep_failures": []
+      },
+      "vanilla_vae": {
+        "condition": "vanilla_vae",
+        "applied_cap_gb": 4,
+        "installed_cap_gb": 4,
+        "reps": 3,
+        "per_rep_seconds": [
+          3.0980766249995213,
+          2.7333457919885404,
+          2.7597714579897
+        ],
+        "median_seconds": 2.7597714579897,
+        "min_seconds": 2.7333457919885404,
+        "max_seconds": 3.0980766249995213,
+        "per_rep_peak_memory_gb": [
+          1.8363245464861393,
+          1.9590810295194387,
+          1.9590810295194387
+        ],
+        "median_peak_memory_gb": 1.9590810295194387,
+        "image_path": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/zimage/vae/vanilla_vae_rep2.webp",
+        "per_rep_failures": []
+      },
+      "ssim_per_pair": [
+        0.9399549961090088,
+        0.9399549961090088,
+        0.9399549961090088,
+        0.9399549961090088,
+        0.9399549961090088,
+        0.9399549961090088,
+        0.9399549961090088,
+        0.9399549961090088,
+        0.9399549961090088,
+        0.9399549961090088,
+        0.9399549961090088,
+        0.9399549961090088,
+        0.9399549961090088,
+        0.9399549961090088,
+        0.9399549961090088
+      ],
+      "ssim_median": 0.9399549961090088
+    }
+  }
+}
