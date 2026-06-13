@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-06-13T16:16:42.867785+00:00",
+  "hardware": {
+    "chip": "Apple M1 Max",
+    "ram_gb": 32,
+    "machine": "arm64",
+    "os": "Darwin 25.5.0",
+    "git_sha": "65cab0e3f0087eabbdfc71a617f98e5c28f6eff6",
+    "mlx_taef_version": "0.3.1.dev3+g9b3226393",
+    "mlx_teacache_version": "0.6.1",
+    "mflux_version": "0.17.5",
+    "mlx_version": "0.31.2",
+    "python_version": "3.13.12",
+    "quantize": 4,
+    "dtype": "bf16"
+  },
+  "isolation": "subprocess-per-rep",
+  "prior_artifacts_moved_to": null,
+  "scenarios": {
+    "zimage_live_preview": {
+      "status": "ok",
+      "scenario_dir": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/zimage_live_preview",
+      "elapsed_s": 85.10659370801295,
+      "peak_memory_gb": 25.919754337519407,
+      "applied_cap_gb": 20,
+      "num_steps": 4,
+      "guidance": 0.0,
+      "seed": 42,
+      "prompt": "a red apple on a wooden table",
+      "height": 512,
+      "width": 512,
+      "preview_paths": [
+        "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/zimage_live_preview/zimage_live_preview_step00.webp",
+        "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/zimage_live_preview/zimage_live_preview_step01.webp",
+        "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/zimage_live_preview/zimage_live_preview_step02.webp",
+        "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/zimage_live_preview/zimage_live_preview_step03.webp"
+      ],
+      "final_path": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/zimage_live_preview/zimage_live_preview_final.webp",
+      "teacache": null
+    }
+  }
+}
