@@ -5,7 +5,7 @@ Target search query: "mflux live preview", "FLUX2 preview mlx",
 
 Expected output: writes preview frames as `preview_step{NN}.png`
 next to this script, plus the Flux2VAE-decoded final image as
-`preview_final.webp`. Per-step previews use the fast TAEF2 decoder;
+`preview_final.png`. Per-step previews use the fast TAEF2 decoder;
 the final image uses the full-quality Flux2VAE decoder.
 
 Run with:
@@ -21,7 +21,6 @@ import time
 from pathlib import Path
 
 import mlx.core as mx
-from mflux.callbacks.callback import AfterLoopCallback
 from mflux.models.common.config.model_config import ModelConfig
 from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
 
@@ -30,17 +29,18 @@ from mlx_taef.integrations.mflux import LivePreviewCallback
 OUT_DIR = Path(__file__).resolve().parent
 
 
-
 class _TimedPreviewCallback(LivePreviewCallback):
-    """LivePreviewCallback subclass that prints TAEF2 decode time per step
-    and embeds the quantization level in the saved filename."""
+    """LivePreviewCallback subclass that prints TAEF2 decode time per step."""
 
-    def _resolve_target(self, idx: int) -> Path:
-        """Override to embed the step index in the filename, e.g. preview_step03.png."""
-        base = self.save_to
-        return base.with_name(f"{base.stem}_step{idx:02d}{base.suffix}")
-
-    def call_in_loop(self, t: object, seed: object, prompt: object, latents: mx.array, config: object, time_steps: object) -> None:
+    def call_in_loop(
+        self,
+        t: object,
+        seed: object,
+        prompt: object,
+        latents: mx.array,
+        config: object,
+        time_steps: object,
+    ) -> None:
         t0 = time.perf_counter()
         super().call_in_loop(t, seed, prompt, latents, config, time_steps)
         # saved_paths is appended by the parent; its length tells us the step index.
@@ -54,7 +54,9 @@ class _VaeTimer:
 
     _t0: float | None = None
 
-    def call_after_loop(self, seed: object, prompt: object, latents: mx.array, config: object) -> None:
+    def call_after_loop(
+        self, seed: object, prompt: object, latents: mx.array, config: object
+    ) -> None:
         # mflux calls this immediately before its own VAE decode; capture the start time.
         self._t0 = time.perf_counter()
 
@@ -62,11 +64,11 @@ class _VaeTimer:
 def main() -> None:
     print("loading Flux2Klein base 4B (quantize=4)...")
 
-    # Load the pre-quantized 4-bit model from HF; model_config describes the architecture
-    # (layer counts, attention dims) without re-downloading the original BFL weights.
+    # Downloads black-forest-labs/FLUX.2-klein-base-4B weights and quantizes to 4-bit
+    # locally. To load a pre-quantized HF repo instead, uncomment model_path= and
+    # remove quantize= (e.g. "Runpod/FLUX.2-klein-4B-mflux-4bit").
     model = Flux2Klein(
-        quantize=4, 
-        # model_path="Runpod/FLUX.2-klein-4B-mflux-4bit",
+        quantize=4,
         model_config=ModelConfig.flux2_klein_base_4b(),
     )
 
