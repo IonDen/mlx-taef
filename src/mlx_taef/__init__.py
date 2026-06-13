@@ -2,7 +2,7 @@
 
 import logging
 
-from mlx_taef.api import TAEF1, TAEF2, TAESD, TAESDXL, Taef
+from mlx_taef.api import TAEF1, TAEF2, TAESD, TAESDXL, Taef, ZImage
 from mlx_taef.errors import (
     ConversionError,
     FixtureLatentMissingError,
@@ -27,6 +27,7 @@ __all__ = [
     "Taef",
     "TaefError",
     "UnknownKernelError",
+    "ZImage",
     "get_memory_cap_hint",
 ]
 
