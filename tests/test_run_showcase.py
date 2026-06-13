@@ -28,6 +28,8 @@ def test_scenario_dispatch_table() -> None:
     assert "taef1_vs_vae" in _SCENARIO_DISPATCH
     assert "live_preview" in _SCENARIO_DISPATCH
     assert "combined" in _SCENARIO_DISPATCH
+    assert "zimage_vs_vae" in _SCENARIO_DISPATCH
+    assert "zimage_live_preview" in _SCENARIO_DISPATCH
 
 
 def test_json_schema_version_round_trip(tmp_path: Path) -> None:
@@ -127,3 +129,27 @@ def test_import_apply_teacache_raises_package_error_when_missing(monkeypatch) ->
 
     with pytest.raises(MlxTeacacheNotInstalledError):
         _import_apply_teacache()
+
+
+def test_argparse_accepts_zimage_scenarios() -> None:
+    from scripts.run_showcase import _build_argparser
+
+    parser = _build_argparser()
+    assert parser.parse_args(["--scenario", "zimage_vs_vae"]).scenario == "zimage_vs_vae"
+    assert (
+        parser.parse_args(["--scenario", "zimage_live_preview"]).scenario == "zimage_live_preview"
+    )
+
+
+def test_run_zimage_vs_vae_uses_correct_condition_and_fixture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mocked: _run_zimage_vs_vae must call _vs_vae_scenario with the Z-Image condition + fixture."""
+    import scripts.run_showcase as rs
+
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(rs, "_vs_vae_scenario", lambda **kw: captured.update(kw) or {})
+    rs._run_zimage_vs_vae(args=None)
+    assert captured["taef_condition"] == "zimage"
+    assert captured["flux_variant"] == "z-image-turbo"
+    assert captured["latent_name"] == "z_image_turbo.safetensors"
