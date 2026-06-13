@@ -274,6 +274,50 @@ def _in_loop_subscribers(registry: object) -> list:
     )
 
 
+def test_zimage_callback_writes_png_offline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Z-Image reuses TAEF1 weights, so this runs fully offline on the committed taef1 file."""
+    from mlx_taef import ZImage
+
+    save_path = tmp_path / "preview.png"
+    converted = Path(__file__).parent / "converted" / "taef1_decoder.safetensors"
+    real_zimage = ZImage.from_pretrained_local(converted)
+    monkeypatch.setattr(ZImage, "from_pretrained", classmethod(lambda cls, **kw: real_zimage))
+
+    cb = LivePreviewCallback(
+        variant="zimage", every=1, save_to=save_path, latent_height=8, latent_width=8
+    )
+    fake_latent = mx.random.normal((16, 1, 8, 8))  # mflux Z-Image in-loop shape
+    cb.call_in_loop(t=0, seed=0, prompt="", latents=fake_latent, config=None, time_steps=None)
+    assert save_path.exists()
+    assert save_path.stat().st_size > 100
+
+
+def test_zimage_callback_rejects_packed_flux_latent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Behavioral routing: the zimage callback dispatches through unpack_zimage_latent, which
+    rejects a packed (1, N, 64) FLUX.1 latent — proving it is NOT wired to a flux unpack."""
+    from mlx_taef import ZImage
+
+    converted = Path(__file__).parent / "converted" / "taef1_decoder.safetensors"
+    real_zimage = ZImage.from_pretrained_local(converted)
+    monkeypatch.setattr(ZImage, "from_pretrained", classmethod(lambda cls, **kw: real_zimage))
+
+    cb = LivePreviewCallback(
+        variant="zimage", save_to=tmp_path / "p.png", latent_height=8, latent_width=8
+    )
+    packed_flux = mx.zeros((1, 64, 64))  # ndim 3 -> unpack_zimage_latent must reject
+    with pytest.raises(ValueError, match=r"16, 1, h, w"):
+        cb.call_in_loop(t=0, seed=0, prompt="", latents=packed_flux, config=None, time_steps=None)
+
+
+def test_callback_rejects_unknown_variant() -> None:
+    with pytest.raises(ValueError, match="variant must be"):
+        LivePreviewCallback(variant="not-a-variant", save_to="/tmp/x.png")
+
+
 def test_live_preview_callback_and_mlx_teacache_coexist_on_real_registry() -> None:
     """Both wrappers must coexist on the same mflux CallbackRegistry.
     The failure mode being asserted is callback-hook collision; mocks
