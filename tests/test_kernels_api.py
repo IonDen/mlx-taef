@@ -36,3 +36,12 @@ def test_from_kernel_binds_passed_kernel_not_class_default():
     assert m._kernel is k
     assert m.decoder.layers[1].weight.shape[-1] == 32
     assert m.decode(mx.zeros((1, 8, 8, 32))).shape == (1, 64, 64, 3)
+
+
+def test_zimage_class_binds_zimage_kernel():
+    from mlx_taef import ZImage
+
+    assert ZImage._kernel is get_kernel("zimage")
+    assert ZImage().decoder.layers[1].weight.shape[-1] == 16
+    out = ZImage.from_kernel  # the generic ctor is inherited
+    assert callable(out)
