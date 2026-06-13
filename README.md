@@ -10,7 +10,7 @@
 
 Tiny AutoEncoders for diffusion latents on Apple Silicon, in pure MLX.
 
-`mlx-taef` is the first MLX port of the TAESD family — TAESD (SD1.x), TAESDXL (SDXL), TAEF1 (FLUX.1), TAEF2 (FLUX.2 Klein) — distilled mini-autoencoders that decode diffusion latents to RGB in milliseconds using a few-MB model instead of multi-GB full VAEs.
+`mlx-taef` is the first MLX port of the TAESD family — TAESD (SD1.x), TAESDXL (SDXL), TAEF1 (FLUX.1), TAEF2 (FLUX.2 Klein), and Z-Image (which reuses the TAEF1 weights for previews) — distilled mini-autoencoders that decode diffusion latents to RGB in milliseconds using a few-MB model instead of multi-GB full VAEs.
 
 Use it for:
 - **Live previews** during long generations on Mac — TAEF1 decodes a 512×512 preview in ~183 ms and TAEF2 in ~258 ms on M1 Max (vs 2 s for the full VAE). See [COMPARISON.md](COMPARISON.md) for the measured table and reproducer.
@@ -74,8 +74,15 @@ Requires Python ≥ 3.11 and Apple Silicon (`mlx` itself is Apple-Silicon-only).
 | `TAESDXL` | 4 | Stable Diffusion XL | [madebyollin/taesdxl](https://huggingface.co/madebyollin/taesdxl) |
 | `TAEF1` | 16 | FLUX.1 | [madebyollin/taef1](https://huggingface.co/madebyollin/taef1) |
 | `TAEF2` | 32 | FLUX.2 Klein | [madebyollin/taef2](https://huggingface.co/madebyollin/taef2) |
+| `ZImage` | 16 | Z-Image / Z-Image-Turbo (shares the FLUX.1 16-ch latent contract) | reuses [madebyollin/taef1](https://huggingface.co/madebyollin/taef1) |
 
-All four share one API.
+They all share one API.
+
+## Examples
+
+[EXAMPLES.md](EXAMPLES.md) walks through live-preview and low-memory decode for each model
+with real captured frames, final images, and the measured gain. Runnable companions live in
+[`examples/`](examples/).
 
 ## Benchmarks
 
@@ -121,6 +128,7 @@ See `docs/manual-verification.md` for the full verification recipe.
 - **v0.2.3 — released on PyPI** (2026-05-29). Weight loading is now strict: `from_pretrained_local` raises on an incomplete or wrong-shaped weights file instead of loading a silently-wrong model, and the HF→MLX converter checks parameter coverage and shapes at convert time (new `ConversionError`). The end-to-end parity tests now gate on an absolute pixel tolerance rather than cosine similarity. A bare `pytest` skips the network and benchmark tests by default (`--run-network` / `--run-benchmark` to opt in).
 - **v0.3.0 — released on PyPI** (2026-06-06). Internal kernel refactor: each variant is now a composable `ModelKernel` (`mlx_taef.kernels`), so adding a model is a self-contained entry; `variants.py` stays a back-compat shim. Ships one user-facing fix — the mflux `LivePreviewCallback` FLUX.1 path fed the packed latent straight to the decoder and produced wrong previews; it now unpacks correctly.
 - **v0.3.1 — released on PyPI** (2026-06-08). Hardening: `decode()`/`encode()` raise a clear error when weights haven't been loaded yet, or when a latent has the wrong channel count, instead of returning garbage; importing without mflux installed now raises `MfluxNotInstalledError` (a `TaefError` that is also an `ImportError`).
+- **v0.4.0 — released on PyPI** (2026-06-13). Z-Image / Z-Image-Turbo live preview: a new `ZImage` model reuses TAEF1's FLUX.1 weights with no new download (Z-Image shares FLUX.1's 16-channel latent contract), validated by an SSIM ≥ 0.75 calibration against mflux's full Z-Image VAE (measured 0.94). Adds `mlx-taef bench --variant zimage` and a new top-level [EXAMPLES.md](EXAMPLES.md) with captured frames and measured decode numbers.
 
 Track future releases via the [PyPI history](https://pypi.org/project/mlx-taef/#history) or `gh release list -R IonDen/mlx-taef`.
 

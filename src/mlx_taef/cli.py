@@ -7,9 +7,19 @@ from pathlib import Path
 
 import mlx.core as mx
 
+from mlx_taef.api import TAEF1, TAEF2, TAESD, TAESDXL, ZImage
 from mlx_taef.kernels import KERNELS
+from mlx_taef.variants import VARIANTS
 
 logger = logging.getLogger(__name__)
+
+_BENCH_CLS_BY_NAME = {
+    "taesd": TAESD,
+    "taesdxl": TAESDXL,
+    "taef1": TAEF1,
+    "taef2": TAEF2,
+    "zimage": ZImage,
+}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -20,10 +30,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    variant_names = sorted(KERNELS)
+    convert_names = sorted(VARIANTS)  # legacy shim (kernels with a distinct convert path)
+    bench_names = sorted(KERNELS)  # all kernels, incl. zimage
 
     p_convert = sub.add_parser("convert", help="Download upstream weights and convert to MLX")
-    p_convert.add_argument("--variant", required=True, choices=variant_names)
+    p_convert.add_argument("--variant", required=True, choices=convert_names)
     p_convert.add_argument("--role", default="decoder", choices=["decoder", "encoder"])
     p_convert.add_argument("--dst", required=True, type=Path, help="Output .safetensors path")
 
@@ -31,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
     p_info.add_argument("path", type=Path)
 
     p_bench = sub.add_parser("bench", help="Decode benchmark on the current Mac")
-    p_bench.add_argument("--variant", default="taef2", choices=variant_names)
+    p_bench.add_argument("--variant", default="taef2", choices=bench_names)
 
     args = parser.parse_args(argv)
     if args.cmd == "convert":
@@ -66,10 +77,7 @@ def _cmd_info(args: argparse.Namespace) -> int:
 
 
 def _cmd_bench(args: argparse.Namespace) -> int:  # pragma: no cover
-    from mlx_taef.api import TAEF1, TAEF2, TAESD, TAESDXL
-
-    cls_by_name = {"taesd": TAESD, "taesdxl": TAESDXL, "taef1": TAEF1, "taef2": TAEF2}
-    cls = cls_by_name[args.variant]
+    cls = _BENCH_CLS_BY_NAME[args.variant]
 
     model = cls.from_pretrained(include_encoder=False)
     # 1024x1024 image with 8x downsample = 128x128 latent

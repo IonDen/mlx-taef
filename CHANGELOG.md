@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-06-13
+
+Z-Image / Z-Image-Turbo support. Z-Image's VAE shares FLUX.1's 16-channel latent contract, so
+the existing TAEF1 decoder previews it with no new weights to download. Validated by an SSIM ≥
+0.75 calibration against mflux's full Z-Image VAE (measured 0.94), gated in CI.
+
+### Added
+- `ZImage` — a model class for Z-Image / Z-Image-Turbo live preview. Reuses TAEF1's weights and
+  its converted-weights cache (no separate download). Loads via the standard API
+  (`from_pretrained` / `from_pretrained_local` / `from_kernel`).
+- `LivePreviewCallback(variant="zimage", ...)` for previewing mflux Z-Image generations.
+- `mlx-taef bench --variant zimage`.
+- Top-level [EXAMPLES.md](EXAMPLES.md): a narrative walkthrough of live preview and low-memory
+  decode for each model, with captured frames and the measured cost of each decode.
+
+### Notes
+- The validated path is decode / live preview (the SSIM calibration is a CI gate). `ZImage`
+  inherits `encode()`, which reuses the TAEF1 encoder on the shared latent contract; it is not
+  separately validated against Z-Image's distinct VAE encoder, so encode / img2img is best-effort.
+- Measured on Apple M1 Max (32 GB), mflux 0.17.5 / MLX 0.31.2, int4: TAEF1 decodes a Z-Image
+  latent in ~62 ms versus ~2.76 s for the full Z-Image VAE, at ~0.55 GB versus ~1.96 GB peak.
+  Reproduce with `uv run python scripts/run_showcase.py --scenario zimage_vs_vae`.
+
 ## [0.3.1] — 2026-06-08
 
 Hardening patch. No public API shape changes; the one new symbol is `MfluxNotInstalledError`.

@@ -21,7 +21,7 @@ from pathlib import Path
 
 import mlx.core as mx
 
-_SUPPORTED_VARIANTS = ["flux1-dev", "flux2-klein-base-4b"]
+_SUPPORTED_VARIANTS = ["flux1-dev", "flux2-klein-base-4b", "z-image-turbo"]
 _DEFAULT_OUT_DIR = Path(__file__).parent.parent / "tests" / "fixtures" / "showcase_latents"
 
 
@@ -62,8 +62,15 @@ def _build_argparser() -> argparse.ArgumentParser:
     return parser
 
 
-_DEFAULT_STEPS = {"flux1-dev": 14, "flux2-klein-base-4b": 4}
-_DEFAULT_GUIDANCE = {"flux1-dev": 3.5, "flux2-klein-base-4b": 1.0}
+_DEFAULT_STEPS = {"flux1-dev": 14, "flux2-klein-base-4b": 4, "z-image-turbo": 4}
+_DEFAULT_GUIDANCE = {
+    "flux1-dev": 3.5,
+    "flux2-klein-base-4b": 1.0,
+    # Z-Image-Turbo is distilled (supports_guidance=False); mflux force-overrides guidance to
+    # 0.0 internally (z_image.py:60-62), so 0.0 is the effective value regardless of what is
+    # passed.  Naming any other value would make the recipe lie about the run mflux performed.
+    "z-image-turbo": 0.0,
+}
 
 
 def _install_memory_caps() -> None:
@@ -165,6 +172,37 @@ def _capture_flux2_latent(
     return capture.latents
 
 
+def _capture_zimage_latent(
+    flux: object,
+    *,
+    prompt: str,
+    seed: int,
+    height: int,
+    width: int,
+    num_steps: int,
+    guidance: float,
+) -> mx.array:
+    """Z-Image equivalent of _capture_flux1_latent.
+
+    mflux's Z-Image in-loop latent is (16, 1, h, w).  The AfterLoopCallback
+    receives the same packed shape, which is what the SSIM gate and showcase
+    downstream expect.
+    """
+    capture = _LatentCaptureCallback()
+    flux.callbacks.register(capture)  # type: ignore[attr-defined]
+    flux.generate_image(  # type: ignore[attr-defined]
+        seed=seed,
+        prompt=prompt,
+        num_inference_steps=num_steps,
+        height=height,
+        width=width,
+        guidance=guidance,
+    )
+    if capture.latents is None:
+        raise RuntimeError("AfterLoopCallback did not fire — mflux contract changed?")
+    return capture.latents
+
+
 def _capture(
     variant: str,
     prompt: str,
@@ -220,6 +258,27 @@ def _capture(
             "latent": latent,
             "bn_mean": bn_mean,
             "bn_var": bn_var,
+            "height": mx.array([height], dtype=mx.int32),
+            "width": mx.array([width], dtype=mx.int32),
+        }
+
+    if variant == "z-image-turbo":
+        from mflux.models.common.config.model_config import ModelConfig
+        from mflux.models.z_image.variants.z_image import ZImage as MfluxZImage
+
+        flux = MfluxZImage(quantize=4, model_config=ModelConfig.z_image_turbo())
+        latent = _capture_zimage_latent(
+            flux,
+            prompt=prompt,
+            seed=seed,
+            height=height,
+            width=width,
+            num_steps=steps,
+            guidance=cfg,
+        )
+        assert latent.shape == (16, 1, height // 8, width // 8), latent.shape
+        return {
+            "latent": latent,
             "height": mx.array([height], dtype=mx.int32),
             "width": mx.array([width], dtype=mx.int32),
         }

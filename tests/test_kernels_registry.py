@@ -4,8 +4,18 @@ from mlx_taef.errors import TaefError, UnknownKernelError
 from mlx_taef.kernels import KERNELS, get_kernel
 
 
-def test_registry_has_exactly_the_four_migrated_kernels():
-    assert set(KERNELS) == {"taesd", "taesdxl", "taef1", "taef2"}
+def test_registry_has_exactly_the_five_kernels():
+    assert set(KERNELS) == {"taesd", "taesdxl", "taef1", "taef2", "zimage"}
+
+
+def test_zimage_shares_taef1_cache_key_and_source():
+    z = get_kernel("zimage")
+    t = get_kernel("taef1")
+    assert z.source.cache_key(role="decoder") == t.source.cache_key(role="decoder")
+    assert z.source.cache_key(role="encoder") == t.source.cache_key(role="encoder")
+    assert z.source.repo == t.source.repo
+    assert z.latent.channels == 16
+    assert z.arch is t.arch  # both reference the shared TAESD2D constant from flux.py
 
 
 def test_kernel_names_byte_identical_and_fixtures_resolve():

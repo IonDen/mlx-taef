@@ -1,15 +1,19 @@
-r"""4-scenario showcase orchestrator for mlx-taef v0.2.0.
+r"""6-scenario showcase orchestrator for mlx-taef.
 
 Scenarios:
-    taef2_vs_vae   — TAEF2 decoder vs Full FLUX.2 VAE on a saved latent
-    taef1_vs_vae   — TAEF1 decoder vs Full FLUX.1 VAE on a saved latent
-    live_preview   — gallery of N frames from one FLUX.2 generation with
-                     LivePreviewCallback registered
-    combined       — same as live_preview plus apply_teacache wrapper
+    taef2_vs_vae        — TAEF2 decoder vs Full FLUX.2 VAE on a saved latent
+    taef1_vs_vae        — TAEF1 decoder vs Full FLUX.1 VAE on a saved latent
+    zimage_vs_vae       — Z-Image decoder vs Full Z-Image VAE on a saved latent
+    live_preview        — gallery of N frames from one FLUX.2 generation with
+                          LivePreviewCallback registered
+    zimage_live_preview — gallery of N frames from one Z-Image-Turbo generation
+                          with LivePreviewCallback registered
+    combined            — same as live_preview plus apply_teacache wrapper
 
 Pre-reqs (run once per release-train):
     scripts/_capture_latent.py --variant flux1-dev
     scripts/_capture_latent.py --variant flux2-klein-base-4b
+    scripts/_capture_latent.py --variant z-image-turbo
 
 Usage:
     # Reproduce the committed report (per-condition defaults: 5 TAEF reps,
@@ -199,28 +203,106 @@ def _run_taef1_vs_vae(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def _run_zimage_vs_vae(args: argparse.Namespace) -> dict[str, Any]:
+    return _vs_vae_scenario(
+        taef_condition="zimage",
+        flux_variant="z-image-turbo",
+        latent_name="z_image_turbo.safetensors",
+        args=args,
+    )
+
+
 def _run_live_preview(args: argparse.Namespace) -> dict[str, Any]:
     """Generate one FLUX.2 image, save a numbered preview frame at every step."""
-    return _live_generation(args=args, with_teacache=False, scenario_dir="live_preview")
+    from mflux.models.common.config.model_config import ModelConfig
+    from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
+
+    return _live_generation(
+        args=args,
+        model_factory=lambda: Flux2Klein(
+            quantize=4, model_config=ModelConfig.flux2_klein_base_4b()
+        ),
+        callback_variant="taef2",
+        latent_height_divisor=16,
+        latent_width_divisor=16,
+        prompt="a red apple on a wooden table",
+        num_steps=4,
+        guidance=1.0,
+        with_teacache=False,
+        auto_bn=True,
+        scenario_dir="live_preview",
+    )
 
 
 def _run_combined(args: argparse.Namespace) -> dict[str, Any]:
     """Generate one FLUX.2 image with apply_teacache + LivePreviewCallback."""
-    return _live_generation(args=args, with_teacache=True, scenario_dir="combined")
+    from mflux.models.common.config.model_config import ModelConfig
+    from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
+
+    return _live_generation(
+        args=args,
+        model_factory=lambda: Flux2Klein(
+            quantize=4, model_config=ModelConfig.flux2_klein_base_4b()
+        ),
+        callback_variant="taef2",
+        latent_height_divisor=16,
+        latent_width_divisor=16,
+        prompt="a red apple on a wooden table",
+        num_steps=4,
+        guidance=1.0,
+        with_teacache=True,
+        auto_bn=True,
+        scenario_dir="combined",
+    )
+
+
+def _run_zimage_live_preview(args: argparse.Namespace) -> dict[str, Any]:
+    """Generate one Z-Image-Turbo image, save numbered preview frames at every step."""
+    from mflux.models.common.config.model_config import ModelConfig
+    from mflux.models.z_image.variants.z_image import ZImage as MfluxZImage
+
+    return _live_generation(
+        args=args,
+        model_factory=lambda: MfluxZImage(quantize=4, model_config=ModelConfig.z_image_turbo()),
+        callback_variant="zimage",
+        latent_height_divisor=8,
+        latent_width_divisor=8,
+        prompt="a red apple on a wooden table",
+        num_steps=4,
+        guidance=0.0,
+        with_teacache=False,
+        auto_bn=False,
+        scenario_dir="zimage_live_preview",
+    )
 
 
 def _live_generation(
-    *, args: argparse.Namespace, with_teacache: bool, scenario_dir: str
+    *,
+    args: argparse.Namespace,
+    model_factory: Any,
+    callback_variant: str,
+    latent_height_divisor: int,
+    latent_width_divisor: int,
+    prompt: str,
+    num_steps: int,
+    guidance: float,
+    with_teacache: bool,
+    auto_bn: bool,
+    scenario_dir: str,
 ) -> dict[str, Any]:
-    """Run one FLUX.2 generation with preview gallery + optional TeaCache wrap."""
+    """Run one generation with a preview gallery and optional TeaCache wrap.
+
+    Parameterized over model factory, callback variant, prompt, steps, guidance,
+    and auto_bn so each scenario supplies its own pinned recipe. Set auto_bn=True
+    for TAEF2 scenarios (enables BN extraction from the mflux model for
+    color-correct previews); False for all other variants.
+    """
     import mlx.core as mx
-    from mflux.models.common.config.model_config import ModelConfig
-    from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
 
     save_dir = _ARTIFACTS_DIR / scenario_dir
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    # Memory cap — live generation needs the full Flux2Klein 4B in memory.
+    # Memory cap — live generation needs the full model in memory.
     # `--cap-gb` (when set) overrides the device-aware default for
     # reproducing the showcase on machines with different ceilings.
     from mlx_taef._memory_caps import compute_safe_caps_gb, install_memory_caps
@@ -239,12 +321,9 @@ def _live_generation(
 
     height = 512
     width = 512
-    num_steps = 4
-    guidance = 1.0
     seed = 42
-    prompt = "a red apple on a wooden table"
 
-    flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_base_4b())
+    flux = model_factory()
 
     teacache_stats: dict[str, Any] | None = None
     handle = None
@@ -255,13 +334,13 @@ def _live_generation(
     from mlx_taef.integrations.mflux import LivePreviewCallback
 
     callback = LivePreviewCallback(
-        flux=flux,
-        variant="taef2",
+        flux=flux if auto_bn else None,
+        variant=callback_variant,
         every=1,
         numbered_frames=True,
         save_to=save_dir / f"{scenario_dir}.webp",
-        latent_height=height // 16,
-        latent_width=width // 16,
+        latent_height=height // latent_height_divisor,
+        latent_width=width // latent_width_divisor,
     )
     flux.callbacks.register(callback)
 
@@ -312,7 +391,9 @@ def _live_generation(
 _SCENARIO_DISPATCH = {
     "taef2_vs_vae": _run_taef2_vs_vae,
     "taef1_vs_vae": _run_taef1_vs_vae,
+    "zimage_vs_vae": _run_zimage_vs_vae,
     "live_preview": _run_live_preview,
+    "zimage_live_preview": _run_zimage_live_preview,
     "combined": _run_combined,
 }
 
