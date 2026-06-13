@@ -35,6 +35,9 @@ dependencies = [
   "numpy>=1.26",
   "huggingface-hub>=0.24",
   "safetensors>=0.4",
+  "pillow>=12.2.0",
+  "scikit-image>=0.26.0",
+  "mflux>=0.17.5",
 ]
 
 [project.optional-dependencies]
