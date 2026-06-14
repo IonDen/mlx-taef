@@ -41,7 +41,8 @@ uv run python scripts/run_showcase.py --scenario zimage_vs_vae
 ```
 
 A note on scope: Z-Image support is validated for decode and live preview (the SSIM number above
-is gated in CI). `ZImage` inherits the full API including `encode()`, which reuses the TAEF1
+comes from an opt-in network test, `pytest --run-network`). `ZImage` inherits the full API
+including `encode()`, which reuses the TAEF1
 encoder on the shared latent contract. It's fine for round-tripping but not separately validated
 against Z-Image's own VAE encoder, so treat encode/img2img as best-effort.
 

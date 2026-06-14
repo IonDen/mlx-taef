@@ -103,14 +103,25 @@ version-file = "src/mlx_taef/_version.py"
 packages = ["src/mlx_taef"]
 
 [tool.hatch.build.targets.sdist]
+# Allowlist: ship only the source package, user-facing docs, examples, and license.
+# Everything else stays out by construction — the test suite (its large parity fixtures
+# under tests/converted/ and tests/reference/ are excluded, so the tests can't run from an
+# sdist anyway), local tool state (.claude/, .codegraph/), and generated showcase output
+# (_artifacts/) — so a local `uv build` can't leak machine-specific files into the archive.
+only-include = [
+  "src/mlx_taef",
+  "examples",
+  "docs",
+  "README.md",
+  "CHANGELOG.md",
+  "COMPARISON.md",
+  "EXAMPLES.md",
+  "ROADMAP.md",
+  "LICENSE",
+]
 exclude = [
-  ".github/",
-  ".hypothesis/",
-  ".pre-commit-config.yaml",
   "docs/superpowers/",
-  "tests/_third_party/",
-  "tests/converted/",
-  "tests/reference/",
+  "**/__pycache__",
 ]
 
 [tool.ruff]
