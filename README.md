@@ -64,7 +64,7 @@ Verify the install:
 mlx-taef --help
 ```
 
-Requires Python ≥ 3.11 and Apple Silicon (`mlx` itself is Apple-Silicon-only). Runtime install has **zero PyTorch dependency** — `torch` is dev-only and used solely for fixture generation in the test suite.
+Requires Python ≥ 3.11 and Apple Silicon (`mlx` itself is Apple-Silicon-only). The base `mlx-taef` install pulls in **no PyTorch**; in this repo `torch` is used only to generate test fixtures. The optional `mflux` extra is a separate case: mflux currently depends on PyTorch, so installing `mlx-taef[mflux]` brings it in.
 
 ## Variants
 
@@ -129,6 +129,7 @@ See `docs/manual-verification.md` for the full verification recipe.
 - **v0.3.0 — released on PyPI** (2026-06-06). Internal kernel refactor: each variant is now a composable `ModelKernel` (`mlx_taef.kernels`), so adding a model is a self-contained entry; `variants.py` stays a back-compat shim. Ships one user-facing fix — the mflux `LivePreviewCallback` FLUX.1 path fed the packed latent straight to the decoder and produced wrong previews; it now unpacks correctly.
 - **v0.3.1 — released on PyPI** (2026-06-08). Hardening: `decode()`/`encode()` raise a clear error when weights haven't been loaded yet, or when a latent has the wrong channel count, instead of returning garbage; importing without mflux installed now raises `MfluxNotInstalledError` (a `TaefError` that is also an `ImportError`).
 - **v0.4.0 — released on PyPI** (2026-06-13). Z-Image / Z-Image-Turbo live preview: a new `ZImage` model reuses TAEF1's FLUX.1 weights with no new download (Z-Image shares FLUX.1's 16-channel latent contract), validated by an SSIM ≥ 0.75 calibration against mflux's full Z-Image VAE (measured 0.94). Adds `mlx-taef bench --variant zimage` and a new top-level [EXAMPLES.md](EXAMPLES.md) with captured frames and measured decode numbers.
+- **v0.4.1 — released on PyPI** (2026-06-14). Documentation and packaging accuracy pass, no code changes: the Z-Image SSIM calibration is described correctly (it runs as an opt-in network test, not in default CI); the "no PyTorch" note is scoped to the base install (the `mflux` extra pulls in PyTorch via mflux); and the source distribution is now an allowlist, so it no longer ships the test suite without its fixtures or sweeps in local tool state.
 
 Track future releases via the [PyPI history](https://pypi.org/project/mlx-taef/#history) or `gh release list -R IonDen/mlx-taef`.
 

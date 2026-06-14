@@ -5,11 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] — 2026-06-14
+
+A documentation and packaging accuracy pass. No code or model behavior changes.
+
+### Changed
+- The Z-Image SSIM ≥ 0.75 calibration is now described correctly across the docs. It runs as an
+  opt-in network test (`pytest --run-network`), not in default CI, so the docs no longer call it
+  CI-gated.
+- The README's "no PyTorch" note is scoped to the base install. The optional `mflux` extra
+  follows mflux's dependency set, which currently includes PyTorch, so `mlx-taef[mflux]` brings
+  it in.
+
+### Fixed
+- The source distribution is now an allowlist of the package, user-facing docs, examples, and
+  license. It no longer ships the test suite without the parity fixtures those tests need, and a
+  local `uv build` can no longer sweep machine-local tool state or generated artifacts into the
+  archive. The wheel is unchanged (package-only).
+
 ## [0.4.0] — 2026-06-13
 
 Z-Image / Z-Image-Turbo support. Z-Image's VAE shares FLUX.1's 16-channel latent contract, so
 the existing TAEF1 decoder previews it with no new weights to download. Validated by an SSIM ≥
-0.75 calibration against mflux's full Z-Image VAE (measured 0.94), gated in CI.
+0.75 calibration against mflux's full Z-Image VAE (measured 0.94). That calibration runs as an
+opt-in network test (`pytest --run-network`), not in default CI.
 
 ### Added
 - `ZImage` — a model class for Z-Image / Z-Image-Turbo live preview. Reuses TAEF1's weights and
@@ -21,7 +40,8 @@ the existing TAEF1 decoder previews it with no new weights to download. Validate
   decode for each model, with captured frames and the measured cost of each decode.
 
 ### Notes
-- The validated path is decode / live preview (the SSIM calibration is a CI gate). `ZImage`
+- The validated path is decode / live preview (the SSIM calibration runs as an opt-in network
+  test, not in default CI). `ZImage`
   inherits `encode()`, which reuses the TAEF1 encoder on the shared latent contract; it is not
   separately validated against Z-Image's distinct VAE encoder, so encode / img2img is best-effort.
 - Measured on Apple M1 Max (32 GB), mflux 0.17.5 / MLX 0.31.2, int4: TAEF1 decodes a Z-Image
