@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] — 2026-06-14
+
+A small hardening patch.
+
+### Changed
+- `decode()` and `encode()` now reject inputs that aren't 4-D NHWC arrays, raising a `ValueError`
+  that names the expected rank instead of failing deep in the conv stack with an opaque error.
+  This closes a gap in the v0.3.1 channel-count guard, which a wrong-rank input could slip past
+  (for example a 3-D array whose last dimension happened to match the channel count).
+- The `mflux_live_preview` example now prints per-step TAEF2 decode timing next to the full
+  Flux2VAE final decode, so the preview-vs-full-VAE speed difference is visible when you run it.
+  Thanks to @ianscrivener (#20).
+
+### Internal
+- The release workflow's `actions/download-artifact` step moves to a Node 24 release (v8),
+  clearing the Node 20 deprecation warning.
+
 ## [0.4.1] — 2026-06-14
 
 A documentation and packaging accuracy pass. No code or model behavior changes.
