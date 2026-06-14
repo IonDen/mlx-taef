@@ -108,6 +108,12 @@ class Taef(nn.Module):  # type: ignore[misc,name-defined]
                 "decode() called before decoder weights were loaded. Build the model "
                 "with from_pretrained() or from_pretrained_local(decoder_path=...)."
             )
+        if latents.ndim != 4:
+            raise ValueError(
+                f"{self._kernel.name}.decode expects a 4-D NHWC array "
+                f"(batch, height, width, channels), got {latents.ndim}-D. "
+                f"Shape: {tuple(latents.shape)}."
+            )
         expected = self._kernel.latent.channels
         actual = latents.shape[-1]
         if actual != expected:
@@ -128,6 +134,12 @@ class Taef(nn.Module):  # type: ignore[misc,name-defined]
                 "encode() called on a model loaded without an encoder. Load with "
                 "include_encoder=True (from_pretrained) or pass encoder_path= to "
                 "from_pretrained_local()."
+            )
+        if image.ndim != 4:
+            raise ValueError(
+                f"{self._kernel.name}.encode expects a 4-D NHWC array "
+                f"(batch, height, width, channels), got {image.ndim}-D. "
+                f"Shape: {tuple(image.shape)}."
             )
         actual = image.shape[-1]
         if actual != 3:

@@ -38,3 +38,22 @@ def test_encode_non_rgb_raises_value_error(converted_dir) -> None:
     )
     with pytest.raises(ValueError, match="3 channels"):
         model.encode(mx.zeros((1, 64, 64, 2)))
+
+
+# Wrong-rank inputs whose last dim still matches the expected channel count slip past the
+# channel-count guard and would otherwise fail deep in the conv stack with an opaque error.
+@pytest.mark.parametrize("bad_shape", [(8, 8, 32), (32,)])
+def test_decode_wrong_rank_raises_value_error(converted_dir, bad_shape) -> None:
+    model = TAEF2.from_pretrained_local(converted_dir / "taef2_decoder.safetensors")
+    with pytest.raises(ValueError, match="4-D"):
+        model.decode(mx.zeros(bad_shape))
+
+
+@pytest.mark.parametrize("bad_shape", [(64, 64, 3), (3,)])
+def test_encode_wrong_rank_raises_value_error(converted_dir, bad_shape) -> None:
+    model = TAEF2.from_pretrained_local(
+        decoder_path=converted_dir / "taef2_decoder.safetensors",
+        encoder_path=converted_dir / "taef2_encoder.safetensors",
+    )
+    with pytest.raises(ValueError, match="4-D"):
+        model.encode(mx.zeros(bad_shape))
