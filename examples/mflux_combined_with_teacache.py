@@ -42,8 +42,7 @@ def main() -> None:
         every=1,
         numbered_frames=True,
         save_to=OUT_DIR / "combined.png",
-        latent_height=32,
-        latent_width=32,
+        # latent_height / latent_width are auto-detected from the generation config
     )
     model.callbacks.register(callback)
 
