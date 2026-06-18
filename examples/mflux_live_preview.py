@@ -80,8 +80,7 @@ def main() -> None:
         every=1,
         numbered_frames=True,
         save_to=OUT_DIR / "preview.png",
-        latent_height=32,
-        latent_width=32,
+        # latent_height / latent_width are auto-detected from the generation config
     )
 
     print(f"  resolved_bn = {callback.resolved_bn}  (expect 'auto')")

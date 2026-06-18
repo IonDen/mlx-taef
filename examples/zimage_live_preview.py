@@ -33,8 +33,7 @@ def main() -> None:
         every=1,
         numbered_frames=True,
         save_to=OUT_DIR / "preview.png",
-        latent_height=HEIGHT // 8,
-        latent_width=WIDTH // 8,
+        # Z-Image's latent isn't packed, so the callback reads its dims from the latent itself
     )
 
     model.callbacks.register(callback)
