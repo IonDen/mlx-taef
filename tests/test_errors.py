@@ -55,15 +55,15 @@ def test_fixture_latent_missing_subclasses_taef_error_and_file_not_found() -> No
 def test_errors_reexported_from_package_root_by_identity() -> None:
     """Re-export must be the SAME object. The old `is not None` check would
     pass a wrong-object or `True` alias; identity catches a broken re-export.
-    Includes ConversionError, which the old check omitted entirely."""
+    Covers the errors raised by importable package code (the three showcase-only
+    exceptions are intentionally NOT root-exported — see
+    test_showcase_only_exceptions_not_in_package_root_all)."""
     import mlx_taef
     from mlx_taef import errors
 
     assert mlx_taef.TaefError is errors.TaefError
-    assert mlx_taef.SchemaVersionError is errors.SchemaVersionError
     assert mlx_taef.ConversionError is errors.ConversionError
-    assert mlx_taef.MlxTeacacheNotInstalledError is errors.MlxTeacacheNotInstalledError
-    assert mlx_taef.FixtureLatentMissingError is errors.FixtureLatentMissingError
+    assert mlx_taef.UnknownKernelError is errors.UnknownKernelError
     assert mlx_taef.MfluxNotInstalledError is errors.MfluxNotInstalledError
 
 
@@ -156,6 +156,23 @@ def test_mflux_not_installed_error_exported_from_root() -> None:
 
     assert "MfluxNotInstalledError" in mlx_taef.__all__
     assert mlx_taef.MfluxNotInstalledError is errors.MfluxNotInstalledError
+
+
+def test_showcase_only_exceptions_not_in_package_root_all() -> None:
+    """Showcase/bench-only exceptions are not part of the supported public surface,
+    but remain importable from mlx_taef.errors for the scripts that raise them."""
+    import mlx_taef
+    from mlx_taef import errors
+
+    showcase_only = (
+        "SchemaVersionError",
+        "FixtureLatentMissingError",
+        "MlxTeacacheNotInstalledError",
+    )
+    for name in showcase_only:
+        assert name not in mlx_taef.__all__, f"{name} should not be in the package-root __all__"
+        assert not hasattr(mlx_taef, name), f"{name} should not be a package-root attribute"
+        assert hasattr(errors, name), f"{name} must stay importable from mlx_taef.errors"
 
 
 def test_no_docstring_references_a_nonexistent_exception() -> None:
