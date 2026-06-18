@@ -318,6 +318,164 @@ def test_callback_rejects_unknown_variant() -> None:
         LivePreviewCallback(variant="not-a-variant", save_to="/tmp/x.png")
 
 
+@dataclass
+class _FakeConfig:
+    """Minimal stand-in for mflux Config — exposes .height/.width like the real one."""
+
+    height: int
+    width: int
+
+
+@pytest.fixture
+def offline_taef2(monkeypatch: pytest.MonkeyPatch) -> object:
+    """Patch TAEF2.from_pretrained to the committed decoder weights so any
+    LivePreviewCallback(variant="taef2") construction stays OFFLINE (no HF download).
+
+    Every new taef2-constructing test in this plan must request this fixture — uncached
+    `from_pretrained` downloads + converts from HF (`get_or_convert`), which would violate
+    the bare-pytest-is-offline gate (Finding 4)."""
+    from mlx_taef import TAEF2
+
+    converted = Path(__file__).parent / "converted" / "taef2_decoder.safetensors"
+    real_taef2 = TAEF2.from_pretrained_local(converted)
+    monkeypatch.setattr(TAEF2, "from_pretrained", classmethod(lambda cls, **kw: real_taef2))
+    return real_taef2
+
+
+def test_partial_latent_dims_rejected_height_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """All-or-nothing: passing exactly one dim is a footgun — reject at construction.
+    The guard must raise BEFORE model load: we patch from_pretrained to BLOW UP if reached,
+    so a misplaced guard reds with AssertionError instead of silently passing on a warm cache
+    (a plain pytest.raises(ValueError) can't tell 'raised before load' from 'raised after')."""
+    from mlx_taef import TAEF2
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    def _boom(cls: object, **kw: object) -> object:
+        raise AssertionError("from_pretrained reached — the all-or-nothing guard is misplaced")
+
+    monkeypatch.setattr(TAEF2, "from_pretrained", classmethod(_boom))
+    with pytest.raises(ValueError, match="together"):
+        LivePreviewCallback(variant="taef2", save_to="/tmp/p.png", latent_height=32)
+
+
+def test_partial_latent_dims_rejected_width_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mlx_taef import TAEF2
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    def _boom(cls: object, **kw: object) -> object:
+        raise AssertionError("from_pretrained reached — the all-or-nothing guard is misplaced")
+
+    monkeypatch.setattr(TAEF2, "from_pretrained", classmethod(_boom))
+    with pytest.raises(ValueError, match="together"):
+        LivePreviewCallback(variant="taef2", save_to="/tmp/p.png", latent_width=32)
+
+
+def test_resolve_latent_dims_explicit_wins() -> None:
+    from mlx_taef.integrations.mflux import _resolve_latent_dims
+
+    cfg = _FakeConfig(height=1024, width=1024)
+    # Explicit dims are returned untouched even when a config is present.
+    assert _resolve_latent_dims(7, 9, cfg, 16) == (7, 9)
+
+
+def test_resolve_latent_dims_derives_from_config_square() -> None:
+    from mlx_taef.integrations.mflux import _resolve_latent_dims
+
+    cfg = _FakeConfig(height=512, width=512)
+    assert _resolve_latent_dims(None, None, cfg, 16) == (32, 32)
+
+
+def test_resolve_latent_dims_derives_from_config_nonsquare() -> None:
+    from mlx_taef.integrations.mflux import _resolve_latent_dims
+
+    cfg = _FakeConfig(height=768, width=512)
+    assert _resolve_latent_dims(None, None, cfg, 16) == (48, 32)
+
+
+def test_resolve_latent_dims_raises_without_dims_or_config() -> None:
+    from mlx_taef.integrations.mflux import _resolve_latent_dims
+
+    with pytest.raises(ValueError, match="latent_height"):
+        _resolve_latent_dims(None, None, None, 16)
+
+
+def test_resolve_latent_dims_against_real_mflux_config() -> None:
+    """Pin the duck-type to the REAL mflux Config (not just _FakeConfig), so a future mflux
+    Config API change (e.g. the 0.18 bump) reddens this rather than passing on a stale fake.
+    Config construction is pure Python (no network); verified offline."""
+    from mflux.models.common.config.config import Config
+    from mflux.models.common.config.model_config import ModelConfig
+
+    from mlx_taef.integrations.mflux import _resolve_latent_dims
+
+    cfg = Config(model_config=ModelConfig.flux2_klein_base_4b(), height=64, width=128)
+    # mflux forces multiples of 16; lh = 64//16 = 4, lw = 128//16 = 8 (matches cfg.image_seq_len=32).
+    assert cfg.image_seq_len == 4 * 8
+    assert _resolve_latent_dims(None, None, cfg, 16) == (4, 8)
+
+
+def test_binding_packed_latent_downscale_values() -> None:
+    from mlx_taef.kernels import KERNELS
+
+    assert KERNELS["taef1"].integration.packed_latent_downscale == 16
+    assert KERNELS["taef2"].integration.packed_latent_downscale == 16
+    # Z-Image's in-loop latent is not packed — None means "skip config-derived resolution".
+    assert KERNELS["zimage"].integration.packed_latent_downscale is None
+
+
+def test_live_preview_auto_resolves_dims_end_to_end(
+    tmp_path: Path, offline_taef2: object
+) -> None:
+    """latent_height=None (the new default) -> dims derived from the Config at fire time.
+
+    STRONG oracle: the decoded image's pixel size equals the config's image size IFF the dims
+    resolved correctly. For taef2, lh = h//16, the unpack doubles to lh*2, then TAEF2 upsamples
+    8x, so image_height = lh*16 = config.height. A wrong divisor (or a height/width swap) yields
+    a wrong-sized image. Non-square 64x128 also catches an axis swap. Deterministic latent (mx.zeros)
+    so no seed is needed (the oracle is size, not pixels)."""
+    from PIL import Image
+
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    save_path = tmp_path / "preview.png"
+    cb = LivePreviewCallback(variant="taef2", every=1, save_to=save_path)  # no latent dims
+    assert cb.latent_height is None  # auto mode
+    assert cb.latent_width is None  # auto mode
+
+    cfg = _FakeConfig(height=64, width=128)  # downscale 16 -> lh=4, lw=8 (small + fast)
+    packed = mx.zeros((1, 4 * 8, 128))
+    cb.call_in_loop(t=0, seed=0, prompt="", latents=packed, config=cfg, time_steps=None)
+    assert save_path.exists()
+    # PIL .size is (width, height); a correct resolve gives the config's image size.
+    assert Image.open(save_path).size == (128, 64)
+
+
+def test_zimage_callback_auto_dims_offline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Z-Image's binding has packed_latent_downscale=None, so the auto path must NOT call
+    _resolve_latent_dims and must NOT raise on config=None — the unpack reads dims from the
+    latent's own shape. Proves the new auto-resolution code doesn't break the unpacked path."""
+    from mlx_taef import ZImage
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    converted = Path(__file__).parent / "converted" / "taef1_decoder.safetensors"
+    real_zimage = ZImage.from_pretrained_local(converted)
+    monkeypatch.setattr(ZImage, "from_pretrained", classmethod(lambda cls, **kw: real_zimage))
+
+    save_path = tmp_path / "preview.png"
+    cb = LivePreviewCallback(variant="zimage", every=1, save_to=save_path)  # no latent dims
+    assert cb.latent_height is None
+    assert cb.latent_width is None
+    assert cb._packed_downscale is None  # zimage skips config-derived resolution
+
+    fake_latent = mx.zeros((16, 1, 8, 8))  # mflux Z-Image in-loop shape
+    # config=None must be safe here (no resolution happens for the unpacked path).
+    cb.call_in_loop(t=0, seed=0, prompt="", latents=fake_latent, config=None, time_steps=None)
+    assert save_path.exists()
+    assert save_path.stat().st_size > 100
+
+
 def test_live_preview_callback_and_mlx_teacache_coexist_on_real_registry() -> None:
     """Both wrappers must coexist on the same mflux CallbackRegistry.
     The failure mode being asserted is callback-hook collision; mocks

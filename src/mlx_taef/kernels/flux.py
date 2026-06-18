@@ -63,7 +63,9 @@ TAEF1 = ModelKernel(
     latent=LatentSpec(channels=16),
     source=WeightSource(repo="madebyollin/taef1", filename="diffusion_pytorch_model.safetensors"),
     integration=MfluxBinding(
-        mflux_models=("flux1", "flux-dev", "flux-schnell"), unpack=unpack_flux1_latent
+        mflux_models=("flux1", "flux-dev", "flux-schnell"),
+        unpack=unpack_flux1_latent,
+        packed_latent_downscale=16,
     ),
     memory_cap_hint_gb=1,
 )
@@ -74,6 +76,10 @@ TAEF2 = ModelKernel(
     conversion=DiffusersRemap(),
     latent=LatentSpec(channels=32),
     source=WeightSource(repo="madebyollin/taef2", filename="taef2.safetensors"),
-    integration=MfluxBinding(mflux_models=("flux2", "flux2-klein"), unpack=unpack_flux2_latent),
+    integration=MfluxBinding(
+        mflux_models=("flux2", "flux2-klein"),
+        unpack=unpack_flux2_latent,
+        packed_latent_downscale=16,
+    ),
     memory_cap_hint_gb=2,
 )

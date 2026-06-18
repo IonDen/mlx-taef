@@ -82,6 +82,16 @@ class MfluxBinding:
 
     mflux_models: tuple[str, ...]
     unpack: Callable[[mx.array, UnpackContext], mx.array]
+    packed_latent_downscale: int | None = 16
+    """Image-pixels per packed in-loop latent cell, for auto-resolution. FLUX in-loop latents
+    are 2x2-PACKED on top of the 8x VAE, so this is 8*2 = 16 (FLUX.1, FLUX.2) and
+    latent_height = image_height // 16.
+
+    This is NOT the VAE spatial scale (that is `LatentSpec.downsample`); it is the packed-latent
+    ratio. `None` means the in-loop latent is NOT packed and already carries its own spatial dims
+    (Z-Image: `(16, 1, h, w)`) — the callback then skips config-derived resolution entirely. If a
+    future unpack for such a model ever consumes `ctx` dims, set this to its image/latent ratio
+    (8 for Z-Image) instead of `None`."""
 
 
 class ConversionStrategy(Protocol):
