@@ -261,9 +261,7 @@ def test_auto_bn_resolved_none_when_variant_not_taef2(monkeypatch: pytest.Monkey
     assert cb.resolved_bn == "none"
 
 
-def test_auto_bn_noop_logs_for_non_taef2(
-    caplog, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_auto_bn_noop_logs_for_non_taef2(caplog, monkeypatch: pytest.MonkeyPatch) -> None:
     """auto_bn=True + flux + variant!='taef2' is a silent no-op today; it should log."""
     import logging
 
@@ -452,9 +450,7 @@ def test_binding_packed_latent_downscale_values() -> None:
     assert KERNELS["zimage"].integration.packed_latent_downscale is None
 
 
-def test_live_preview_auto_resolves_dims_end_to_end(
-    tmp_path: Path, offline_taef2: object
-) -> None:
+def test_live_preview_auto_resolves_dims_end_to_end(tmp_path: Path, offline_taef2: object) -> None:
     """latent_height=None (the new default) -> dims derived from the Config at fire time.
 
     STRONG oracle: the decoded image's pixel size equals the config's image size IFF the dims
@@ -479,9 +475,7 @@ def test_live_preview_auto_resolves_dims_end_to_end(
     assert Image.open(save_path).size == (128, 64)
 
 
-def test_zimage_callback_auto_dims_offline(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_zimage_callback_auto_dims_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Z-Image's binding has packed_latent_downscale=None, so the auto path must NOT call
     _resolve_latent_dims and must NOT raise on config=None — the unpack reads dims from the
     latent's own shape. Proves the new auto-resolution code doesn't break the unpacked path."""
