@@ -476,6 +476,96 @@ def test_zimage_callback_auto_dims_offline(
     assert save_path.stat().st_size > 100
 
 
+def test_auto_bn_extracts_and_stores_eps(offline_taef2: object) -> None:
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    flux = _build_fake_flux_with_nontrivial_bn()  # _FakeBN(eps=1e-5)
+    cb = LivePreviewCallback(flux=flux, variant="taef2", save_to="/tmp/preview.png")
+    assert cb.resolved_bn == "auto"
+    assert cb.bn_eps == 1e-5
+
+
+def test_bn_eps_defaults_to_1e_4_without_flux(offline_taef2: object) -> None:
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    cb = LivePreviewCallback(variant="taef2", save_to="/tmp/preview.png")
+    assert cb.bn_eps == 1e-4
+
+
+def test_auto_bn_with_bn_missing_eps_falls_back_to_default(offline_taef2: object) -> None:
+    """bn exposes running_mean/var but NO `eps` attribute: resolved_bn stays 'auto' (mean+var
+    present) and bn_eps falls back to the 1e-4 default. Pins the asymmetric path where eps is
+    absent but mean/var are not — otherwise an untested silent fallback."""
+    from dataclasses import dataclass
+
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    @dataclass
+    class _BNNoEps:  # real-shape stand-in WITHOUT an eps attribute
+        running_mean: mx.array
+        running_var: mx.array
+
+    @dataclass
+    class _VAE:
+        bn: object
+
+    @dataclass
+    class _Flux:
+        vae: object
+
+    flux = _Flux(vae=_VAE(bn=_BNNoEps(running_mean=mx.ones(128), running_var=mx.ones(128))))
+    cb = LivePreviewCallback(flux=flux, variant="taef2", save_to="/tmp/preview.png")
+    assert cb.resolved_bn == "auto"  # mean + var present
+    assert cb.bn_eps == 1e-4  # eps absent -> documented fallback
+
+
+def test_call_in_loop_forwards_bn_eps_and_auto_dims_into_unpack_context(
+    tmp_path: Path, offline_taef2: object
+) -> None:
+    """Storage alone is not enough (Finding 3): prove call_in_loop actually builds the
+    UnpackContext with the stored bn_eps AND the auto-resolved dims. A spy binding captures
+    the ctx; a stub model avoids running the real decoder."""
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    flux = _build_fake_flux_with_nontrivial_bn()  # eps=1e-5
+    cb = LivePreviewCallback(flux=flux, variant="taef2", save_to=tmp_path / "p.png")  # auto dims
+    assert cb.bn_eps == 1e-5  # extracted at construction
+    assert cb._packed_downscale == 16  # read from the real taef2 binding
+
+    captured: dict[str, object] = {}
+
+    class _SpyBinding:
+        # `unpack` is a stored callable, matching the real MfluxBinding.unpack FIELD
+        # (Callable[[mx.array, UnpackContext], mx.array]) — NOT a bound method — so
+        # binding.unpack(latents, ctx) passes exactly two args, faithful to the real dispatch.
+        def __init__(self) -> None:
+            def _capture(latents: mx.array, ctx: object) -> mx.array:
+                captured["bn_eps"] = ctx.bn_eps
+                captured["lh"] = ctx.latent_height
+                captured["lw"] = ctx.latent_width
+                return mx.zeros((1, 8, 8, 32))
+
+            self.unpack = _capture
+
+    class _SpyKernel:
+        name = "taef2"
+        integration = _SpyBinding()
+
+    class _SpyModel:
+        _kernel = _SpyKernel()
+
+        def decode_image(self, x: mx.array) -> mx.array:
+            return mx.zeros((1, 8, 8, 3), dtype=mx.uint8)
+
+    cb.model = _SpyModel()  # type: ignore[assignment]  # swap in the spy for the fire path
+    cfg = _FakeConfig(height=64, width=128)  # downscale 16 -> lh=4, lw=8
+    packed = mx.zeros((1, 4 * 8, 128))
+    cb.call_in_loop(t=0, seed=0, prompt="", latents=packed, config=cfg, time_steps=None)
+
+    assert captured["bn_eps"] == 1e-5  # forwarded, not just stored
+    assert (captured["lh"], captured["lw"]) == (4, 8)  # auto-resolved dims reached the ctx
+
+
 def test_live_preview_callback_and_mlx_teacache_coexist_on_real_registry() -> None:
     """Both wrappers must coexist on the same mflux CallbackRegistry.
     The failure mode being asserted is callback-hook collision; mocks
