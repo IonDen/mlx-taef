@@ -131,6 +131,11 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
             mflux; intended to be a `Flux2Klein` instance when `auto_bn=True` and
             `variant="taef2"`. Required for auto-bn extraction (the mflux callback
             contract does not pass the flux instance at fire time).
+        auto_bn: TAEF2-only. When True (default) and a `flux` instance is passed for
+            `variant='taef2'`, the VAE BN running stats (and eps) are auto-extracted for
+            color-correct previews. For 'taef1'/'zimage' it is a no-op (those have no BN
+            step) and logs an info line so the no-op is observable. Explicit `bn_mean`/
+            `bn_var` always take precedence.
         variant: 'taef1' (FLUX.1), 'taef2' (FLUX.2 Klein), or 'zimage' (Z-Image /
             Z-Image-Turbo, which reuses TAEF1's weights).
         every: emit a preview every Nth iteration. Default 5. When
@@ -144,11 +149,10 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
             gallery (`<stem>_step00.<ext>`, `<stem>_step01.<ext>`, …)
             instead of overwriting a single path. Used by the v0.2.0
             showcase to build a per-step gallery.
-        latent_height: latent spatial height. ``None`` (the default) means auto-detected from
-            the mflux Config at generation time. Pass **both** ``latent_height`` and
-            ``latent_width`` to override (passing exactly one raises ``ValueError``).
-        latent_width: latent spatial width. ``None`` (the default) means auto-detected from
-            the mflux Config at generation time. Must be set together with ``latent_height``.
+        latent_height: latent spatial height. Default None auto-detects it from the mflux
+            Config at generation time (image_height // 16 for FLUX). Pass both latent_height
+            and latent_width to override; passing exactly one raises ValueError.
+        latent_width: latent spatial width; None auto-detects (see latent_height).
         bn_mean: optional BN running_mean for TAEF2 (see `unpack_flux2_latent`).
         bn_var: optional BN running_var for TAEF2.
     """
@@ -174,7 +178,7 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
                 "the auto-detected resolution, or neither to auto-detect from the mflux "
                 f"Config. Got latent_height={latent_height!r}, latent_width={latent_width!r}."
             )
-        if variant == "taef1":  # pragma: no cover
+        if variant == "taef1":
             self.model: Taef = TAEF1.from_pretrained(include_encoder=False)
         elif variant == "taef2":
             self.model = TAEF2.from_pretrained(include_encoder=False)
@@ -222,6 +226,14 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
                 )
                 self.resolved_bn = "none"
         else:
+            if auto_bn and flux is not None and variant != "taef2":
+                logger.info(
+                    "auto_bn=True is a no-op for variant=%r: BN denormalization is "
+                    "TAEF2-only, so previews use identity BN (correct for %s — it has "
+                    "no BN step).",
+                    variant,
+                    variant,
+                )
             self.resolved_bn = "none"
         self._iter = 0
 
