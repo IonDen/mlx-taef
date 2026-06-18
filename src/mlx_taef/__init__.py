@@ -5,10 +5,7 @@ import logging
 from mlx_taef.api import TAEF1, TAEF2, TAESD, TAESDXL, Taef, ZImage
 from mlx_taef.errors import (
     ConversionError,
-    FixtureLatentMissingError,
     MfluxNotInstalledError,
-    MlxTeacacheNotInstalledError,
-    SchemaVersionError,
     TaefError,
     UnknownKernelError,
 )
@@ -20,10 +17,7 @@ __all__ = [
     "TAESD",
     "TAESDXL",
     "ConversionError",
-    "FixtureLatentMissingError",
     "MfluxNotInstalledError",
-    "MlxTeacacheNotInstalledError",
-    "SchemaVersionError",
     "Taef",
     "TaefError",
     "UnknownKernelError",
