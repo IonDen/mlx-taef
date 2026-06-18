@@ -26,8 +26,7 @@ This validates that `LivePreviewCallback` produces recognizable previews during 
        variant="taef2",
        every=5,
        save_to=Path("preview.png"),
-       latent_height=32,       # 512 / 16
-       latent_width=32,
+       # latent_height / latent_width auto-detected from the generation config
    )
    assert callback.resolved_bn == "auto"   # confirms BN extraction succeeded
    model.callbacks.register(callback)
