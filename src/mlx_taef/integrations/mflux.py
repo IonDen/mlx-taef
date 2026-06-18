@@ -79,6 +79,41 @@ def _try_extract_bn(flux: object) -> tuple[mx.array | None, mx.array | None]:
         return (None, None)
 
 
+def _resolve_latent_dims(
+    latent_height: int | None,
+    latent_width: int | None,
+    config: object,
+    downscale: int,
+) -> tuple[int, int]:
+    """Return the (latent_height, latent_width) to unpack the in-loop latent with.
+
+    Explicit dims (both provided) override and are returned unchanged. Otherwise they are
+    derived from the mflux Config's image dimensions: ``lh = config.height // downscale``,
+    ``lw = config.width // downscale``. mflux forces ``config.height/width`` to multiples of
+    16, and FLUX in-loop latents are packed so ``lh = image // 16`` (see
+    mflux/models/common/config/config.py and kernels/flux.py). Raises ``ValueError`` when
+    dims are absent and the config does not expose ``.height``/``.width``.
+
+    Precondition: callers pass both dims or neither — the LivePreviewCallback constructor
+    rejects exactly-one upstream, so the partial case never reaches here. Only bindings whose
+    in-loop latent is packed (downscale not None) reach this helper; the unpacked Z-Image path
+    skips it. Invariant: mflux rounds config H/W to multiples of 16 unconditionally
+    (config.py: ``16 * (height // 16)``), so a packed binding whose downscale is not itself a
+    factor of 16 would desync from mflux's rounding — today every packed binding is 16.
+    """
+    if latent_height is not None and latent_width is not None:
+        return latent_height, latent_width
+    h = getattr(config, "height", None)
+    w = getattr(config, "width", None)
+    if h is None or w is None:
+        raise ValueError(
+            "latent_height/latent_width were not provided and the mflux Config passed to "
+            "call_in_loop does not expose .height/.width to auto-detect them; pass "
+            "latent_height= and latent_width= explicitly."
+        )
+    return int(h) // downscale, int(w) // downscale
+
+
 class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
     """mflux callback that writes a low-quality preview image every N iterations.
 
@@ -106,8 +141,11 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
             gallery (`<stem>_step00.<ext>`, `<stem>_step01.<ext>`, …)
             instead of overwriting a single path. Used by the v0.2.0
             showcase to build a per-step gallery.
-        latent_height: latent spatial height; for 512x512 image with FLUX.2 Klein, this is 32.
-        latent_width: latent spatial width.
+        latent_height: latent spatial height. ``None`` (the default) means auto-detected from
+            the mflux Config at generation time. Pass **both** ``latent_height`` and
+            ``latent_width`` to override (passing exactly one raises ``ValueError``).
+        latent_width: latent spatial width. ``None`` (the default) means auto-detected from
+            the mflux Config at generation time. Must be set together with ``latent_height``.
         bn_mean: optional BN running_mean for TAEF2 (see `unpack_flux2_latent`).
         bn_var: optional BN running_var for TAEF2.
     """
@@ -121,12 +159,18 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
         every: int = 5,
         save_to: str | Path = "preview.png",
         numbered_frames: bool = False,
-        latent_height: int = 32,
-        latent_width: int = 32,
+        latent_height: int | None = None,
+        latent_width: int | None = None,
         bn_mean: mx.array | None = None,
         bn_var: mx.array | None = None,
     ) -> None:
         """Initialise LivePreviewCallback. See class docstring for argument descriptions."""
+        if (latent_height is None) != (latent_width is None):
+            raise ValueError(
+                "latent_height and latent_width must be set together: pass both to override "
+                "the auto-detected resolution, or neither to auto-detect from the mflux "
+                f"Config. Got latent_height={latent_height!r}, latent_width={latent_width!r}."
+            )
         if variant == "taef1":  # pragma: no cover
             self.model: Taef = TAEF1.from_pretrained(include_encoder=False)
         elif variant == "taef2":
@@ -135,6 +179,9 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
             self.model = ZImage.from_pretrained(include_encoder=False)
         else:
             raise ValueError(f"variant must be 'taef1', 'taef2', or 'zimage', got {variant!r}")
+        _binding = self.model._kernel.integration
+        assert _binding is not None, f"kernel {self.model._kernel.name!r} has no mflux binding"
+        self._packed_downscale: int | None = _binding.packed_latent_downscale
         self.flux = flux
         self.auto_bn = auto_bn
         # Numbered-frame mode emits every step (galleries capture progression);
@@ -192,9 +239,18 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
         binding = self.model._kernel.integration
         if binding is None:
             raise ValueError(f"kernel {self.model._kernel.name!r} has no mflux binding")
+        if self._packed_downscale is None:
+            # In-loop latent is not packed (Z-Image): unpack reads dims from the latent shape.
+            # Pass the explicit dims if given, else 0 — either way the unpack ignores them.
+            lh = self.latent_height if self.latent_height is not None else 0
+            lw = self.latent_width if self.latent_width is not None else 0
+        else:
+            lh, lw = _resolve_latent_dims(
+                self.latent_height, self.latent_width, config, self._packed_downscale
+            )
         ctx = UnpackContext(
-            latent_height=self.latent_height,
-            latent_width=self.latent_width,
+            latent_height=lh,
+            latent_width=lw,
             bn_mean=self.bn_mean,
             bn_var=self.bn_var,
         )

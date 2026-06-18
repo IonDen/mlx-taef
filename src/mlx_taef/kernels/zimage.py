@@ -43,7 +43,9 @@ ZIMAGE = ModelKernel(
     latent=LatentSpec(channels=16),
     source=WeightSource(repo="madebyollin/taef1", filename="diffusion_pytorch_model.safetensors"),
     integration=MfluxBinding(
-        mflux_models=("z-image", "z-image-turbo"), unpack=unpack_zimage_latent
+        mflux_models=("z-image", "z-image-turbo"),
+        unpack=unpack_zimage_latent,
+        packed_latent_downscale=None,
     ),
     memory_cap_hint_gb=1,
 )
