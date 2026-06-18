@@ -104,8 +104,8 @@ preview = LivePreviewCallback(
     variant="taef2",
     every=5,
     save_to="preview.png",
-    latent_height=32,      # 512 / 16
-    latent_width=32,
+    # latent_height / latent_width are auto-detected from the generation config;
+    # pass both only if you want to override.
 )
 model.callbacks.register(preview)
 model.generate_image(
@@ -131,6 +131,7 @@ See `docs/manual-verification.md` for the full verification recipe.
 - **v0.4.0 — released on PyPI** (2026-06-13). Z-Image / Z-Image-Turbo live preview: a new `ZImage` model reuses TAEF1's FLUX.1 weights with no new download (Z-Image shares FLUX.1's 16-channel latent contract), validated by an SSIM ≥ 0.75 calibration against mflux's full Z-Image VAE (measured 0.94). Adds `mlx-taef bench --variant zimage` and a new top-level [EXAMPLES.md](EXAMPLES.md) with captured frames and measured decode numbers.
 - **v0.4.1 — released on PyPI** (2026-06-14). Documentation and packaging accuracy pass, no code changes: the Z-Image SSIM calibration is described correctly (it runs as an opt-in network test, not in default CI); the "no PyTorch" note is scoped to the base install (the `mflux` extra pulls in PyTorch via mflux); and the source distribution is now an allowlist, so it no longer ships the test suite without its fixtures or sweeps in local tool state.
 - **v0.4.2 — released on PyPI** (2026-06-14). Hardening patch: `decode()` and `encode()` now reject non-4-D inputs with a clear `ValueError` naming the expected NHWC rank, instead of failing deep in the conv stack. Also moves the release workflow's `download-artifact` step to a Node 24 release, and the `mflux_live_preview` example now prints per-step decode timing next to the full-VAE decode (thanks @ianscrivener, #20).
+- **v0.5.0 — released on PyPI** (2026-06-18). Live-preview ergonomics: `LivePreviewCallback` auto-detects `latent_height` / `latent_width` from the mflux generation config, so you no longer pass them by hand. Passing both still overrides; passing exactly one now raises. The auto-extracted Flux2VAE batch-norm `eps` is forwarded into the TAEF2 unpack so a non-default `eps` previews faithfully, and `auto_bn=True` on a non-TAEF2 variant logs its no-op instead of staying silent. Three showcase-only exceptions (`SchemaVersionError`, `FixtureLatentMissingError`, `MlxTeacacheNotInstalledError`) are no longer exported from the package root; they remain importable from `mlx_taef.errors`.
 
 Track future releases via the [PyPI history](https://pypi.org/project/mlx-taef/#history) or `gh release list -R IonDen/mlx-taef`.
 

@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-06-18
+
+A live-preview ergonomics release.
+
+### Added
+- `LivePreviewCallback` auto-detects the preview resolution. Leave `latent_height` /
+  `latent_width` unset and the callback reads the image size from the mflux generation config at
+  run time, so a non-square or non-512 render previews correctly without you passing dimensions
+  by hand. Passing both dimensions still overrides the auto-detection.
+
+### Changed
+- `latent_height` / `latent_width` now default to `None` (auto-detect) instead of `32`. Callers
+  that pass both explicit dimensions are unaffected; callers that relied on the old `32` default
+  now get the right dimensions for their actual resolution. Passing exactly one of the two now
+  raises a `ValueError` (set both, or leave both to auto-detect); previously the unset one
+  silently fell back to `32`.
+- The auto-extracted Flux2VAE batch-norm `eps` is forwarded into the TAEF2 preview unpack, so a
+  VAE whose `eps` differs from the `1e-4` default previews faithfully.
+- `auto_bn=True` on a non-TAEF2 variant now logs that it is a no-op (it was silent before), and
+  the `auto_bn` / `latent_height` / `latent_width` arguments are documented on the callback.
+
+### Removed
+- `SchemaVersionError`, `FixtureLatentMissingError` and `MlxTeacacheNotInstalledError` are no
+  longer exported from the package root. They are raised only by the bundled showcase script and
+  remain importable from `mlx_taef.errors`.
+
 ## [0.4.2] — 2026-06-14
 
 A small hardening patch.
