@@ -247,13 +247,42 @@ def test_auto_bn_resolved_none_when_flux_missing_vae(caplog) -> None:
     assert any("auto_bn" in r.message for r in caplog.records)
 
 
-def test_auto_bn_resolved_none_when_variant_not_taef2() -> None:
+def test_auto_bn_resolved_none_when_variant_not_taef2(monkeypatch: pytest.MonkeyPatch) -> None:
     """auto-bn is a no-op for non-taef2 variants."""
+    from mlx_taef import TAEF1
     from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    converted = Path(__file__).parent / "converted" / "taef1_decoder.safetensors"
+    real_taef1 = TAEF1.from_pretrained_local(converted)
+    monkeypatch.setattr(TAEF1, "from_pretrained", classmethod(lambda cls, **kw: real_taef1))
 
     flux = _build_fake_flux_with_nontrivial_bn()
     cb = LivePreviewCallback(flux=flux, variant="taef1", save_to="/tmp/preview.png")
     assert cb.resolved_bn == "none"
+
+
+def test_auto_bn_noop_logs_for_non_taef2(
+    caplog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """auto_bn=True + flux + variant!='taef2' is a silent no-op today; it should log."""
+    import logging
+
+    from mlx_taef import TAEF1
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    converted = Path(__file__).parent / "converted" / "taef1_decoder.safetensors"
+    real_taef1 = TAEF1.from_pretrained_local(converted)
+    monkeypatch.setattr(TAEF1, "from_pretrained", classmethod(lambda cls, **kw: real_taef1))
+
+    flux = _build_fake_flux_with_nontrivial_bn()
+    with caplog.at_level(logging.INFO, logger="mlx_taef"):
+        cb = LivePreviewCallback(
+            flux=flux, variant="taef1", auto_bn=True, save_to="/tmp/preview.png"
+        )
+    assert cb.resolved_bn == "none"
+    # Use caplog.messages (already-formatted strings); LogRecord.message is only set after
+    # formatting and is not guaranteed populated across pytest versions.
+    assert any("auto_bn" in m and "taef1" in m for m in caplog.messages)
 
 
 def _in_loop_subscribers(registry: object) -> list:
