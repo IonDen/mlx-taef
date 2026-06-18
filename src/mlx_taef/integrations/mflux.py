@@ -57,26 +57,29 @@ def unpack_flux2_latent(
     return _kernel_unpack(packed, ctx)
 
 
-def _try_extract_bn(flux: object) -> tuple[mx.array | None, mx.array | None]:
+def _try_extract_bn(
+    flux: object,
+) -> tuple[mx.array | None, mx.array | None, float | None]:
     """Best-effort extraction of FLUX.2 VAE BN stats.
 
-    Returns (running_mean, running_var) on success, (None, None) on any
+    Returns (running_mean, running_var, eps) on success, (None, None, None) on any
     failure (missing attribute, wrong shape, exception). Never raises.
     """
     try:
         vae = getattr(flux, "vae", None)
         if vae is None:
-            return (None, None)
+            return (None, None, None)
         bn = getattr(vae, "bn", None)
         if bn is None:
-            return (None, None)
+            return (None, None, None)
         mean = getattr(bn, "running_mean", None)
         var = getattr(bn, "running_var", None)
         if mean is None or var is None:
-            return (None, None)
-        return (mean, var)
+            return (None, None, None)
+        eps = getattr(bn, "eps", None)
+        return (mean, var, eps)
     except Exception:
-        return (None, None)
+        return (None, None, None)
 
 
 def _resolve_latent_dims(
@@ -194,6 +197,7 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
         self.bn_mean = bn_mean
         self.bn_var = bn_var
         self.saved_paths: list[Path] = []
+        self.bn_eps: float = 1e-4
         # Resolve BN source. Precedence:
         #   explicit (user passed bn_mean + bn_var)
         #     > auto (auto_bn=True + variant=="taef2" + flux.vae.bn extractable)
@@ -201,10 +205,12 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
         if bn_mean is not None and bn_var is not None:
             self.resolved_bn = "explicit"
         elif auto_bn and variant == "taef2" and flux is not None:
-            extracted_mean, extracted_var = _try_extract_bn(flux)
+            extracted_mean, extracted_var, extracted_eps = _try_extract_bn(flux)
             if extracted_mean is not None and extracted_var is not None:
                 self.bn_mean = extracted_mean
                 self.bn_var = extracted_var
+                if extracted_eps is not None:
+                    self.bn_eps = float(extracted_eps)
                 self.resolved_bn = "auto"
             else:
                 logger.warning(
@@ -253,6 +259,7 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
             latent_width=lw,
             bn_mean=self.bn_mean,
             bn_var=self.bn_var,
+            bn_eps=self.bn_eps,
         )
         img = self.model.decode_image(binding.unpack(latents, ctx))
         target = self._resolve_target(idx)
