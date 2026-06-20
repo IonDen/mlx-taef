@@ -1326,7 +1326,7 @@ wheels = [
 
 [[package]]
 name = "mflux"
-version = "0.17.5"
+version = "0.18.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "filelock" },
@@ -1354,9 +1354,9 @@ dependencies = [
     { name = "twine" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d3/ee/20bcf2a71c24882f79f861321ab82d61b3ad1943f702d7b3763683069016/mflux-0.17.5.tar.gz", hash = "sha256:f5e23b1d5a1ed8de13daff069d3fa034406839bdd4109b5714f06d2e7e597a3a", size = 780106, upload-time = "2026-04-10T09:09:54.523Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a1/a8/a1b1580daa3a7b2b1c0cd8f316be6873f5508e37218c92cb678e0cd2f593/mflux-0.18.0.tar.gz", hash = "sha256:55af58c4ee3ad76366f3aad3a1517e463b31f9133903e3909c5d3cc97e20103d", size = 825100, upload-time = "2026-06-07T20:00:28.75Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/29/a7/2d2d2e9e800be079b675ca75b980d99c2254223a73efe25026015e6cc900/mflux-0.17.5-py3-none-any.whl", hash = "sha256:bb4c61242e0a47bfc558ac33ecc79e7022ad8d27fee43e85332131f0a9ec011e", size = 1038092, upload-time = "2026-04-10T09:09:53.225Z" },
+    { url = "https://files.pythonhosted.org/packages/44/59/776d77d4444d9fcf26a8cc79cba9d16624812dc89aa8705762270444ae43/mflux-0.18.0-py3-none-any.whl", hash = "sha256:a5357d99cfab0b1856721433dca9fdc38bcd3e7f223266bf414c48e0f7eebee5", size = 1110593, upload-time = "2026-06-07T20:00:27.265Z" },
 ]
 
 [[package]]
@@ -1631,10 +1631,10 @@ typecheck = [
 [package.metadata]
 requires-dist = [
     { name = "huggingface-hub", specifier = ">=0.24" },
-    { name = "mflux", marker = "extra == 'mflux'", specifier = ">=0.17,<0.18" },
-    { name = "mflux", marker = "extra == 'showcase'", specifier = ">=0.17,<0.18" },
+    { name = "mflux", marker = "extra == 'mflux'", specifier = ">=0.17,<0.19" },
+    { name = "mflux", marker = "extra == 'showcase'", specifier = ">=0.17,<0.19" },
     { name = "mlx", specifier = ">=0.20" },
-    { name = "mlx-teacache", marker = "extra == 'showcase'", specifier = ">=0.6,<0.7" },
+    { name = "mlx-teacache", marker = "extra == 'showcase'", specifier = ">=0.9.1,<0.10" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pillow", marker = "extra == 'image'", specifier = ">=10.0" },
     { name = "pillow", marker = "extra == 'showcase'", specifier = ">=10.0" },
@@ -1646,10 +1646,10 @@ provides-extras = ["image", "mflux", "showcase"]
 [package.metadata.requires-dev]
 dev = [
     { name = "hypothesis", specifier = ">=6.130" },
-    { name = "mflux", specifier = ">=0.17,<0.18" },
+    { name = "mflux", specifier = ">=0.17,<0.19" },
     { name = "mkdocs-material", specifier = ">=9.5" },
     { name = "mkdocstrings", extras = ["python"], specifier = ">=0.27" },
-    { name = "mlx-teacache", specifier = ">=0.6,<0.7" },
+    { name = "mlx-teacache", specifier = ">=0.9.1,<0.10" },
     { name = "mypy", specifier = ">=1.13" },
     { name = "pillow", specifier = ">=10.0" },
     { name = "pre-commit", specifier = ">=3.8" },
@@ -1671,8 +1671,8 @@ fixtures = [
 lint = [{ name = "ruff", specifier = ">=0.7" }]
 test = [
     { name = "hypothesis", specifier = ">=6.130" },
-    { name = "mflux", specifier = ">=0.17,<0.18" },
-    { name = "mlx-teacache", specifier = ">=0.6,<0.7" },
+    { name = "mflux", specifier = ">=0.17,<0.19" },
+    { name = "mlx-teacache", specifier = ">=0.9.1,<0.10" },
     { name = "pillow", specifier = ">=10.0" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-benchmark", specifier = ">=4.0" },
@@ -1683,16 +1683,16 @@ typecheck = [{ name = "mypy", specifier = ">=1.13" }]
 
 [[package]]
 name = "mlx-teacache"
-version = "0.6.1"
+version = "0.9.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "mlx", version = "0.31.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'linux'" },
     { name = "mlx", version = "0.31.2", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
     { name = "numpy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/49/7e/a255b2aaa00f72b6edd6e732e7d8b102636ba5b34449dc9715264014834d/mlx_teacache-0.6.1.tar.gz", hash = "sha256:31cfa951a36888281d687f52549f6244de76dae03bc66fe7e873b9154dd34983", size = 1447214, upload-time = "2026-05-26T19:40:26.384Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c0/a2/e36c4785db149dfb4d91dd91ae6695406fd59ff4db85963445f1bdf6423c/mlx_teacache-0.9.1.tar.gz", hash = "sha256:c93872a2ab2ab5889c4add60182372b0c2f1b560d0fba54a6d7d76a26461ade2", size = 2369140, upload-time = "2026-06-19T12:46:15.082Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ad/c4/2820aac5687d49ef8fcb78c56490abff08bf9a1c90d630ba31ef8ed7ed25/mlx_teacache-0.6.1-py3-none-any.whl", hash = "sha256:614dbb40f5e7194128e00d5f1edcc9a2ba7362de9b854cce2d23505630c38f83", size = 67967, upload-time = "2026-05-26T19:40:24.612Z" },
+    { url = "https://files.pythonhosted.org/packages/96/b2/23b4cf03ee2e59e1df28f647f94861b42dabea1fc5ae79ad7fc287e549cc/mlx_teacache-0.9.1-py3-none-any.whl", hash = "sha256:c9b7e8bfde5728f3ff09fe32b0ed3a6a0b53c04e05d5c91c63da1214d6965898", size = 89877, upload-time = "2026-06-19T12:46:13.534Z" },
 ]
 
 [[package]]
