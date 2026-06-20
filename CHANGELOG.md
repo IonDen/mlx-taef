@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] — 2026-06-20
+
+A compatibility release. No API or behavior changes.
+
+### Changed
+- The `mflux` extra now installs against mflux 0.18.x as well as 0.17.x. mflux 0.18.0
+  shipped after the previous pin, so the old `<0.18` bound left anyone already on 0.18
+  unable to install `mlx-taef[mflux]` without downgrading mflux. The pin is now
+  `>=0.17,<0.19`. The live-preview integration was verified against mflux 0.18.0: the
+  callback contract, the generation config the auto-resolution reads, the packed-latent
+  layout, and the Flux2VAE batch-norm stats the auto-bn path extracts are unchanged, so
+  no code needed to change.
+- The `showcase` extra moves its `mlx-teacache` pin to `>=0.9.1,<0.10`, the first
+  mlx-teacache release that supports mflux 0.18.x, so `mlx-taef[showcase]` stays coherent
+  on mflux 0.18.
+
 ## [0.5.0] — 2026-06-18
 
 A live-preview ergonomics release.

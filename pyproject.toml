@@ -38,11 +38,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-mflux = ["mflux>=0.17,<0.18"]
+mflux = ["mflux>=0.17,<0.19"]
 image = ["Pillow>=10.0"]
 showcase = [
-  "mflux>=0.17,<0.18",
-  "mlx-teacache>=0.6,<0.7",
+  "mflux>=0.17,<0.19",
+  "mlx-teacache>=0.9.1,<0.10",
   "Pillow>=10.0",
   "scikit-image>=0.22",
 ]
@@ -64,8 +64,8 @@ test = [
   "pytest-cov>=5.0",
   "hypothesis>=6.130",
   "pytest-benchmark>=4.0",
-  "mflux>=0.17,<0.18",
-  "mlx-teacache>=0.6,<0.7",
+  "mflux>=0.17,<0.19",
+  "mlx-teacache>=0.9.1,<0.10",
   "scikit-image>=0.22",
   "Pillow>=10.0",
 ]
