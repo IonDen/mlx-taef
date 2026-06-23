@@ -10,10 +10,23 @@ module load creates a cycle (kernels.__init__ -> flux -> _conversion -> convert 
 variants(shim) -> kernels.KERNELS, which is not yet bound).
 """
 
+import hashlib
+from pathlib import Path
+
 import mlx.core as mx
 import numpy as np
 
+from mlx_taef.errors import ConversionError
 from mlx_taef.kernels._types import WeightSource
+
+
+def _verify_sha256(path: Path, expected: str | None) -> None:
+    """Raise ConversionError if the file at `path` doesn't match `expected` sha256 (no-op if None)."""
+    if expected is None:
+        return
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if digest != expected:
+        raise ConversionError(f"sha256 mismatch for {path}: got {digest}, expected {expected}")
 
 
 class DiffusersRemap:
@@ -98,6 +111,7 @@ class TaehvCombined:
         path = hf_hub_download(  # pragma: no cover
             repo_id=source.repo, filename=source.filename, revision=source.revision
         )
+        _verify_sha256(Path(path), source.sha256)  # pragma: no cover
         return self._select_role(safetensors_load_numpy(path), role)  # pragma: no cover
 
     def convert(
