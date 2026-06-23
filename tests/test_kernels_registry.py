@@ -4,8 +4,19 @@ from mlx_taef.errors import TaefError, UnknownKernelError
 from mlx_taef.kernels import KERNELS, get_kernel
 
 
-def test_registry_has_exactly_the_five_kernels():
-    assert set(KERNELS) == {"taesd", "taesdxl", "taef1", "taef2", "zimage"}
+def test_registry_has_exactly_the_six_kernels():
+    assert set(KERNELS) == {"taesd", "taesdxl", "taef1", "taef2", "zimage", "qwen-image"}
+
+
+def test_qwen_image_kernel_registered():
+    k = get_kernel("qwen-image")
+    assert k.name == "qwen-image"
+    assert k.arch.name == "taehv"
+    assert k.latent.channels == 16
+    assert k.integration is not None
+    assert k.integration.mflux_models == ("qwen-image", "qwen-image-edit")
+    assert k.integration.packed_latent_downscale == 16
+    assert k.source.sha256 is not None
 
 
 def test_zimage_shares_taef1_cache_key_and_source():

@@ -196,4 +196,14 @@ class ZImage(Taef):
     _kernel = KERNELS["zimage"]
 
 
-__all__ = ["TAEF1", "TAEF2", "TAESD", "TAESDXL", "Taef", "ZImage"]
+class QwenImage(Taef):
+    """Qwen-Image / Qwen-Image-Edit previews via the taew2.1 (Wan 2.1 VAE) tiny autoencoder.
+
+    Ports madebyollin's taew2.1; decodes the 16-channel Wan 2.1 latent that mflux uses for
+    Qwen-Image. ``decode``/``encode`` operate in taew2.1's native normalized latent space.
+    """
+
+    _kernel = KERNELS["qwen-image"]
+
+
+__all__ = ["TAEF1", "TAEF2", "TAESD", "TAESDXL", "QwenImage", "Taef", "ZImage"]

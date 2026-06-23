@@ -2,7 +2,7 @@
 
 import logging
 
-from mlx_taef.api import TAEF1, TAEF2, TAESD, TAESDXL, Taef, ZImage
+from mlx_taef.api import TAEF1, TAEF2, TAESD, TAESDXL, QwenImage, Taef, ZImage
 from mlx_taef.errors import (
     ConversionError,
     MfluxNotInstalledError,
@@ -18,6 +18,7 @@ __all__ = [
     "TAESDXL",
     "ConversionError",
     "MfluxNotInstalledError",
+    "QwenImage",
     "Taef",
     "TaefError",
     "UnknownKernelError",
