@@ -2,7 +2,7 @@
 
 The canonical taew2.1 weights are published only on GitHub (madebyollin/taehv); community HF
 mirrors were found to diverge from them. This is the ground-truth source for the conversion test
-and the parity fixtures. The runtime package pins a byte-identical HF re-host (IonDen/taew2.1);
+and the parity fixtures. The runtime package pins a byte-identical HF re-host (ionden/taew2.1);
 this helper keeps the tests independent of that re-host.
 """
 
