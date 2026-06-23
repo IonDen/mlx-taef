@@ -148,6 +148,14 @@ MIT. Mirrors upstream [madebyollin/taesd](https://github.com/madebyollin/taesd) 
 - [Apple ML Explore](https://github.com/ml-explore/mlx) for MLX.
 - [filipstrand/mflux](https://github.com/filipstrand/mflux) for the MLX-native FLUX runner this library integrates with.
 
+## Sister projects
+
+Other MLX libraries for Apple Silicon:
+
+- [mlx-teacache](https://github.com/IonDen/mlx-teacache) — TeaCache residual caching to skip redundant FLUX denoising steps.
+- [mlx-model-doctor](https://github.com/IonDen/mlx-model-doctor) — validate an MLX / Hugging Face model repo before you load it (config, tokenizer, safetensors, memory).
+- [mlx-quant-fidelity](https://github.com/IonDen/mlx-quant-fidelity) — measure how much quality a quantization costs (KL divergence, top-token flips, perplexity delta).
+
 ---
 
 By Denis Ineshin · [ineshin.space](https://ineshin.space)
