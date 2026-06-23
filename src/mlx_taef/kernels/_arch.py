@@ -59,8 +59,23 @@ def _build_taesd2d_encoder(latent_channels: int, *, midblock_gn: bool) -> "nn.Se
     return nn.Sequential(*layers)  # type: ignore[attr-defined]
 
 
+def _build_taehv_decoder(latent_channels: int, *, midblock_gn: bool) -> "nn.Sequential":  # type: ignore[name-defined]
+    """Build the taew2.1 (taehv) decoder. `midblock_gn` is accepted for the uniform call site but unused."""
+    from mlx_taef.kernels._taehv import TaehvDecoder
+
+    return TaehvDecoder(latent_channels=latent_channels)
+
+
+def _build_taehv_encoder(latent_channels: int, *, midblock_gn: bool) -> "nn.Sequential":  # type: ignore[name-defined]
+    """Build the taew2.1 (taehv) encoder. `midblock_gn` is accepted for the uniform call site but unused."""
+    from mlx_taef.kernels._taehv import TaehvEncoder
+
+    return TaehvEncoder(latent_channels=latent_channels)
+
+
 ARCH_BUILDERS: dict[str, dict[str, Callable[..., nn.Sequential]]] = {  # type: ignore[name-defined]
     "taesd2d": {"decoder": _build_taesd2d_decoder, "encoder": _build_taesd2d_encoder},
+    "taehv": {"decoder": _build_taehv_decoder, "encoder": _build_taehv_encoder},
 }
 
 
