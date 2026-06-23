@@ -11,14 +11,18 @@ import numpy as np
 from mlx_taef.kernels._taehv import MemBlock, TGrow, TPool
 
 
-def test_memblock_concats_past_on_last_axis_and_outputs_n_out():
+def test_memblock_uses_past_memory_and_outputs_n_out():
     # NHWC, H,W>1, time folded into batch (NT=2). taehv MemBlocks are square (n_in==n_out).
-    x = mx.zeros((2, 4, 5, 64))
-    past = mx.zeros((2, 4, 5, 64))
+    # Distinct non-zero x/past so we verify `past` is actually concatenated + used — an all-zero
+    # test only checks shape and can't see the concat axis.
     block = MemBlock(64, 64)
     mx.eval(block.parameters())
+    x = mx.random.normal((2, 4, 5, 64), key=mx.random.key(0))
+    past = mx.random.normal((2, 4, 5, 64), key=mx.random.key(1))
     out = block(x, past)
     assert out.shape == (2, 4, 5, 64)
+    # Changing the memory changes the output -> past is genuinely wired into the conv.
+    assert not mx.allclose(out, block(x, mx.zeros_like(past))).item()
 
 
 def _ref_tgrow_nchw(x_nchw: np.ndarray, stride: int) -> np.ndarray:
