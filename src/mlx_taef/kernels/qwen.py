@@ -42,11 +42,11 @@ QWEN_IMAGE = ModelKernel(
     conversion=TaehvCombined(),
     latent=LatentSpec(channels=16),
     # Canonical taew2.1 weights are published only on GitHub (madebyollin/taehv); this is the
-    # sha256-verified Hugging Face re-host. sha256 is the integrity pin; `revision` is set to the
-    # repo's commit once the re-host exists.
+    # sha256-verified Hugging Face re-host, pinned by commit revision + file sha256.
     source=WeightSource(
-        repo="IonDen/taew2.1",
+        repo="ionden/taew2.1",
         filename="taew2_1.safetensors",
+        revision="2ac5ae1c3291a8607a2d6c423b9a0337cef45f2b",
         sha256="04766eac0221b5390b985ae3fdcca652cbb4b1e8b82b28ea7ff89dfad1b1a93f",
     ),
     integration=MfluxBinding(
