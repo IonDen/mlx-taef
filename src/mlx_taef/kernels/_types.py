@@ -50,6 +50,10 @@ class WeightSource:
     filename: str | None = None
     decoder_filename: str | None = None
     encoder_filename: str | None = None
+    revision: str | None = None
+    """Optional HF commit revision (full SHA) to pin the download to a fixed checkpoint."""
+    sha256: str | None = None
+    """Optional sha256 of the source file; verified after download when set (supply-chain pin)."""
 
     def cache_key(self, *, role: str) -> str:
         """Return a stable cache filename stem for (this weight source, role)."""
