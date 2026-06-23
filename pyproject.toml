@@ -4,14 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mlx-taef"
-description = "Tiny AutoEncoders for diffusion on Apple Silicon — live previews + low-memory decode for FLUX & SD."
+description = "Tiny AutoEncoders for diffusion on Apple Silicon — live previews + low-memory decode for FLUX, SD, and Qwen-Image."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "Denis Ineshin", email = "denis.ineshin@gmail.com" }]
 keywords = [
   "mlx", "apple-silicon", "diffusion", "stable-diffusion",
-  "flux", "mflux", "taesd", "taef", "taef1", "taef2",
+  "flux", "mflux", "qwen-image", "taesd", "taef", "taef1", "taef2",
   "tiny-autoencoder", "vae", "latent-preview", "autoencoder",
 ]
 classifiers = [
