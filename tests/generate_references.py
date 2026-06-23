@@ -56,8 +56,84 @@ def convert_diffusers_sd_to_taesd(sd: dict, *, role: str) -> dict:
     return out
 
 
+def _generate_qwen_references() -> None:
+    """Generate qwen-image (taew2.1) reference fixtures + converted MLX weights.
+
+    Uses the vendored upstream taehv oracle (fp32) on the sha256-verified canonical checkpoint.
+    Kept separate from the TAESD loop because taehv has a distinct temporal forward + encode path.
+    Decode/encode run at T=1 (a single still image) with H,W>1 latents.
+    """
+    import mlx.core as mx
+    from safetensors.numpy import load_file as load_np
+    from safetensors.torch import load_file as load_torch
+
+    sys.path.insert(0, str(Path(__file__).parent / "_third_party"))
+    sys.path.insert(0, str(Path(__file__).parent))
+    from _taehv_canonical import canonical_taew21_path
+    from taehv import TAEHV
+
+    from mlx_taef.convert import _build_mlx_state_dict, _flatten_module_param_shapes
+    from mlx_taef.kernels._arch import build_arch
+    from mlx_taef.kernels._conversion import TaehvCombined
+
+    converted_dir = Path(__file__).parent / "converted"
+    converted_dir.mkdir(parents=True, exist_ok=True)
+    ckpt = canonical_taew21_path()
+
+    # Oracle in fp32 (canonical is fp16; the MLX port also runs fp32 — see the review dtype note).
+    model = TAEHV(checkpoint_path=None).eval().float()
+    sd = {k: v.float() for k, v in load_torch(str(ckpt)).items()}
+    model.load_state_dict(model.patch_tgrow_layers(sd))
+
+    lh = lw = 16  # 16x16 latent -> 128x128 RGB
+    for i, seed in enumerate(SEEDS):
+        g = torch.Generator().manual_seed(seed)
+        latent = torch.randn(1, 1, 16, lh, lw, generator=g, dtype=torch.float32)  # N,T,C,H,W
+        with torch.no_grad():
+            decoded = model.decode_video(latent, parallel=True, show_progress_bar=False)
+        latent_nhwc = latent[:, 0].permute(0, 2, 3, 1).contiguous().numpy().astype(np.float32)
+        decoded_nhwc = decoded[:, 0].permute(0, 2, 3, 1).contiguous().numpy().astype(np.float32)
+        save_file({"latent": latent_nhwc}, REFERENCE_DIR / f"qwen-image_latent_{i:03d}.safetensors")
+        save_file(
+            {"image": decoded_nhwc}, REFERENCE_DIR / f"qwen-image_decoded_{i:03d}.safetensors"
+        )
+        img_uint8 = (decoded_nhwc[0] * 255).clip(0, 255).astype(np.uint8)
+        Image.fromarray(img_uint8).save(REFERENCE_DIR / f"qwen-image_decoded_{i:03d}.png")
+
+    # Encode reference from the shared source image.
+    src = Image.open(REFERENCE_DIR / "_source_image.png").convert("RGB").resize((256, 256))
+    src_np = np.array(src).astype(np.float32) / 255.0
+    src_t = torch.from_numpy(src_np).permute(2, 0, 1).unsqueeze(0).unsqueeze(0)  # N,T,C,H,W
+    with torch.no_grad():
+        encoded = model.encode_video(src_t, parallel=True, show_progress_bar=False)
+    encoded_nhwc = encoded[:, 0].permute(0, 2, 3, 1).contiguous().numpy().astype(np.float32)
+    save_file({"latent": encoded_nhwc}, REFERENCE_DIR / "qwen-image_encoded_001.safetensors")
+
+    # Converted MLX weights (fp32) via the kernel conversion path.
+    full = load_np(str(ckpt))
+    for role in ("decoder", "encoder"):
+        raw = TaehvCombined._select_role(full, role)
+        arch = build_arch("taehv", role=role, latent_channels=16, midblock_gn=False)
+        converted = _build_mlx_state_dict(raw, expected_shapes=_flatten_module_param_shapes(arch))
+        mx.save_safetensors(str(converted_dir / f"qwen-image_{role}.safetensors"), converted)
+    print("  wrote qwen-image: 5 latents + 5 decoded + 1 encoded + 2 converted weight files")
+
+
 def main() -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Generate parity reference fixtures.")
+    parser.add_argument(
+        "--only",
+        help="Generate only this variant's fixtures (e.g. 'qwen-image'); leaves others untouched.",
+    )
+    args = parser.parse_args()
+
     REFERENCE_DIR.mkdir(parents=True, exist_ok=True)
+
+    if args.only == "qwen-image":
+        _generate_qwen_references()
+        return 0
 
     sys.path.insert(0, str(Path(__file__).parent / "_third_party"))
     from taesd import TAESD
