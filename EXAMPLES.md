@@ -46,6 +46,27 @@ above measures the SSIM number, and an opt-in network test (`pytest --run-networ
 full API including `encode()`, which reuses the TAEF1 encoder on the shared latent contract. It's fine for round-tripping but not separately validated
 against Z-Image's own VAE encoder, so treat encode/img2img as best-effort.
 
+## Qwen-Image live preview
+
+Qwen-Image and Qwen-Image-Edit generate in the Wan 2.1 VAE's 16-channel latent space, which the
+rest of the TAESD family doesn't cover. `QwenImage` ports madebyollin's taew2.1 tiny autoencoder
+for it, so `LivePreviewCallback(variant="qwen-image")` previews an in-flight Qwen generation the
+same way the other variants do:
+
+```python
+from mlx_taef.integrations.mflux import LivePreviewCallback
+
+callback = LivePreviewCallback(variant="qwen-image", save_to="preview.png", every=5)
+# pass `callback` to your mflux Qwen-Image generation
+```
+
+Correctness is gated by committed parity fixtures: the decode and encode paths match the upstream
+taew2.1 reference to within ~3e-6 (fp32).
+
+Frames and decode timing here are pending. Qwen-Image is a ~20B model that doesn't fit a usable
+resolution on 32 GB, so the in-context live preview and the `mlx-taef bench --variant qwen-image`
+number are community-measured rather than captured on this reference machine.
+
 ## FLUX.2 Klein live preview
 
 A live preview of FLUX.2 Klein with `auto_bn` color correction. Pass `flux=model` and the
