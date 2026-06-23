@@ -3,8 +3,9 @@
 Provides:
 - `unpack_flux2_latent`: convert mflux's packed FLUX.2 latents to TAEF2-compatible NHWC.
 - `LivePreviewCallback`: drop-in mflux callback that writes preview PNGs every N steps.
-  Supports FLUX.1 (``variant='taef1'``), FLUX.2 Klein (``variant='taef2'``), and Z-Image /
-  Z-Image-Turbo (``variant='zimage'``, reuses TAEF1 weights).
+  Supports FLUX.1 (``variant='taef1'``), FLUX.2 Klein (``variant='taef2'``), Z-Image /
+  Z-Image-Turbo (``variant='zimage'``, reuses TAEF1 weights), and Qwen-Image / Qwen-Image-Edit
+  (``variant='qwen-image'``, via taew2.1).
 
 Install with: `pip install "mlx-taef[mflux]"`.
 """
@@ -24,9 +25,17 @@ try:
 except ImportError as e:  # pragma: no cover
     raise MfluxNotInstalledError() from e
 
-from mlx_taef.api import TAEF1, TAEF2, Taef, ZImage
+from mlx_taef.api import TAEF1, TAEF2, QwenImage, Taef, ZImage
 
 logger = logging.getLogger(__name__)
+
+# mflux-capable preview variants: kernel name -> API class. (taesd/taesdxl have no mflux binding.)
+_VARIANT_CLASSES: dict[str, type[Taef]] = {
+    "taef1": TAEF1,
+    "taef2": TAEF2,
+    "zimage": ZImage,
+    "qwen-image": QwenImage,
+}
 
 
 def unpack_flux2_latent(
@@ -136,8 +145,9 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
             color-correct previews. For 'taef1'/'zimage' it is a no-op (those have no BN
             step) and logs an info line so the no-op is observable. Explicit `bn_mean`/
             `bn_var` always take precedence.
-        variant: 'taef1' (FLUX.1), 'taef2' (FLUX.2 Klein), or 'zimage' (Z-Image /
-            Z-Image-Turbo, which reuses TAEF1's weights).
+        variant: 'taef1' (FLUX.1), 'taef2' (FLUX.2 Klein), 'zimage' (Z-Image /
+            Z-Image-Turbo, which reuses TAEF1's weights), or 'qwen-image'
+            (Qwen-Image / Qwen-Image-Edit, via taew2.1).
         every: emit a preview every Nth iteration. Default 5. When
             `numbered_frames=True` this is forced to 1 so the gallery
             captures every step.
@@ -178,14 +188,13 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
                 "the auto-detected resolution, or neither to auto-detect from the mflux "
                 f"Config. Got latent_height={latent_height!r}, latent_width={latent_width!r}."
             )
-        if variant == "taef1":
-            self.model: Taef = TAEF1.from_pretrained(include_encoder=False)
-        elif variant == "taef2":
-            self.model = TAEF2.from_pretrained(include_encoder=False)
-        elif variant == "zimage":
-            self.model = ZImage.from_pretrained(include_encoder=False)
-        else:
-            raise ValueError(f"variant must be 'taef1', 'taef2', or 'zimage', got {variant!r}")
+        try:
+            model_cls = _VARIANT_CLASSES[variant]
+        except KeyError:
+            raise ValueError(
+                f"variant must be one of {sorted(_VARIANT_CLASSES)}, got {variant!r}"
+            ) from None
+        self.model: Taef = model_cls.from_pretrained(include_encoder=False)
         _binding = self.model._kernel.integration
         assert _binding is not None, f"kernel {self.model._kernel.name!r} has no mflux binding"
         self._packed_downscale: int | None = _binding.packed_latent_downscale
