@@ -7,7 +7,7 @@ from pathlib import Path
 
 import mlx.core as mx
 
-from mlx_taef.api import TAEF1, TAEF2, TAESD, TAESDXL, ZImage
+from mlx_taef.api import TAEF1, TAEF2, TAESD, TAESDXL, QwenImage, ZImage
 from mlx_taef.kernels import KERNELS
 from mlx_taef.variants import VARIANTS
 
@@ -19,6 +19,7 @@ _BENCH_CLS_BY_NAME = {
     "taef1": TAEF1,
     "taef2": TAEF2,
     "zimage": ZImage,
+    "qwen-image": QwenImage,
 }
 
 
