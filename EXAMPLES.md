@@ -1,11 +1,14 @@
 # Examples
 
-Worked examples of mlx-taef in use, with real captured frames and the measured cost of each
-decode. The point of a tiny autoencoder is to watch a diffusion run progress without paying for
-the full VAE on every step, so most of these are live-preview walkthroughs.
+Worked examples of mlx-taef in use. Most include real captured frames and the measured cost of
+each decode; the Qwen-Image example is decode-verified against committed parity fixtures, with its
+frames and live-preview timing still pending (that section explains why). The point of a tiny
+autoencoder is to watch a diffusion run progress without paying for the full VAE on every step, so
+most of these are live-preview walkthroughs.
 
-Every number below was produced by the committed bench harness and is reproducible with the
-command shown in its section. Captures and timings: Apple M1 Max, 32 GB unified memory, macOS;
+Every measured number below was produced by the committed bench harness and is reproducible with
+the command shown in its section, except where a section marks its figures as pending or
+community-measured. Captures and timings: Apple M1 Max, 32 GB unified memory, macOS;
 mflux 0.17.5, MLX 0.31.2; weights quantized to int4 (`quantize=4`), bf16 activations. Decode
 times are the median over several timed reps; SSIM compares the tiny-decoder image against the
 full VAE on the same latent.

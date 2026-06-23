@@ -10,7 +10,7 @@
 
 Tiny AutoEncoders for diffusion latents on Apple Silicon, in pure MLX.
 
-`mlx-taef` is the first MLX port of the TAESD family — TAESD (SD1.x), TAESDXL (SDXL), TAEF1 (FLUX.1), TAEF2 (FLUX.2 Klein), and Z-Image (which reuses the TAEF1 weights for previews) — distilled mini-autoencoders that decode diffusion latents to RGB in milliseconds using a few-MB model instead of multi-GB full VAEs.
+`mlx-taef` is the first MLX port of the TAESD family — TAESD (SD1.x), TAESDXL (SDXL), TAEF1 (FLUX.1), TAEF2 (FLUX.2 Klein), and Z-Image (which reuses the TAEF1 weights for previews) — plus Qwen-Image / Qwen-Image-Edit on a port of the taew2.1 (Wan 2.1 VAE) autoencoder. All are distilled mini-autoencoders that decode diffusion latents to RGB in milliseconds using a few-MB model instead of multi-GB full VAEs.
 
 Use it for:
 - **Live previews** during long generations on Mac — TAEF1 decodes a 512×512 preview in ~183 ms and TAEF2 in ~258 ms on M1 Max (vs 2 s for the full VAE). See [COMPARISON.md](COMPARISON.md) for the measured table and reproducer.
@@ -75,6 +75,7 @@ Requires Python ≥ 3.11 and Apple Silicon (`mlx` itself is Apple-Silicon-only).
 | `TAEF1` | 16 | FLUX.1 | [madebyollin/taef1](https://huggingface.co/madebyollin/taef1) |
 | `TAEF2` | 32 | FLUX.2 Klein | [madebyollin/taef2](https://huggingface.co/madebyollin/taef2) |
 | `ZImage` | 16 | Z-Image / Z-Image-Turbo (shares the FLUX.1 16-ch latent contract) | reuses [madebyollin/taef1](https://huggingface.co/madebyollin/taef1) |
+| `QwenImage` | 16 | Qwen-Image / Qwen-Image-Edit (Wan 2.1 VAE 16-ch latent) | [ionden/taew2.1](https://huggingface.co/ionden/taew2.1) |
 
 They all share one API.
 
