@@ -81,7 +81,7 @@ docs = [
 ]
 # Reference-fixture generation only. Not for runtime.
 fixtures = [
-  "torch>=2.4",
+  "torch>=2.4,<3",
   "pillow>=10.0",
 ]
 dev = [
