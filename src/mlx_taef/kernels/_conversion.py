@@ -66,3 +66,46 @@ class UpstreamTwoFile:
         raw = self._load_raw(source, role)
         expected = _flatten_module_param_shapes(arch_module)
         return _build_mlx_state_dict(raw, expected_shapes=expected)
+
+
+class TaehvCombined:
+    """Combined single-file taew2.1 source: one .safetensors holds both encoder + decoder.
+
+    The MLX `TaehvDecoder`/`TaehvEncoder` are `nn.Sequential` subclasses whose params key as
+    `layers.N...` — exactly what `_sequential_key_to_mlx` produces. So conversion is just: keep
+    this role's keys, strip the `decoder.`/`encoder.` prefix, cast fp16->fp32 (the canonical
+    weights are fp16; parity runs fp32 and MLX would silently upcast fp16 weights anyway), then
+    reuse the shared `_build_mlx_state_dict` (NCHW->NHWC conv transpose + strict coverage-verify).
+    """
+
+    @staticmethod
+    def _select_role(full_sd: dict[str, np.ndarray], role: str) -> dict[str, np.ndarray]:
+        """Keep `role`'s tensors, strip the role prefix, cast fp16->fp32 (Sequential-style keys)."""
+        prefix = f"{role}."
+        return {
+            key[len(prefix) :]: arr.astype(np.float32)
+            for key, arr in full_sd.items()
+            if key.startswith(prefix)
+        }
+
+    def _load_raw(self, source: WeightSource, role: str) -> dict[str, np.ndarray]:
+        """Download the combined safetensors and select this role's tensors."""
+        from huggingface_hub import hf_hub_download  # pragma: no cover
+        from safetensors.numpy import load_file as safetensors_load_numpy  # pragma: no cover
+
+        if source.filename is None:  # pragma: no cover
+            raise ValueError(f"Combined taehv source {source.repo!r} has no filename")
+        path = hf_hub_download(  # pragma: no cover
+            repo_id=source.repo, filename=source.filename, revision=source.revision
+        )
+        return self._select_role(safetensors_load_numpy(path), role)  # pragma: no cover
+
+    def convert(
+        self, source: WeightSource, arch_module: object, *, role: str
+    ) -> dict[str, mx.array]:
+        """Convert the combined taehv source for `role` into the arch-shaped MLX state dict."""
+        from mlx_taef.convert import _build_mlx_state_dict, _flatten_module_param_shapes
+
+        raw = self._load_raw(source, role)
+        expected = _flatten_module_param_shapes(arch_module)
+        return _build_mlx_state_dict(raw, expected_shapes=expected)
