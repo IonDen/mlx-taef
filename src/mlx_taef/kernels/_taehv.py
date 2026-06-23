@@ -13,7 +13,7 @@ grouping exactly (verified against an NCHW reference at H,W>1 in tests/test_taeh
 import mlx.core as mx
 import mlx.nn as nn
 
-from mlx_taef.model import _Identity, make_conv
+from mlx_taef.model import Clamp, _Identity, make_conv
 
 
 class MemBlock(nn.Module):  # type: ignore[misc,name-defined]
@@ -120,3 +120,115 @@ class TPool(nn.Module):  # type: ignore[misc,name-defined]
     def __call__(self, x: mx.array) -> mx.array:
         """Apply the time group then 1x1 conv. Input/output NHWC."""
         return self.conv(self._reshape_time(x))  # type: ignore[no-any-return]
+
+
+def _shift_memory(x: mx.array, n: int) -> mx.array:
+    """Previous-frame memory for a MemBlock: prepend a zero frame on time, drop the last.
+
+    Mirrors upstream `pad(_x, (...,1,0))[:, :T]`. `T = NT // n` is recomputed from the current
+    tensor each call, because intervening TGrows grow NT.
+    """
+    nt, h, w, c = x.shape
+    t = nt // n
+    g = x.reshape(n, t, h, w, c)
+    zero = mx.zeros((n, 1, h, w, c), dtype=x.dtype)
+    g = mx.concatenate([zero, g], axis=1)[:, :t]
+    return g.reshape(nt, h, w, c)
+
+
+def _run_memblocks(layers: object, x: mx.array, n: int) -> mx.array:
+    """Iterate the Sequential's children with the memory-threaded driver (time folded into NT)."""
+    for layer in layers:  # type: ignore[attr-defined]
+        x = layer(x, _shift_memory(x, n)) if isinstance(layer, MemBlock) else layer(x)
+    return x
+
+
+class TaehvDecoder(nn.Sequential):  # type: ignore[misc,name-defined]
+    """taew2.1 decoder as an MLX nn.Sequential (param keys `layers.N...`) with a custom driver.
+
+    Child order mirrors upstream exactly (incl. paramless Clamp/ReLU/Upsample) so indices align
+    for weight conversion. `__call__` runs the memory-threaded driver, not a feed-forward chain.
+    For a single image (T=1) the temporal TGrows grow NT to `T_UPSCALE`; the leading
+    `T_UPSCALE-1` output frames are trimmed, leaving one RGB frame.
+    """
+
+    T_UPSCALE = 4  # two decoder TGrows with stride 2 (decoder_time_upscale=(False,True,True))
+
+    def __init__(self, latent_channels: int = 16) -> None:
+        """Build the decoder blocks for the given latent channel count."""
+        super().__init__(
+            Clamp(),
+            make_conv(latent_channels, 256),
+            nn.ReLU(),  # type: ignore[attr-defined]
+            MemBlock(256, 256),
+            MemBlock(256, 256),
+            MemBlock(256, 256),
+            nn.Upsample(scale_factor=2, mode="nearest"),  # type: ignore[attr-defined]
+            TGrow(256, 1),
+            make_conv(256, 128, bias=False),
+            MemBlock(128, 128),
+            MemBlock(128, 128),
+            MemBlock(128, 128),
+            nn.Upsample(scale_factor=2, mode="nearest"),  # type: ignore[attr-defined]
+            TGrow(128, 2),
+            make_conv(128, 64, bias=False),
+            MemBlock(64, 64),
+            MemBlock(64, 64),
+            MemBlock(64, 64),
+            nn.Upsample(scale_factor=2, mode="nearest"),  # type: ignore[attr-defined]
+            TGrow(64, 2),
+            make_conv(64, 64, bias=False),
+            nn.ReLU(),  # type: ignore[attr-defined]
+            make_conv(64, 3),
+        )
+
+    def __call__(self, latent: mx.array) -> mx.array:
+        """Decode an NHWC latent `(B,H,W,16)` (T=1) to RGB `(B,H*8,W*8,3)` in [0,1]."""
+        n = latent.shape[0]
+        x = _run_memblocks(self.layers, latent, n)
+        nt = x.shape[0]
+        t_out = nt // n
+        x = x.reshape(n, t_out, *x.shape[1:])[:, self.T_UPSCALE - 1 :]
+        x = x.reshape(-1, *x.shape[2:])
+        return mx.clip(x, 0.0, 1.0)
+
+
+class TaehvEncoder(nn.Sequential):  # type: ignore[misc,name-defined]
+    """taew2.1 encoder as an MLX nn.Sequential with a custom driver.
+
+    For a single image, the input frame is repeat-padded along time to `T_DOWNSCALE` before the
+    encoder driver (the TPools require T divisible by their stride); the two stride-2 TPools then
+    collapse it back to one latent frame.
+    """
+
+    T_DOWNSCALE = 4  # two encoder TPools with stride 2 (encoder_time_downscale=(True,True,False))
+
+    def __init__(self, latent_channels: int = 16) -> None:
+        """Build the encoder blocks for the given latent channel count."""
+        super().__init__(
+            make_conv(3, 64),
+            nn.ReLU(),  # type: ignore[attr-defined]
+            TPool(64, 2),
+            make_conv(64, 64, stride=2, bias=False),
+            MemBlock(64, 64),
+            MemBlock(64, 64),
+            MemBlock(64, 64),
+            TPool(64, 2),
+            make_conv(64, 64, stride=2, bias=False),
+            MemBlock(64, 64),
+            MemBlock(64, 64),
+            MemBlock(64, 64),
+            TPool(64, 1),
+            make_conv(64, 64, stride=2, bias=False),
+            MemBlock(64, 64),
+            MemBlock(64, 64),
+            MemBlock(64, 64),
+            make_conv(64, latent_channels),
+        )
+
+    def __call__(self, image: mx.array) -> mx.array:
+        """Encode NHWC RGB `(B,H,W,3)` (T=1) to a latent `(B,H/8,W/8,16)`."""
+        n = image.shape[0]
+        x = mx.repeat(mx.expand_dims(image, axis=1), self.T_DOWNSCALE, axis=1)
+        x = x.reshape(n * self.T_DOWNSCALE, *image.shape[1:])
+        return _run_memblocks(self.layers, x, n)
