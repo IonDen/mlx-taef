@@ -25,6 +25,8 @@ def get_or_convert(kernel: ModelKernel, *, role: str = "decoder") -> Path:
     cache_dir = CACHE_ROOT / "converted"
     cache_dir.mkdir(parents=True, exist_ok=True)
     out_path = cache_dir / f"{kernel.source.cache_key(role=role)}.mlx.safetensors"
+    if not out_path.resolve().is_relative_to(cache_dir.resolve()):  # pragma: no cover - defensive
+        raise ValueError(f"refusing to write cache outside {cache_dir}: {out_path}")
     if out_path.exists():
         logger.debug("Using cached weights at %s", out_path)
         return out_path

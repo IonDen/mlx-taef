@@ -63,7 +63,8 @@ class WeightSource:
             fname = self.decoder_filename or ""
         else:
             fname = self.encoder_filename or ""
-        return f"{self.repo.replace('/', '_')}__{fname}__{role}"
+        safe_fname = fname.replace("/", "_").replace("..", "_")
+        return f"{self.repo.replace('/', '_')}__{safe_fname}__{role}"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
