@@ -4,6 +4,7 @@ A non-binding sketch of where the library is headed. Each item lists status, eff
 
 ## Released
 
+- **v0.6.0** (2026-06-23) — Qwen-Image / Qwen-Image-Edit live preview. A new `QwenImage` model ports madebyollin's taew2.1 tiny autoencoder (Wan 2.1 VAE, 16-channel latent) to pure MLX — the first variant on the new `taehv` architecture (2D convs with recurrent temporal blocks, run for a single still image). Adds `LivePreviewCallback(variant="qwen-image")` and `mlx-taef bench --variant qwen-image`. Decode and encode match the upstream reference to ~3e-6 (committed parity fixtures). Live-preview quality against the full Wan VAE is community-measured (the ~20B Qwen-Image model won't fit a usable resolution on 32 GB).
 - **v0.5.1** (2026-06-20) — mflux 0.18.x compatibility. The `mflux` extra widens to install against mflux 0.18.x alongside 0.17.x (the previous `<0.18` pin excluded it); the live-preview integration is verified against mflux 0.18.0 with no API or behavior change.
 - **v0.5.0** (2026-06-18) — live-preview ergonomics. `LivePreviewCallback` auto-detects `latent_height` / `latent_width` from the mflux generation config on each call, so the resolution no longer has to be passed by hand; passing both still overrides, and passing exactly one now raises. The auto-extracted Flux2VAE batch-norm `eps` is forwarded into the TAEF2 unpack so a non-default `eps` previews faithfully, and `auto_bn=True` on a non-TAEF2 variant now logs its no-op. Drops three showcase-only exceptions (`SchemaVersionError`, `FixtureLatentMissingError`, `MlxTeacacheNotInstalledError`) from the package-root exports; they remain importable from `mlx_taef.errors`.
 - **v0.4.2** (2026-06-14) — hardening patch. `decode()` / `encode()` reject non-4-D inputs with a `ValueError` naming the expected NHWC rank, closing a gap in the v0.3.1 channel-count guard. Internal: the release workflow's `download-artifact` action moves to a Node 24 release; the `mflux_live_preview` example now prints per-step decode timing next to the full-VAE final decode (thanks @ianscrivener, #20).
@@ -34,7 +35,7 @@ These exist in upstream [`madebyollin/taesd`](https://github.com/madebyollin/tae
 - **TAESD3** — for Stable Diffusion 3 / 3.5.
 - **TAESANA** — for Sana (the `f32` arch_variant placeholder in `variants.py` is reserved for this).
 - **TAESDV** — for SD video models.
-- **TAEHV** — for Hunyuan / Wan / CogVideoX.
+- **TAEHV** — for Hunyuan / Wan / CogVideoX. The Wan 2.1 decoder (taew2.1) ships as of v0.6.0 for Qwen-Image; the multi-frame video models on this architecture are not yet wired.
 - **TAEM1** — for Mochi 1.
 
 The mlx-taef integration cost for each is roughly: half-day of code (new variant entry, weight conversion path, smoke test) + a calibration/reference-fixture pass to verify the SSIM/parity bound holds. Not blocked by anything; awaits user/community demand.

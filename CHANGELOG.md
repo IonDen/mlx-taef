@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-06-23
+
+Qwen-Image live preview.
+
+### Added
+- `QwenImage` decodes Qwen-Image and Qwen-Image-Edit latents — the Wan 2.1 VAE's 16-channel
+  latent — with a pure-MLX port of madebyollin's taew2.1 tiny autoencoder. Construct it with
+  `QwenImage.from_pretrained()` for standalone decode/encode, or preview a live generation with
+  `LivePreviewCallback(variant="qwen-image")`. Adds `mlx-taef bench --variant qwen-image`.
+
+### Notes
+- Decode and encode match the upstream taew2.1 reference to within ~3e-6 (fp32, measured worst),
+  gated by committed parity fixtures for both paths.
+- taew2.1 is a different shape from the rest of the family: a 2D-conv autoencoder with recurrent
+  temporal blocks, run here for a single still image. It is the first variant on the new `taehv`
+  architecture.
+- The weights are a sha256-verified re-host of madebyollin's canonical taew2.1, which is published
+  on GitHub only; the kernel pins the file by its hash.
+- Live-preview quality against the full Wan VAE is community-measured: Qwen-Image is a ~20B model
+  that does not fit a usable resolution on 32 GB, so that comparison is not captured here.
+
 ## [0.5.1] — 2026-06-20
 
 A compatibility release. No API or behavior changes.
