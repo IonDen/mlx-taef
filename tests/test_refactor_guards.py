@@ -1,7 +1,10 @@
-"""Guard: the v0.3.0 kernel refactor is zero-behavior-change vs the base branch.
+"""Guard: the committed parity oracle must not be silently MODIFIED or DELETED.
 
-It must not modify committed reference fixtures, converted weights, or the fixture manifest —
-those are the bit-exact parity oracle. A diff against the merge-base catches any such change.
+Committed reference fixtures and converted weights are the bit-exact oracle. A diff against the
+merge-base catches any modification/deletion of an existing oracle file. New model fixtures may be
+ADDED (e.g. a new variant's reference latents + converted weights) — only changes to files that
+already existed are rejected. `tests/fixtures.toml` is covered separately by
+`test_fixtures_integrity` (every listed hash must match), so it is not guarded here.
 """
 
 import subprocess
@@ -10,7 +13,7 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[1]
-PROTECTED = ("tests/reference", "tests/converted", "tests/fixtures.toml")
+PROTECTED = ("tests/reference", "tests/converted")
 
 
 def _base_ref() -> str | None:
@@ -27,7 +30,7 @@ def _base_ref() -> str | None:
     return None
 
 
-def test_phase1_does_not_modify_committed_fixtures():
+def test_committed_fixtures_are_not_modified_or_deleted():
     base = _base_ref()
     if base is None:
         pytest.skip("no origin/main or main ref to diff against")
@@ -38,12 +41,15 @@ def test_phase1_does_not_modify_committed_fixtures():
         text=True,
         check=True,
     ).stdout.strip()
+    # --diff-filter=MD: only Modified/Deleted files — Added (new-model) fixtures are allowed.
     changed = subprocess.run(
-        ["git", "diff", "--name-only", f"{merge_base}...HEAD"],
+        ["git", "diff", "--name-only", "--diff-filter=MD", f"{merge_base}...HEAD"],
         cwd=REPO,
         capture_output=True,
         text=True,
         check=True,
     ).stdout.splitlines()
     touched = [f for f in changed if any(f.startswith(p) for p in PROTECTED)]
-    assert touched == [], f"refactor must not modify committed fixtures, but changed: {touched}"
+    assert touched == [], (
+        f"committed oracle fixtures must not be modified/deleted, changed: {touched}"
+    )
