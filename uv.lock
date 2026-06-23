@@ -1658,7 +1658,7 @@ dev = [
     { name = "pytest-cov", specifier = ">=5.0" },
     { name = "ruff", specifier = ">=0.7" },
     { name = "scikit-image", specifier = ">=0.22" },
-    { name = "torch", specifier = ">=2.4" },
+    { name = "torch", specifier = ">=2.4,<3" },
 ]
 docs = [
     { name = "mkdocs-material", specifier = ">=9.5" },
@@ -1666,7 +1666,7 @@ docs = [
 ]
 fixtures = [
     { name = "pillow", specifier = ">=10.0" },
-    { name = "torch", specifier = ">=2.4" },
+    { name = "torch", specifier = ">=2.4,<3" },
 ]
 lint = [{ name = "ruff", specifier = ">=0.7" }]
 test = [
