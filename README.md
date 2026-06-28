@@ -1,7 +1,7 @@
 # mlx-taef
 
 <p align="center">
-  <img src="docs/assets/mlx-taef-logo.png" alt="mlx-taef" width="100%">
+  <img src="https://raw.githubusercontent.com/IonDen/mlx-taef/main/docs/assets/mlx-taef-logo.png" alt="mlx-taef" width="100%">
 </p>
 
 [![PyPI version](https://img.shields.io/pypi/v/mlx-taef.svg)](https://pypi.org/project/mlx-taef/)
