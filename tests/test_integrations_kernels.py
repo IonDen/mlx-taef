@@ -35,8 +35,13 @@ def test_unpack_flux2_value_routing():
 
 
 def test_binding_dispatch_routes_each_model_to_its_unpack():
+    from mlx_taef.kernels.qwen import unpack_qwen_latent
+    from mlx_taef.kernels.zimage import unpack_zimage_latent
+
     assert get_kernel("taef1").integration.unpack is unpack_flux1_latent
     assert get_kernel("taef2").integration.unpack is unpack_flux2_latent
+    assert get_kernel("zimage").integration.unpack is unpack_zimage_latent
+    assert get_kernel("qwen-image").integration.unpack is unpack_qwen_latent
 
 
 def test_flux1_callback_end_to_end_writes_preview(monkeypatch, tmp_path):
@@ -62,4 +67,4 @@ def test_flux1_callback_end_to_end_writes_preview(monkeypatch, tmp_path):
     cb.call_in_loop(t=0, seed=0, prompt="x", latents=packed, config=None, time_steps=None)
     out = tmp_path / "p.png"
     assert out.exists()
-    assert out.stat().st_size > 0
+    assert out.stat().st_size > 100  # a truncated/empty PNG (no real image data) would red this

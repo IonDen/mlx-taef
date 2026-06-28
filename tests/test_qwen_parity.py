@@ -54,7 +54,7 @@ def test_qwen_kernel_binding_unpacks_then_decodes() -> None:
 
     binding = get_kernel("qwen-image").integration
     assert binding is not None
-    lh, lw = 8, 8
+    lh, lw = 4, 6  # non-square: a transposed unpack would yield (1, lw*2, lh*2, 16) and fail
     packed = mx.random.normal((1, lh * lw, 64), key=mx.random.key(1))
     latent = binding.unpack(packed, UnpackContext(latent_height=lh, latent_width=lw))
     assert latent.shape == (1, lh * 2, lw * 2, 16)
@@ -62,4 +62,6 @@ def test_qwen_kernel_binding_unpacks_then_decodes() -> None:
     out = model.decode_image(latent)
     mx.eval(out)
     assert out.shape == (1, lh * 2 * 8, lw * 2 * 8, 3)  # decode upscales 8x spatial
-    assert bool(mx.all(out <= 255).item())
+    assert out.dtype == mx.uint8
+    # Not a tautology (uint8 is always <= 255): a collapsed/constant decode reds this.
+    assert int(out.max()) > int(out.min())

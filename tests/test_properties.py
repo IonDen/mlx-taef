@@ -75,22 +75,6 @@ def test_decode_image_shape_and_dtype(taef2: TAEF2) -> None:
     assert img.shape == (1, 64, 64, 3)
 
 
-def test_encode_decode_roundtrip_perceptually_close(taef2_with_encoder: TAEF2) -> None:
-    """encode(image); decode(latent) should be perceptually close to original.
-
-    TAEF is lossy — we accept a generous MSE bound. The critical claim isn't
-    perfect reconstruction but that the lossy roundtrip doesn't collapse.
-    """
-    rng = np.random.default_rng(0)
-    img = rng.uniform(0, 1, (1, 256, 256, 3)).astype(np.float32)
-    latent = taef2_with_encoder.encode(mx.array(img))
-    recon = np.array(taef2_with_encoder.decode(latent))
-    mse = float(np.mean((img - recon) ** 2))
-    # Generous bound: random noise is hard to reconstruct, but the result
-    # shouldn't drift to the corners of [0, 1].
-    assert mse < 0.3, f"Roundtrip MSE {mse:.4f} exceeds 0.3 — encoder/decoder may be broken"
-
-
 def test_decode_handles_extreme_input_without_nan(taef2: TAEF2) -> None:
     """Extreme but finite latent values must not produce NaN/Inf outputs.
 
@@ -112,9 +96,9 @@ def test_encode_decode_roundtrip_ssim_on_structured_image(taef2_with_encoder: TA
 
     TAEF2 is a tiny preview decoder; fine detail loss is expected. SSIM is
     the right metric (not MSE) because SSIM captures structural similarity
-    rather than per-pixel exactness. Random noise (as in the MSE test above)
-    is not a good proxy for perceptual quality on a tiny VAE — structured
-    inputs like the gradient+checkerboard fixture are far more diagnostic.
+    rather than per-pixel exactness. Random noise is not a good proxy for
+    perceptual quality on a tiny VAE — structured inputs like the
+    gradient+checkerboard fixture are far more diagnostic.
     """
     img_path = Path(__file__).parent / "reference" / "_source_image.png"
     src = (
@@ -125,18 +109,10 @@ def test_encode_decode_roundtrip_ssim_on_structured_image(taef2_with_encoder: TA
     latent = taef2_with_encoder.encode(src_nhwc)
     recon = np.array(taef2_with_encoder.decode(latent))[0]
 
-    try:
-        from skimage.metrics import structural_similarity as ssim  # type: ignore[import-untyped]
+    from skimage.metrics import structural_similarity as ssim  # type: ignore[import-untyped]
 
-        # skimage SSIM: data_range=1.0 because both arrays are float32 in [0, 1].
-        # channel_axis=-1 because images are HWC.
-        score = float(ssim(src, recon, data_range=1.0, channel_axis=-1))
-    except ImportError:  # pragma: no cover — scikit-image is an optional dep
-        # Fallback: 1 - MSE-on-luminance. For a structured (low-frequency)
-        # image, this correlates closely with SSIM; threshold 0.75 maps to
-        # luminance MSE < 0.25, which is very generous.
-        lum_src = 0.299 * src[..., 0] + 0.587 * src[..., 1] + 0.114 * src[..., 2]
-        lum_recon = 0.299 * recon[..., 0] + 0.587 * recon[..., 1] + 0.114 * recon[..., 2]
-        score = 1.0 - float(np.mean((lum_src - lum_recon) ** 2))
+    # skimage SSIM: data_range=1.0 because both arrays are float32 in [0, 1];
+    # channel_axis=-1 because images are HWC. scikit-image is a hard test dependency.
+    score = float(ssim(src, recon, data_range=1.0, channel_axis=-1))
 
-    assert score >= 0.75, f"Roundtrip SSIM/score {score:.4f} < 0.75 — preview decoder may be broken"
+    assert score >= 0.75, f"Roundtrip SSIM {score:.4f} < 0.75 — preview decoder may be broken"

@@ -158,6 +158,22 @@ def test_mflux_not_installed_error_exported_from_root() -> None:
     assert mlx_taef.MfluxNotInstalledError is errors.MfluxNotInstalledError
 
 
+def test_mflux_not_installed_error_raised_when_mflux_import_fails(monkeypatch) -> None:
+    """Raise-condition: importing the integration with mflux absent must raise
+    MfluxNotInstalledError, not a bare ImportError. Drives the real module-level guard at
+    integrations/mflux.py (which is `# pragma: no cover` because mflux is present in dev)."""
+    import importlib
+    import sys
+
+    from mlx_taef.errors import MfluxNotInstalledError
+
+    # Make `from mflux.callbacks.callback import InLoopCallback` fail at import time.
+    monkeypatch.setitem(sys.modules, "mflux.callbacks.callback", None)
+    monkeypatch.delitem(sys.modules, "mlx_taef.integrations.mflux", raising=False)
+    with pytest.raises(MfluxNotInstalledError):
+        importlib.import_module("mlx_taef.integrations.mflux")
+
+
 def test_showcase_only_exceptions_not_in_package_root_all() -> None:
     """Showcase/bench-only exceptions are not part of the supported public surface,
     but remain importable from mlx_taef.errors for the scripts that raise them."""

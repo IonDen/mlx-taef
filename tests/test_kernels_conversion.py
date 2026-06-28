@@ -2,7 +2,7 @@ import numpy as np
 
 from mlx_taef.convert import _flatten_module_param_shapes
 from mlx_taef.kernels._arch import build_arch
-from mlx_taef.kernels._conversion import DiffusersRemap, UpstreamTwoFile
+from mlx_taef.kernels._conversion import DiffusersRemap, TaehvCombined, UpstreamTwoFile
 
 
 def _mlx_to_sequential(mlx_key: str) -> str:
@@ -44,3 +44,17 @@ def test_upstream_two_file_round_trips_offline(monkeypatch):
     monkeypatch.setattr(strat, "_load_raw", lambda source, role: src)
     out = strat.convert(source=object(), arch_module=encoder, role="encoder")  # type: ignore[arg-type]
     assert set(out) == set(expected)
+
+
+def test_taehv_combined_round_trips_to_arch_shapes_offline(monkeypatch):
+    """The qwen-image conversion path (taehv arch): convert() must produce arch-shaped MLX keys
+    via the shared NCHW->NHWC transpose + coverage. Offline — _load_raw (download) is faked."""
+    decoder = build_arch("taehv", role="decoder", latent_channels=16, midblock_gn=False)
+    expected = _flatten_module_param_shapes(decoder)
+    src = _synth_sequential_source(decoder)
+    strat = TaehvCombined()
+    monkeypatch.setattr(strat, "_load_raw", lambda source, role: src)
+    out = strat.convert(source=object(), arch_module=decoder, role="decoder")  # type: ignore[arg-type]
+    assert set(out) == set(expected)
+    for k, shape in expected.items():
+        assert tuple(out[k].shape) == shape

@@ -8,6 +8,10 @@ from mlx_taef.kernels import get_kernel
 
 def _fake_convert_factory(calls):
     def _fake(self, source, arch_module, *, role):
+        # arch_module must be the built arch (a real nn module), not None — a build/wiring
+        # regression that dropped it would otherwise pass unnoticed.
+        assert arch_module is not None
+        assert hasattr(arch_module, "parameters")
         calls.append(role)
         return {"w": mx.zeros((1,))}
 

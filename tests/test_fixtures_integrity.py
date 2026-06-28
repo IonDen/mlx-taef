@@ -31,3 +31,17 @@ def test_every_converted_weight_is_sha_pinned() -> None:
     on_disk = {p.name for p in (Path(__file__).parent / "converted").glob("*.safetensors")}
     missing = on_disk - listed
     assert not missing, f"converted weights missing a fixtures.toml sha entry: {sorted(missing)}"
+
+
+def test_every_reference_oracle_is_sha_pinned() -> None:
+    # The reference/*.safetensors are the parity oracle: the input latents plus the
+    # PyTorch-generated decode/encode ground truth every parity test compares against. Each must
+    # have a fixtures.toml entry so a silent oracle replacement (e.g. MLX output saved over the
+    # PyTorch reference) is a hard failure here, not a green MLX-vs-MLX comparison (mlx-taef-0005).
+    config = tomllib.loads(FIXTURES_TOML.read_text())
+    listed = set(config.get("reference", {}))
+    on_disk = {p.name for p in (Path(__file__).parent / "reference").glob("*.safetensors")}
+    missing = on_disk - listed
+    assert not missing, (
+        f"reference oracle files missing a fixtures.toml sha entry: {sorted(missing)}"
+    )

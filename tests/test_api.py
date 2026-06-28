@@ -36,7 +36,8 @@ def _cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
 
 def test_taef2_loads_from_local_path() -> None:
     taef2 = TAEF2.from_pretrained_local(CONVERTED_DIR / "taef2_decoder.safetensors")
-    assert taef2 is not None
+    # 32-channel FLUX.2 latent must reach the decoder's first conv (layers[1]).
+    assert taef2.decoder.layers[1].weight.shape[-1] == 32
 
 
 def test_taef2_decode_produces_correct_shape() -> None:
