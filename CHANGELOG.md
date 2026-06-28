@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] — 2026-06-28
+
+A test-suite hardening release. No runtime or API changes; the installed wheel is identical to 0.6.0.
+
+### Changed
+- The parity-oracle fixtures — the reference decode/encode outputs and the input latents every
+  parity test compares against — are now SHA-256 pinned, so an accidental change to the oracle
+  fails the test suite instead of silently weakening the parity guarantee.
+- The default `pytest` run is now fully offline. A group of live-preview integration tests could
+  fall back to a Hugging Face download when the local cache was cold; they now pin to the committed
+  weights, so a bare `pytest` never touches the network.
+- Tightened several tests to assert observable output instead of mere presence, and to pin exact
+  values (the conversion key map, the Qwen-Image weight hash, decode shapes). Added offline
+  coverage for the Qwen-Image decode path, the taew2.1 conversion strategy, and the
+  missing-`mflux` error.
+
 ## [0.6.0] — 2026-06-23
 
 Qwen-Image live preview.

@@ -82,7 +82,7 @@ def test_unpack_with_bn_stats_differs_from_identity_bn() -> None:
     assert not np.allclose(np.array(out_identity), np.array(out_with_bn))
 
 
-def test_live_preview_callback_stores_passed_flux_instance() -> None:
+def test_live_preview_callback_stores_passed_flux_instance(offline_taef2: object) -> None:
     from mlx_taef.integrations.mflux import LivePreviewCallback
 
     sentinel = object()
@@ -90,7 +90,7 @@ def test_live_preview_callback_stores_passed_flux_instance() -> None:
     assert cb.flux is sentinel
 
 
-def test_resolved_bn_is_explicit_when_kwargs_passed() -> None:
+def test_resolved_bn_is_explicit_when_kwargs_passed(offline_taef2: object) -> None:
     import mlx.core as mx
 
     from mlx_taef.integrations.mflux import LivePreviewCallback
@@ -104,7 +104,7 @@ def test_resolved_bn_is_explicit_when_kwargs_passed() -> None:
     assert cb.resolved_bn == "explicit"
 
 
-def test_resolved_bn_is_none_when_no_bn_and_no_flux() -> None:
+def test_resolved_bn_is_none_when_no_bn_and_no_flux(offline_taef2: object) -> None:
     from mlx_taef.integrations.mflux import LivePreviewCallback
 
     cb = LivePreviewCallback(variant="taef2", save_to="/tmp/preview.png")
@@ -146,7 +146,7 @@ def _build_fake_flux_with_nontrivial_bn() -> _FakeFlux:
     )
 
 
-def test_auto_bn_resolved_auto_when_flux_has_bn_for_taef2() -> None:
+def test_auto_bn_resolved_auto_when_flux_has_bn_for_taef2(offline_taef2: object) -> None:
     from mlx_taef.integrations.mflux import LivePreviewCallback
 
     flux = _build_fake_flux_with_nontrivial_bn()
@@ -158,11 +158,12 @@ def test_auto_bn_resolved_auto_when_flux_has_bn_for_taef2() -> None:
     assert float(mx.max(cb.bn_var - flux.vae.bn.running_var)) == 0.0
 
 
-def test_auto_bn_changes_decoded_output_vs_identity_bn() -> None:
-    """End-to-end behavioral test: callback constructed with flux=fake (auto path)
-    produces different decoder output than callback with no flux (identity-BN path).
+def test_auto_bn_changes_decoded_output_vs_identity_bn(offline_taef2: object) -> None:
+    """Behavioral test: callback constructed with flux=fake (auto path) produces different
+    decoder output than callback with no flux (identity-BN path).
 
-    Exercises the FULL chain: construct → _try_extract_bn → callback.bn_mean/var → unpack.
+    Exercises construct → _try_extract_bn → callback.bn_mean/var → unpack. (The call_in_loop
+    dispatch that forwards bn into the UnpackContext is covered by a separate spy-based test.)
     """
     from mlx_taef.integrations.mflux import LivePreviewCallback, unpack_flux2_latent
 
@@ -195,7 +196,7 @@ def test_auto_bn_changes_decoded_output_vs_identity_bn() -> None:
     assert not np.allclose(np.array(out_auto), np.array(out_none))
 
 
-def test_explicit_kwargs_win_over_auto_bn() -> None:
+def test_explicit_kwargs_win_over_auto_bn(offline_taef2: object) -> None:
     """When user passes bn_mean + bn_var AND auto_bn=True, explicit wins.
     resolved_bn reports "explicit"."""
     from mlx_taef.integrations.mflux import LivePreviewCallback
@@ -214,7 +215,7 @@ def test_explicit_kwargs_win_over_auto_bn() -> None:
     assert float(mx.max(cb.bn_mean - user_mean)) == 0.0
 
 
-def test_auto_bn_off_when_kwarg_false() -> None:
+def test_auto_bn_off_when_kwarg_false(offline_taef2: object) -> None:
     from mlx_taef.integrations.mflux import LivePreviewCallback
 
     flux = _build_fake_flux_with_nontrivial_bn()
@@ -229,7 +230,7 @@ def test_auto_bn_off_when_kwarg_false() -> None:
     assert cb.bn_var is None
 
 
-def test_auto_bn_resolved_none_when_flux_missing_vae(caplog) -> None:
+def test_auto_bn_resolved_none_when_flux_missing_vae(offline_taef2: object, caplog) -> None:
     """flux without .vae attribute: warn + fall back to identity BN."""
     import logging
 
@@ -589,7 +590,9 @@ def test_call_in_loop_forwards_bn_eps_and_auto_dims_into_unpack_context(
     assert (captured["lh"], captured["lw"]) == (4, 8)  # auto-resolved dims reached the ctx
 
 
-def test_live_preview_callback_and_mlx_teacache_coexist_on_real_registry() -> None:
+def test_live_preview_callback_and_mlx_teacache_coexist_on_real_registry(
+    offline_taef2: object,
+) -> None:
     """Both wrappers must coexist on the same mflux CallbackRegistry.
     The failure mode being asserted is callback-hook collision; mocks
     would hide it, so we use the real registry."""

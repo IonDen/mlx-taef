@@ -62,9 +62,9 @@ def test_sequential_key_to_mlx_flat_key() -> None:
 
 def test_sequential_key_to_mlx_nested_sequential() -> None:
     # Nested: "3.conv.0.weight" -> "layers.3.conv.layers.0.weight"
-    out = _sequential_key_to_mlx("3.conv.0.weight")
-    assert out.startswith("layers.")
-    assert "conv" in out
+    assert _sequential_key_to_mlx("3.conv.0.weight") == "layers.3.conv.layers.0.weight"
+    # pool branch too, so a mutation that mis-prefixes only one nesting kind is still caught.
+    assert _sequential_key_to_mlx("3.pool.1.bias") == "layers.3.pool.layers.1.bias"
 
 
 def test_build_mlx_state_dict_transposes_4d_conv_weights() -> None:

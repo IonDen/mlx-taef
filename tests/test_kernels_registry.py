@@ -16,7 +16,7 @@ def test_qwen_image_kernel_registered():
     assert k.integration is not None
     assert k.integration.mflux_models == ("qwen-image", "qwen-image-edit")
     assert k.integration.packed_latent_downscale == 16
-    assert k.source.sha256 is not None
+    assert k.source.sha256 == "04766eac0221b5390b985ae3fdcca652cbb4b1e8b82b28ea7ff89dfad1b1a93f"
 
 
 def test_zimage_shares_taef1_cache_key_and_source():
