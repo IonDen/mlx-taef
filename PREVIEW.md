@@ -9,4 +9,5 @@ waiting for the full VAE at the end.
 
 A FLUX.1-dev generation on an M1 Max, previewed step by step with the TAEF1 live-preview
 callback. Every frame except the last is the tiny decoder; the final frame is the full VAE.
-See [`examples/mflux_live_preview.py`](examples/mflux_live_preview.py).
+Wire previews into your own run with `LivePreviewCallback`; the [`examples/`](examples/)
+directory has runnable scripts.
