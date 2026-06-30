@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] — 2026-06-30
+
+A maintenance release: a cache-corruption fix, Python 3.14 support, sharper public-API types, and a live-preview demo.
+
+### Added
+- Python 3.14 is now tested in CI and advertised in the package classifiers.
+- A short live-preview clip — TAEF1 decoding a FLUX.1-dev generation step by step — linked near the top of the README.
+
+### Fixed
+- Converted weights are written atomically (temp file + rename), so a run interrupted mid-download/convert can no longer leave a truncated file in the cache. (If an earlier version already left a corrupt cache file, clear it once with `rm -rf ~/.cache/mlx-taef/` — existing files are not auto-repaired.)
+
+### Changed
+- Factory constructors (`from_pretrained`, `from_pretrained_local`, `from_kernel`) are now typed to return the concrete subclass, and the decoder/encoder role and the preview variant are typed literals. Editor autocomplete and type-checking improve; runtime behavior is unchanged.
+- Internal: the test suite was hardened (parity-oracle integrity pinning, offline-by-default mflux tests).
+
 ## [0.6.0] — 2026-06-23
 
 Qwen-Image live preview.
