@@ -1,6 +1,8 @@
 """HF Hub auto-download + cache. Zero PyTorch dependency at runtime."""
 
 import logging
+import os
+import tempfile
 from pathlib import Path
 
 import mlx.core as mx
@@ -36,7 +38,21 @@ def get_or_convert(kernel: ModelKernel, *, role: str = "decoder") -> Path:
     mbgn = MIDBLOCK_GN.get(kernel.name, False)
     arch_module = build_arch(kernel.arch.name, role=role, latent_channels=ch, midblock_gn=mbgn)
     converted = kernel.conversion.convert(kernel.source, arch_module, role=role)
-    mx.save_safetensors(str(out_path), converted)
+    # Atomic write: a process killed mid-save must not leave a truncated file at the
+    # canonical path (the out_path.exists() check above would trust it forever). Write to a
+    # temp file in the same directory, then atomically replace. (mx.save_safetensors requires
+    # a .safetensors path, so the temp keeps that extension.)
+    fd, tmp_name = tempfile.mkstemp(
+        dir=cache_dir, prefix=out_path.name + ".", suffix=".tmp.safetensors"
+    )
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        mx.save_safetensors(str(tmp_path), converted)
+        tmp_path.replace(out_path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
     return out_path
 
 
