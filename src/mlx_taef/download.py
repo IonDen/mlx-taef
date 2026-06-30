@@ -4,10 +4,11 @@ import logging
 import os
 import tempfile
 from pathlib import Path
+from typing import get_args
 
 import mlx.core as mx
 
-from mlx_taef.kernels import MIDBLOCK_GN, ModelKernel
+from mlx_taef.kernels import MIDBLOCK_GN, ModelKernel, Role
 from mlx_taef.kernels._arch import build_arch
 
 logger = logging.getLogger(__name__)
@@ -15,14 +16,14 @@ logger = logging.getLogger(__name__)
 CACHE_ROOT = Path.home() / ".cache" / "mlx-taef"
 
 
-def get_or_convert(kernel: ModelKernel, *, role: str = "decoder") -> Path:
+def get_or_convert(kernel: ModelKernel, *, role: Role = "decoder") -> Path:
     """Return the local path to converted MLX weights for (kernel, role).
 
     Cache is keyed on the weight SOURCE identity (repo + filename + role), not the kernel
     name, so kernels that share upstream weights (e.g. zimage -> taef1) share one converted
     file while a model's decoder/encoder never collide.
     """
-    if role not in ("decoder", "encoder"):
+    if role not in get_args(Role):
         raise ValueError(f"role must be 'decoder' or 'encoder', got {role!r}")
     cache_dir = CACHE_ROOT / "converted"
     cache_dir.mkdir(parents=True, exist_ok=True)

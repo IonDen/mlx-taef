@@ -17,7 +17,7 @@ import mlx.core as mx
 import numpy as np
 
 from mlx_taef.errors import ConversionError
-from mlx_taef.kernels._types import WeightSource
+from mlx_taef.kernels._types import Role, WeightSource
 
 
 def _verify_sha256(path: Path, expected: str | None) -> None:
@@ -32,7 +32,7 @@ def _verify_sha256(path: Path, expected: str | None) -> None:
 class DiffusersRemap:
     """Diffusers single-file source (FLUX.1/FLUX.2/Z-Image). Decoder keys get a +1 offset."""
 
-    def _load_raw(self, source: WeightSource, role: str) -> dict[str, np.ndarray]:
+    def _load_raw(self, source: WeightSource, role: Role) -> dict[str, np.ndarray]:
         """Download + key-remap the diffusers single-file source to Sequential keys."""
         from huggingface_hub import hf_hub_download  # pragma: no cover
         from safetensors.numpy import load_file as safetensors_load_numpy  # pragma: no cover
@@ -46,7 +46,7 @@ class DiffusersRemap:
         return convert_diffusers_to_sequential(full_sd, role=role)  # pragma: no cover
 
     def convert(
-        self, source: WeightSource, arch_module: object, *, role: str
+        self, source: WeightSource, arch_module: object, *, role: Role
     ) -> dict[str, mx.array]:
         """Convert the diffusers source for `role` into the arch-shaped MLX state dict."""
         from mlx_taef.convert import _build_mlx_state_dict, _flatten_module_param_shapes
@@ -59,7 +59,7 @@ class DiffusersRemap:
 class UpstreamTwoFile:
     """Upstream two-file source (TAESD/TAESDXL): separate decoder/encoder safetensors."""
 
-    def _load_raw(self, source: WeightSource, role: str) -> dict[str, np.ndarray]:
+    def _load_raw(self, source: WeightSource, role: Role) -> dict[str, np.ndarray]:
         """Download the upstream per-role safetensors (already Sequential-keyed)."""
         from huggingface_hub import hf_hub_download  # pragma: no cover
         from safetensors.numpy import load_file as safetensors_load_numpy  # pragma: no cover
@@ -71,7 +71,7 @@ class UpstreamTwoFile:
         return safetensors_load_numpy(path)  # pragma: no cover
 
     def convert(
-        self, source: WeightSource, arch_module: object, *, role: str
+        self, source: WeightSource, arch_module: object, *, role: Role
     ) -> dict[str, mx.array]:
         """Convert the upstream source for `role` into the arch-shaped MLX state dict."""
         from mlx_taef.convert import _build_mlx_state_dict, _flatten_module_param_shapes
@@ -92,7 +92,7 @@ class TaehvCombined:
     """
 
     @staticmethod
-    def _select_role(full_sd: dict[str, np.ndarray], role: str) -> dict[str, np.ndarray]:
+    def _select_role(full_sd: dict[str, np.ndarray], role: Role) -> dict[str, np.ndarray]:
         """Keep `role`'s tensors, strip the role prefix, cast fp16->fp32 (Sequential-style keys)."""
         prefix = f"{role}."
         return {
@@ -101,7 +101,7 @@ class TaehvCombined:
             if key.startswith(prefix)
         }
 
-    def _load_raw(self, source: WeightSource, role: str) -> dict[str, np.ndarray]:
+    def _load_raw(self, source: WeightSource, role: Role) -> dict[str, np.ndarray]:
         """Download the combined safetensors and select this role's tensors."""
         from huggingface_hub import hf_hub_download  # pragma: no cover
         from safetensors.numpy import load_file as safetensors_load_numpy  # pragma: no cover
@@ -115,7 +115,7 @@ class TaehvCombined:
         return self._select_role(safetensors_load_numpy(path), role)  # pragma: no cover
 
     def convert(
-        self, source: WeightSource, arch_module: object, *, role: str
+        self, source: WeightSource, arch_module: object, *, role: Role
     ) -> dict[str, mx.array]:
         """Convert the combined taehv source for `role` into the arch-shaped MLX state dict."""
         from mlx_taef.convert import _build_mlx_state_dict, _flatten_module_param_shapes

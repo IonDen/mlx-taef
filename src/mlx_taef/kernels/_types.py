@@ -8,9 +8,12 @@ optional `MfluxBinding` (which mflux models it previews + how to unpack their in
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 import mlx.core as mx
+
+Role = Literal["decoder", "encoder"]
+"""The two weight roles a kernel converts/caches independently."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -55,7 +58,7 @@ class WeightSource:
     sha256: str | None = None
     """Optional sha256 of the source file; verified after download when set (supply-chain pin)."""
 
-    def cache_key(self, *, role: str) -> str:
+    def cache_key(self, *, role: Role) -> str:
         """Return a stable cache filename stem for (this weight source, role)."""
         if self.filename is not None:
             fname = self.filename
@@ -107,7 +110,7 @@ class ConversionStrategy(Protocol):
     """
 
     def convert(
-        self, source: WeightSource, arch_module: object, *, role: str
+        self, source: WeightSource, arch_module: object, *, role: Role
     ) -> dict[str, mx.array]:
         """Convert the source weights for `role` into the arch-shaped MLX state dict."""
         ...

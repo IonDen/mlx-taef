@@ -6,7 +6,7 @@ Value space: decode() outputs [0, 1] float; encode() expects [0, 1] float.
 
 import logging
 from pathlib import Path
-from typing import cast
+from typing import Self, cast
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -47,14 +47,14 @@ class Taef(nn.Module):  # type: ignore[misc,name-defined]
         decoder_path: Path | str,
         encoder_path: Path | str | None = None,
         dtype: mx.Dtype = mx.float32,
-    ) -> "Taef":
+    ) -> Self:
         """Build an instance bound to `kernel` and load converted MLX weights from disk."""
 
         class _Bound(cls):  # type: ignore[valid-type, misc]
             _kernel = kernel
 
         return cast(
-            "Taef",
+            "Self",
             _Bound.from_pretrained_local(decoder_path, encoder_path=encoder_path, dtype=dtype),
         )
 
@@ -65,7 +65,7 @@ class Taef(nn.Module):  # type: ignore[misc,name-defined]
         encoder_path: Path | str | None = None,
         *,
         dtype: mx.Dtype = mx.float32,
-    ) -> "Taef":
+    ) -> Self:
         """Instantiate from already-converted MLX safetensors on disk."""
         instance = cls()
         d_weights = cast("dict[str, mx.array]", mx.load(str(decoder_path)))
@@ -87,8 +87,12 @@ class Taef(nn.Module):  # type: ignore[misc,name-defined]
         *,
         dtype: mx.Dtype = mx.float32,
         include_encoder: bool = True,
-    ) -> "Taef":
-        """Auto-download weights from HF Hub, convert to MLX, and load."""
+    ) -> Self:
+        """Auto-download weights from HF Hub, convert to MLX, and load.
+
+        `repo_id` is an optional assertion, not an override: when given it must equal the
+        variant's own HF repo (a mismatch raises ValueError); it never redirects the download.
+        """
         from mlx_taef.download import get_or_convert
 
         kernel = cls._kernel
@@ -102,7 +106,11 @@ class Taef(nn.Module):  # type: ignore[misc,name-defined]
         return cls.from_pretrained_local(decoder_path, encoder_path=encoder_path, dtype=dtype)
 
     def decode(self, latents: mx.array) -> mx.array:
-        """Decode raw latents (NHWC) to image (NHWC, [0, 1] float)."""
+        """Decode raw latents (NHWC) to image (NHWC, [0, 1] float).
+
+        Returns an unevaluated MLX graph; force it with `mx.eval(...)` (or `.item()` /
+        `np.array(...)` / printing / saving).
+        """
         if not self._decoder_loaded:
             raise TaefError(
                 "decode() called before decoder weights were loaded. Build the model "
@@ -124,11 +132,19 @@ class Taef(nn.Module):  # type: ignore[misc,name-defined]
         return mx.clip(self.decoder(latents), 0.0, 1.0)
 
     def decode_image(self, latents: mx.array) -> mx.array:
-        """Decode raw latents to a uint8 NHWC image suitable for PIL/PNG."""
+        """Decode raw latents to a uint8 NHWC image suitable for PIL/PNG.
+
+        Returns an unevaluated MLX graph; force it with `mx.eval(...)` (or `.item()` /
+        `np.array(...)` / printing / saving).
+        """
         return (self.decode(latents) * 255.0).astype(mx.uint8)
 
     def encode(self, image: mx.array) -> mx.array:
-        """Encode an NHWC RGB image (B,H,W,3) in [0,1] to a latent (B,H/8,W/8,channels)."""
+        """Encode an NHWC RGB image (B,H,W,3) in [0,1] to a latent (B,H/8,W/8,channels).
+
+        Returns an unevaluated MLX graph; force it with `mx.eval(...)` (or `.item()` /
+        `np.array(...)` / printing / saving).
+        """
         if not self._encoder_loaded:
             raise TaefError(
                 "encode() called on a model loaded without an encoder. Load with "

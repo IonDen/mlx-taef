@@ -12,6 +12,7 @@ Install with: `pip install "mlx-taef[mflux]"`.
 
 import logging
 from pathlib import Path
+from typing import Literal
 
 import mlx.core as mx
 import numpy as np
@@ -172,7 +173,7 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
         *,
         flux: object | None = None,
         auto_bn: bool = True,
-        variant: str = "taef2",
+        variant: Literal["taef1", "taef2", "zimage", "qwen-image"] = "taef2",
         every: int = 5,
         save_to: str | Path = "preview.png",
         numbered_frames: bool = False,
