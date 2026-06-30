@@ -46,3 +46,31 @@ def test_get_or_convert_rejects_bad_role(tmp_path, monkeypatch):
     monkeypatch.setattr(download, "CACHE_ROOT", tmp_path)
     with pytest.raises(ValueError, match="role must be"):
         download.get_or_convert(get_kernel("taef1"), role="bogus")
+
+
+def test_get_or_convert_leaves_no_partial_cache_on_interrupted_write(monkeypatch, tmp_path):
+    import pytest
+
+    monkeypatch.setattr(download, "CACHE_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "mlx_taef.kernels._conversion.DiffusersRemap.convert",
+        lambda self, source, arch_module, *, role: {"w": mx.zeros((1,))},
+    )
+
+    def _failing_save(path, arrays):
+        # Simulate a process killed mid-write: bytes land on disk, then it dies.
+        from pathlib import Path
+
+        Path(path).write_bytes(b"truncated-safetensors-header")
+        raise RuntimeError("disk full mid-write")
+
+    monkeypatch.setattr(download.mx, "save_safetensors", _failing_save)
+
+    k = get_kernel("taef1")
+    with pytest.raises(RuntimeError, match="disk full mid-write"):
+        download.get_or_convert(k, role="decoder")
+
+    cache_dir = tmp_path / "converted"
+    out_path = cache_dir / f"{k.source.cache_key(role='decoder')}.mlx.safetensors"
+    assert not out_path.exists(), "an interrupted write must not leave a usable-looking cache file"
+    assert list(cache_dir.glob("*")) == [], "an interrupted write must not leave stray temp files"
