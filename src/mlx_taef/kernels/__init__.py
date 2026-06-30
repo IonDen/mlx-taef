@@ -8,6 +8,7 @@ from mlx_taef.kernels._types import (
     LatentSpec,
     MfluxBinding,
     ModelKernel,
+    Role,
     UnpackContext,
     WeightSource,
 )
@@ -47,6 +48,7 @@ __all__ = [
     "LatentSpec",
     "MfluxBinding",
     "ModelKernel",
+    "Role",
     "UnpackContext",
     "WeightSource",
     "get_kernel",

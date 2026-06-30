@@ -74,3 +74,11 @@ def test_modelkernel_composes_strategies():
     assert k.latent.channels == 16
     out = k.integration.unpack(mx.zeros((1,)), UnpackContext(latent_height=1, latent_width=1))
     assert out.shape == (1,)
+
+
+def test_role_is_exported_with_the_two_roles():
+    from typing import get_args
+
+    from mlx_taef.kernels import Role
+
+    assert get_args(Role) == ("decoder", "encoder")
