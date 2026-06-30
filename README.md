@@ -13,7 +13,7 @@ Tiny AutoEncoders for diffusion latents on Apple Silicon, in pure MLX.
 `mlx-taef` is the first MLX port of the TAESD family — TAESD (SD1.x), TAESDXL (SDXL), TAEF1 (FLUX.1), TAEF2 (FLUX.2 Klein), and Z-Image (which reuses the TAEF1 weights for previews) — plus Qwen-Image / Qwen-Image-Edit on a port of the taew2.1 (Wan 2.1 VAE) autoencoder. All are distilled mini-autoencoders that decode diffusion latents to RGB in milliseconds using a few-MB model instead of multi-GB full VAEs.
 
 Use it for:
-- **Live previews** during long generations on Mac — TAEF1 decodes a 512×512 preview in ~183 ms and TAEF2 in ~258 ms on M1 Max (vs 2 s for the full VAE). [See it in motion →](https://github.com/IonDen/mlx-taef/blob/main/PREVIEW.md) See [COMPARISON.md](COMPARISON.md) for the measured table and reproducer.
+- **Live previews** during long generations on Mac — TAEF1 decodes a 512×512 preview in ~183 ms and TAEF2 in ~258 ms on M1 Max (vs 2 s for the full VAE). [Watch a step-by-step decode](https://github.com/IonDen/mlx-taef/blob/main/PREVIEW.md), or see [COMPARISON.md](COMPARISON.md) for the measured table and reproducer.
 - **Low-memory fallbacks** when the full VAE OOMs on 16 GB Macs (TAEF2 peaks at ~0.6 GB decode memory vs ~2.6 GB for the full FLUX.2 VAE on the same latent).
 - **Quick latent inspection** in notebooks and ML research.
 
