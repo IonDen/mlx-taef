@@ -117,10 +117,12 @@ only-include = [
   "CHANGELOG.md",
   "COMPARISON.md",
   "EXAMPLES.md",
+  "PREVIEW.md",
   "ROADMAP.md",
   "LICENSE",
 ]
 exclude = [
+  "docs/assets/*.gif",
   "docs/superpowers/",
   "**/__pycache__",
 ]
