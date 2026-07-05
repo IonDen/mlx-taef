@@ -1,19 +1,18 @@
 """Hardware-aware MLX memory caps (kernel-watchdog panic guard).
 
-The user's CLAUDE.md memory-guardrails rule mandates wired + memory caps
-before any heavy model load on 32 GB M-series Macs. The targets there
-are (20 GB wired, 22 GB memory) — but those values exceed the system
-`max_recommended_working_set_size` on smaller Apple Silicon (CI runners,
-8 GB Mac mini, etc.), and `mx.set_wired_limit` raises ValueError when
-asked to exceed that ceiling.
+Heavy model loads on Apple Silicon must cap wired + total unified memory before loading:
+wired (GPU-pinned) allocations past the OS reserve cannot be paged out, so exceeding the
+device ceiling panics the kernel instead of cleanly failing the process. The desired targets
+(20 GB wired, 22 GB memory) suit a 32 GB M1 Max, but exceed the system
+`max_recommended_working_set_size` on smaller Apple Silicon (CI runners, 8 GB Mac mini),
+where `mx.set_wired_limit` raises ValueError when asked to exceed that ceiling.
 
 This module computes caps that fit the actual device. On a 32 GB M1 Max
-(max_recommended ~25 GB) it returns (20, 22) unchanged. On a smaller
-runner it clamps below `max_recommended - HEADROOM_GB`.
+(max_recommended ~25 GB) it returns (20, 22) unchanged. On a smaller runner it clamps below
+`max_recommended - HEADROOM_GB`.
 
-Refs: CLAUDE.md "Memory guardrails for heavy generations on 32 GB
-unified memory"; ml-explore/mlx-lm issue #883 (wired memory is the
-root cause of kernel watchdog panics on Apple Silicon).
+Ref: ml-explore/mlx-lm issue #883 (wired memory is the root cause of kernel-watchdog panics
+on Apple Silicon).
 """
 
 import mlx.core as mx
@@ -26,10 +25,10 @@ HEADROOM_GB = 2
 def compute_safe_caps_gb() -> tuple[int, int]:
     """Return (wired_gb, memory_gb) that fit the current device.
 
-    Reads `mx.device_info()["max_recommended_working_set_size"]` and
-    clamps the desired CLAUDE.md targets to fit. Returns (0, 0) when
-    the device does not report a working-set size (older MLX, non-Metal
-    env) — the caller should treat that as a no-op signal.
+    Reads `mx.device_info()["max_recommended_working_set_size"]` and clamps the desired
+    (20 GB wired, 22 GB memory) targets to fit. Returns (0, 0) when the device does not
+    report a working-set size (older MLX, non-Metal env) — the caller should treat that as a
+    no-op signal.
     """
     info = mx.device_info()
     max_bytes = int(info.get("max_recommended_working_set_size", 0))

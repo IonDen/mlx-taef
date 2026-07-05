@@ -10,11 +10,11 @@ pytest_plugins = ["pytester"]
 # Install MLX memory caps at module-import time (NOT pytest_configure) so
 # the cap lands before pytest's collection imports any worker module.
 # Mirrors mlx-teacache v0.6.0 conftest.py:27-59 pattern. Prevents the kernel
-# watchdog panic documented in CLAUDE.md "Memory guardrails" rule on 32 GB
+# watchdog panic that unbounded wired (GPU-pinned) allocations trigger on 32 GB
 # M-series Macs when a misrouted parity test loads a large model.
 #
 # The actual (wired_gb, memory_gb) installed is hardware-dependent: on a
-# 32 GB M1 Max it lands at (20, 22) per CLAUDE.md; on smaller CI runners
+# 32 GB M1 Max it lands at (20, 22); on smaller CI runners
 # the helper clamps below the device's max_recommended_working_set_size.
 def _install_mlx_memory_caps() -> tuple[int, int]:
     try:
