@@ -674,3 +674,19 @@ def test_every_zero_rejected_at_construction(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(TAEF2, "from_pretrained", classmethod(_boom))
     with pytest.raises(ValueError, match="every"):
         LivePreviewCallback(variant="taef2", save_to="/tmp/p.png", every=0)
+
+
+def test_bn_mean_without_var_rejected(offline_taef2: object) -> None:
+    """BN stats are all-or-nothing: passing only bn_mean silently produced identity-BN
+    previews. Reject the half-pair at construction."""
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    with pytest.raises(ValueError, match="bn_mean and bn_var"):
+        LivePreviewCallback(variant="taef2", save_to="/tmp/p.png", bn_mean=mx.ones(128))
+
+
+def test_bn_var_without_mean_rejected(offline_taef2: object) -> None:
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    with pytest.raises(ValueError, match="bn_mean and bn_var"):
+        LivePreviewCallback(variant="taef2", save_to="/tmp/p.png", bn_var=mx.ones(128))
