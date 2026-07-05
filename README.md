@@ -96,10 +96,11 @@ The previous v0.1.x README claim — *"~100 ms decode at 1024×1024, 50–100× 
 ## mflux live previews
 
 ```python
+from mflux.models.common.config.model_config import ModelConfig
 from mflux.models.flux2 import Flux2Klein
 from mlx_taef.integrations.mflux import LivePreviewCallback
 
-model = Flux2Klein.from_pretrained("4bit")
+model = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_base_4b())
 preview = LivePreviewCallback(
     flux=model,            # auto-extracts the Flux2VAE BN stats for exact color
     variant="taef2",
