@@ -58,8 +58,26 @@ class WeightSource:
     sha256: str | None = None
     """Optional sha256 of the source file; verified after download when set (supply-chain pin)."""
 
+    def __post_init__(self) -> None:
+        # A single sha256 cannot verify two distinct role files. Reject a sha256 pin on a
+        # two-file (decoder/encoder) source until per-role digests exist — otherwise one role
+        # would silently verify the wrong file's digest. Only single-file sources are pinned
+        # today; this guards a future two-file pin.
+        if self.sha256 is not None and self.filename is None:
+            raise ValueError(
+                "sha256 pinning is only supported for single-file sources (filename=...). "
+                "This two-file source (decoder_filename/encoder_filename) would verify both "
+                "roles against one digest; add per-role digests before pinning sha256."
+            )
+
     def cache_key(self, *, role: Role) -> str:
-        """Return a stable cache filename stem for (this weight source, role)."""
+        """Return a stable cache filename stem for (this weight source, role).
+
+        Includes revision + sha256 (when pinned) so bumping a source's pinned revision or
+        sha256 changes the key — an existing cache is never silently reused for a new pin.
+        Unpinned sources (taef1/taef2/taesd/taesdxl) keep their pre-0.6.2 key, so they do
+        NOT re-convert on upgrade.
+        """
         if self.filename is not None:
             fname = self.filename
         elif role == "decoder":
@@ -67,7 +85,12 @@ class WeightSource:
         else:
             fname = self.encoder_filename or ""
         safe_fname = fname.replace("/", "_").replace("..", "_")
-        return f"{self.repo.replace('/', '_')}__{safe_fname}__{role}"
+        parts = [self.repo.replace("/", "_"), safe_fname, role]
+        if self.revision is not None:
+            parts.append(f"rev-{self.revision[:12]}")
+        if self.sha256 is not None:
+            parts.append(f"sha-{self.sha256[:12]}")
+        return "__".join(parts)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

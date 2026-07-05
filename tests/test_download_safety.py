@@ -170,6 +170,64 @@ def test_upstream_two_file_load_raw_routes_through_download_and_verify(
     assert out == {"raw": 1}
 
 
+def test_cache_key_unchanged_for_unpinned_source() -> None:
+    """Unpinned sources keep the exact pre-0.6.2 key so an upgrade forces no re-convert."""
+    from mlx_taef.kernels._types import WeightSource
+
+    src = WeightSource(repo="madebyollin/taef1", filename="diffusion_pytorch_model.safetensors")
+    assert src.cache_key(role="decoder") == (
+        "madebyollin_taef1__diffusion_pytorch_model.safetensors__decoder"
+    )
+
+
+def test_cache_key_changes_when_revision_changes() -> None:
+    from mlx_taef.kernels._types import WeightSource
+
+    a = WeightSource(repo="x/y", filename="w.safetensors", revision="a" * 40)
+    b = WeightSource(repo="x/y", filename="w.safetensors", revision="b" * 40)
+    assert a.cache_key(role="decoder") != b.cache_key(role="decoder")
+
+
+def test_cache_key_changes_when_sha_changes() -> None:
+    from mlx_taef.kernels._types import WeightSource
+
+    a = WeightSource(repo="x/y", filename="w.safetensors", sha256="a" * 64)
+    b = WeightSource(repo="x/y", filename="w.safetensors", sha256="b" * 64)
+    assert a.cache_key(role="decoder") != b.cache_key(role="decoder")
+
+
+def test_cache_key_stays_path_safe_with_pins() -> None:
+    """The revision/sha suffix must not reintroduce path-escape characters."""
+    from mlx_taef.kernels._types import WeightSource
+
+    src = WeightSource(
+        repo="ionden/taew2.1",
+        filename="taew2_1.safetensors",
+        revision="2ac5ae1c3291a8607a2d6c423b9a0337cef45f2b",
+        sha256="04766eac0221b5390b985ae3fdcca652cbb4b1e8b82b28ea7ff89dfad1b1a93f",
+    )
+    key = src.cache_key(role="decoder")
+    assert "/" not in key
+    assert ".." not in key
+    assert "rev-2ac5ae1c3291" in key
+    assert "sha-04766eac0221" in key
+
+
+def test_weightsource_rejects_sha256_on_two_file_source() -> None:
+    """A single sha256 cannot verify two distinct role files; reject the pin at construction so
+    a future two-file sha256 pin fails fast instead of verifying one role against the wrong
+    digest (see Task 6 scope note)."""
+    from mlx_taef.kernels._types import WeightSource
+
+    with pytest.raises(ValueError, match="single-file"):
+        WeightSource(
+            repo="x/y",
+            decoder_filename="dec.safetensors",
+            encoder_filename="enc.safetensors",
+            sha256="a" * 64,
+        )
+
+
 def test_taehv_combined_load_raw_routes_through_download_and_verify(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
