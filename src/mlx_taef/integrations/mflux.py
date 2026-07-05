@@ -256,6 +256,27 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
             self.resolved_bn = "none"
         self._iter = 0
 
+    def call_before_loop(
+        self,
+        seed: object,
+        prompt: object,
+        latents: mx.array,
+        config: object,
+        canny_image: object = None,
+        depth_image: object = None,
+    ) -> None:
+        """Reset per-generation state so a callback reused across multiple generate_image calls.
+
+        Restarts its `every` cadence and numbered-frame gallery from step 0. mflux keeps
+        registered callbacks on the model's persistent CallbackRegistry, so one instance fires
+        across every generation; mflux dispatches this hook to any subscriber exposing
+        `call_before_loop`, before each denoise loop. Single-generation behavior is unchanged.
+        In numbered-frame mode a subsequent generation restarts at step00 and overwrites the
+        prior gallery — use a fresh `save_to` per generation to keep both.
+        """
+        self._iter = 0
+        self.saved_paths = []
+
     def call_in_loop(
         self,
         t: object,

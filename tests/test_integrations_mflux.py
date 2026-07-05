@@ -690,3 +690,39 @@ def test_bn_var_without_mean_rejected(offline_taef2: object) -> None:
 
     with pytest.raises(ValueError, match="bn_mean and bn_var"):
         LivePreviewCallback(variant="taef2", save_to="/tmp/p.png", bn_var=mx.ones(128))
+
+
+def test_call_before_loop_resets_iter_and_saved_paths(
+    offline_taef2: object, tmp_path: Path
+) -> None:
+    """A callback reused across generations resets its step counter + gallery via
+    call_before_loop (mflux dispatches it before each denoise loop). Without the reset the
+    `every` cadence and numbered-frame indices continue from the prior generation."""
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    cb = LivePreviewCallback(
+        variant="taef2", every=1, save_to=tmp_path / "p.png", latent_height=4, latent_width=4
+    )
+    packed = mx.zeros((1, 4 * 4, 128))
+    cb.call_in_loop(t=0, seed=0, prompt="", latents=packed, config=None, time_steps=None)
+    cb.call_in_loop(t=0, seed=0, prompt="", latents=packed, config=None, time_steps=None)
+    assert cb._iter == 2
+    assert len(cb.saved_paths) == 2
+
+    cb.call_before_loop(seed=0, prompt="", latents=packed, config=None)
+    assert cb._iter == 0
+    assert cb.saved_paths == []
+
+
+def test_callback_registers_as_before_loop_subscriber(offline_taef2: object) -> None:
+    """mflux only dispatches call_before_loop to subscribers it files under before_loop;
+    prove LivePreviewCallback lands there so the per-generation reset actually fires."""
+    from mflux.callbacks.callback_registry import CallbackRegistry
+
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    reg = CallbackRegistry()
+    cb = LivePreviewCallback(variant="taef2", save_to="/tmp/p.png")
+    reg.register(cb)
+    assert cb in reg.before_loop_callbacks()
+    assert cb in reg.in_loop_callbacks()
