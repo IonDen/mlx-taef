@@ -153,3 +153,45 @@ def test_run_zimage_vs_vae_uses_correct_condition_and_fixture(
     assert captured["taef_condition"] == "zimage"
     assert captured["flux_variant"] == "z-image-turbo"
     assert captured["latent_name"] == "z_image_turbo.safetensors"
+
+
+def test_run_scenarios_records_error_and_writes_incrementally(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One failing scenario is recorded as an error entry, does NOT abort the run, and the
+    report is written after each scenario so completed results are never discarded."""
+    import argparse
+
+    import scripts.run_showcase as run_showcase
+
+    def _ok(args: object) -> dict[str, str]:
+        return {"status": "ok"}
+
+    def _boom(args: object) -> dict[str, str]:
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(run_showcase, "_SCENARIO_DISPATCH", {"a": _ok, "b": _boom, "c": _ok})
+    writes: list[dict[str, str]] = []
+
+    def _capture_write(path: object, rep: dict[str, object]) -> None:
+        # Snapshot per-scenario status at write time — the scenario dicts mutate in place after.
+        scenarios = rep["scenarios"]
+        assert isinstance(scenarios, dict)
+        writes.append({k: v.get("status", "?") for k, v in scenarios.items()})
+
+    monkeypatch.setattr(run_showcase, "_write_report", _capture_write)
+
+    report: dict[str, object] = {"scenarios": {}}
+    args = argparse.Namespace(report=tmp_path / "r.json")
+    run_showcase._run_scenarios(["a", "b", "c"], args, report)
+
+    assert report["scenarios"]["b"]["error_type"] == "RuntimeError"
+    assert report["scenarios"]["c"] == {"status": "ok"}  # ran despite b failing
+    # Exact write progression proves the report is written AFTER EACH scenario (an
+    # all-then-write-3x implementation would snapshot {a,b,c} three times), and that b's
+    # error entry is on disk before c runs:
+    assert writes == [
+        {"a": "ok"},
+        {"a": "ok", "b": "error"},
+        {"a": "ok", "b": "error", "c": "ok"},
+    ]
