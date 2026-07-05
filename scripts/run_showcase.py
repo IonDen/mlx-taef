@@ -584,6 +584,29 @@ def _compute_ssim(refs: list[Path], cands: list[Path]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _run_scenarios(
+    scenarios_to_run: list[str],
+    args: argparse.Namespace,
+    report: dict[str, Any],
+) -> None:
+    """Run each scenario, recording an error entry (not aborting) if one raises.
+
+    Write the report to disk after EACH scenario so a later failure or interruption
+    never discards results already computed (subprocess-per-rep runs are minutes each).
+    """
+    for scenario in scenarios_to_run:
+        try:
+            report["scenarios"][scenario] = _SCENARIO_DISPATCH[scenario](args)
+        except Exception as e:  # noqa: BLE001, RUF100 - deliberate broad catch per spec
+            logger.warning("scenario %s failed: %s", scenario, e)
+            report["scenarios"][scenario] = {
+                "status": "error",
+                "error_type": type(e).__name__,
+                "reason": str(e),
+            }
+        _write_report(args.report, report)
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point. Builds report, dispatches scenarios, writes JSON."""
     parser = _build_argparser()
@@ -606,14 +629,7 @@ def main(argv: list[str] | None = None) -> int:
         list(_SCENARIO_DISPATCH.keys()) if args.scenario == "all" else [args.scenario]
     )
 
-    for scenario in scenarios_to_run:
-        try:
-            report["scenarios"][scenario] = _SCENARIO_DISPATCH[scenario](args)
-        except NotImplementedError as e:
-            logger.warning("scenario %s skipped: %s", scenario, e)
-            report["scenarios"][scenario] = {"status": "not_implemented", "reason": str(e)}
-
-    _write_report(args.report, report)
+    _run_scenarios(scenarios_to_run, args, report)
     print(f"Wrote {args.report}")
     return 0
 
