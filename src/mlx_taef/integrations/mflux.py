@@ -189,6 +189,8 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
                 "the auto-detected resolution, or neither to auto-detect from the mflux "
                 f"Config. Got latent_height={latent_height!r}, latent_width={latent_width!r}."
             )
+        if every < 1:
+            raise ValueError(f"every must be a positive integer (>= 1), got {every!r}.")
         try:
             model_cls = _VARIANT_CLASSES[variant]
         except KeyError:

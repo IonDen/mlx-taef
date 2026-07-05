@@ -660,3 +660,17 @@ def test_flux2klein_construction_shape_matches_installed_mflux() -> None:
         "mflux Flux2Klein no longer accepts model_config=; update README"
     )
     assert callable(ModelConfig.flux2_klein_base_4b), "ModelConfig.flux2_klein_base_4b missing"
+
+
+def test_every_zero_rejected_at_construction(monkeypatch: pytest.MonkeyPatch) -> None:
+    """every must be >= 1: idx % every would ZeroDivisionError mid-generation otherwise.
+    The guard must fire BEFORE model load — patch from_pretrained to blow up if reached."""
+    from mlx_taef import TAEF2
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    def _boom(cls: object, **kw: object) -> object:
+        raise AssertionError("from_pretrained reached — the every guard is misplaced")
+
+    monkeypatch.setattr(TAEF2, "from_pretrained", classmethod(_boom))
+    with pytest.raises(ValueError, match="every"):
+        LivePreviewCallback(variant="taef2", save_to="/tmp/p.png", every=0)
