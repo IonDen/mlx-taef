@@ -191,6 +191,13 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
             )
         if every < 1:
             raise ValueError(f"every must be a positive integer (>= 1), got {every!r}.")
+        if (bn_mean is None) != (bn_var is None):
+            raise ValueError(
+                "bn_mean and bn_var must be set together: pass both to configure explicit BN "
+                "denormalization, or neither to auto-extract / use identity BN. Got "
+                f"bn_mean={'set' if bn_mean is not None else None}, "
+                f"bn_var={'set' if bn_var is not None else None}."
+            )
         try:
             model_cls = _VARIANT_CLASSES[variant]
         except KeyError:
