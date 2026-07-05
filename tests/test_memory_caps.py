@@ -1,6 +1,6 @@
 """Tests for `mlx_taef._memory_caps` — the device-aware cap clamper.
 
-The helper exists so CLAUDE.md's 20 GB / 22 GB user-machine targets
+The helper exists so the 20 GB / 22 GB user-machine targets
 don't crash on smaller-ceiling hardware (CI runners, 8 GB Mac mini).
 Tests cover the happy path (real device) and the clamping branches
 via `mx.device_info` patching.

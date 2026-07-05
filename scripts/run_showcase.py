@@ -89,7 +89,7 @@ def _build_argparser() -> argparse.ArgumentParser:
         help=(
             "Don't move existing _artifacts/showcase/ to ~/.Trash before "
             "starting. By default, prior bench output is preserved in "
-            "Trash with a dated suffix per the CLAUDE.md 'never rm' rule."
+            "Trash with a dated suffix (generated artifacts are moved to the Trash, never deleted)."
         ),
     )
     return parser
@@ -99,7 +99,7 @@ def _move_prior_artifacts_to_trash(artifacts_dir: Path) -> Path | None:
     """Move an existing artifacts dir to ~/.Trash with a dated tag.
 
     Returns the new Trash path on success, None if there was nothing to
-    move. Mirrors the CLAUDE.md 'never rm' guardrail — re-running the
+    move. Prior bench output is moved to the Trash, never deleted — re-running the
     bench would otherwise silently overwrite multi-minute prior work.
     """
     if not artifacts_dir.exists():
