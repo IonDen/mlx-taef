@@ -37,8 +37,8 @@ def test_taef2_decode_1024_under_200ms(taef2_fp16: TAEF2, benchmark) -> None:
 def test_taef2_decode_peak_memory_under_budget(taef2_fp16: TAEF2) -> None:
     """Peak unified-memory pressure during 1024x1024 decode.
 
-    Budget: 1.5 GB. The full Flux VAE needs ~9-10 GB for the same operation,
-    so TAEF2 at <1.5 GB is the headline 5-7x memory win.
+    Budget: 1.5 GB. See COMPARISON.md for the measured TAEF vs full-VAE peak-memory
+    numbers (the same-process ~9-10 GB / 5-7x figure was retracted in v0.2.0).
     """
     latent = mx.random.normal((1, 128, 128, 32)).astype(mx.float16)
     mx.eval(latent)
