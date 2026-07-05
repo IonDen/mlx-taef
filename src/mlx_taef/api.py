@@ -81,7 +81,7 @@ class Taef(nn.Module):  # type: ignore[misc,name-defined]
         return instance
 
     @classmethod
-    def from_pretrained(  # pragma: no cover
+    def from_pretrained(
         cls,
         repo_id: str | None = None,
         *,
@@ -101,9 +101,13 @@ class Taef(nn.Module):  # type: ignore[misc,name-defined]
                 f"repo_id mismatch: requested {repo_id!r} but kernel {kernel.name!r} "
                 f"uses {kernel.source.repo!r}"
             )
-        decoder_path = get_or_convert(kernel, role="decoder")
-        encoder_path = get_or_convert(kernel, role="encoder") if include_encoder else None
-        return cls.from_pretrained_local(decoder_path, encoder_path=encoder_path, dtype=dtype)
+        decoder_path = get_or_convert(kernel, role="decoder")  # pragma: no cover - network
+        encoder_path = (  # pragma: no cover - network
+            get_or_convert(kernel, role="encoder") if include_encoder else None
+        )
+        return cls.from_pretrained_local(  # pragma: no cover - network
+            decoder_path, encoder_path=encoder_path, dtype=dtype
+        )
 
     def decode(self, latents: mx.array) -> mx.array:
         """Decode raw latents (NHWC) to image (NHWC, [0, 1] float).
