@@ -629,3 +629,34 @@ def test_live_preview_callback_and_mlx_teacache_coexist_on_real_registry(
     new_subscribers = [s for s in after if s not in initial]
     assert preview in new_subscribers
     assert teacache_cb in new_subscribers
+
+
+def test_readme_mflux_snippet_uses_valid_flux2klein_construction() -> None:
+    """H1 regression guard: the README 'mflux live previews' snippet must construct
+    Flux2Klein via the installed-mflux API, not the nonexistent Flux2Klein.from_pretrained.
+    Reads the shipped README so a future edit reintroducing the broken call reddens."""
+    readme = Path(__file__).resolve().parent.parent / "README.md"
+    if not readme.exists():  # tests run in-repo only; the sdist ships no README beside tests
+        pytest.skip("README.md not present next to the test tree")
+    text = readme.read_text()
+    assert "Flux2Klein.from_pretrained" not in text, (
+        "README uses Flux2Klein.from_pretrained, which does not exist in mflux; use "
+        "Flux2Klein(quantize=..., model_config=ModelConfig.flux2_klein_base_4b())."
+    )
+
+
+def test_flux2klein_construction_shape_matches_installed_mflux() -> None:
+    """Doc-shape guard: the README/example construct Flux2Klein(quantize=..., model_config=...).
+    Pin those parameters against installed mflux so a rename/removal reddens here instead of in a
+    user's copy-paste. Signature-only (no construction) — constructing downloads the 4B weights."""
+    import inspect
+
+    from mflux.models.common.config.model_config import ModelConfig
+    from mflux.models.flux2 import Flux2Klein
+
+    params = inspect.signature(Flux2Klein.__init__).parameters
+    assert "quantize" in params, "mflux Flux2Klein no longer accepts quantize=; update README"
+    assert "model_config" in params, (
+        "mflux Flux2Klein no longer accepts model_config=; update README"
+    )
+    assert callable(ModelConfig.flux2_klein_base_4b), "ModelConfig.flux2_klein_base_4b missing"
