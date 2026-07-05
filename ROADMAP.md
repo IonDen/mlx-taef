@@ -34,7 +34,7 @@ A non-binding sketch of where the library is headed. Each item lists status, eff
 These exist in upstream [`madebyollin/taesd`](https://github.com/madebyollin/taesd) but are not in mlx-taef as of v0.2.3. Each requires its own integration + calibration cycle.
 
 - **TAESD3** — for Stable Diffusion 3 / 3.5.
-- **TAESANA** — for Sana (the `f32` arch_variant placeholder in `variants.py` is reserved for this).
+- **TAESANA** — for Sana.
 - **TAESDV** — for SD video models.
 - **TAEHV** — for Hunyuan / Wan / CogVideoX. The Wan 2.1 decoder (taew2.1) ships as of v0.6.0 for Qwen-Image; the multi-frame video models on this architecture are not yet wired.
 - **TAEM1** — for Mochi 1.

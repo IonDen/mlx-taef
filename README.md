@@ -55,7 +55,7 @@ uv add "mlx-taef[mflux]"
 Pin an exact version in a project that needs reproducibility:
 
 ```bash
-pip install "mlx-taef==0.2.0"
+pip install "mlx-taef==0.6.2"
 ```
 
 Verify the install:
