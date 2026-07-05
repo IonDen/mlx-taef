@@ -138,3 +138,10 @@ def test_decode_parity_gate_rejects_brightness_shift() -> None:
     assert _cosine_sim(out, shifted_ref) > 0.999  # old gate would have passed this
     with pytest.raises(AssertionError):
         np.testing.assert_allclose(out, shifted_ref, atol=DECODE_ATOL, rtol=0)
+
+
+def test_from_pretrained_rejects_repo_id_mismatch() -> None:
+    """from_pretrained(repo_id=...) validates against the kernel's own repo BEFORE any
+    download, so a mismatch raises offline. Documented behavior, previously untested."""
+    with pytest.raises(ValueError, match="repo_id mismatch"):
+        TAEF1.from_pretrained(repo_id="not/the-real-repo")
