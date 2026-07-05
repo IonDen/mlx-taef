@@ -59,7 +59,17 @@ def diff_reports(
     old_scenarios = old.get("scenarios", {})
     new_scenarios = new.get("scenarios", {})
 
-    for scenario, new_data in new_scenarios.items():
+    for scenario in sorted(old_scenarios.keys() | new_scenarios.keys()):
+        if scenario not in new_scenarios:
+            regressions.append(
+                {
+                    "kind": "scenario-missing",
+                    "scenario": scenario,
+                    "detail": "present in baseline, absent from new report",
+                }
+            )
+            continue
+        new_data = new_scenarios[scenario]
         old_data = old_scenarios.get(scenario, {})
 
         # taef*_vs_vae conditions → median_seconds + median_peak_memory_gb per condition
@@ -70,23 +80,30 @@ def diff_reports(
                 continue
             old_med = old_cond.get("median_seconds")
             new_med = new_cond.get("median_seconds")
-            if (
-                isinstance(old_med, (int, float))
-                and isinstance(new_med, (int, float))
-                and old_med > 0
-            ):
-                drift = (new_med - old_med) / old_med
-                if drift > wallclock_tolerance:
+            if isinstance(old_med, (int, float)) and old_med > 0:
+                if not isinstance(new_med, (int, float)):
                     regressions.append(
                         {
-                            "kind": "wallclock-drift",
+                            "kind": "wallclock-missing",
                             "scenario": scenario,
                             "condition": cond,
                             "old_seconds": old_med,
                             "new_seconds": new_med,
-                            "drift_pct": drift * 100,
                         }
                     )
+                else:
+                    drift = (new_med - old_med) / old_med
+                    if drift > wallclock_tolerance:
+                        regressions.append(
+                            {
+                                "kind": "wallclock-drift",
+                                "scenario": scenario,
+                                "condition": cond,
+                                "old_seconds": old_med,
+                                "new_seconds": new_med,
+                                "drift_pct": drift * 100,
+                            }
+                        )
             old_mem = old_cond.get("median_peak_memory_gb")
             new_mem = new_cond.get("median_peak_memory_gb")
             if isinstance(old_mem, (int, float)) and old_mem > 0:
@@ -117,23 +134,30 @@ def diff_reports(
         # Live scenarios → scenario-level elapsed_s
         old_elapsed = old_data.get("elapsed_s")
         new_elapsed = new_data.get("elapsed_s")
-        if (
-            isinstance(old_elapsed, (int, float))
-            and isinstance(new_elapsed, (int, float))
-            and old_elapsed > 0
-        ):
-            drift = (new_elapsed - old_elapsed) / old_elapsed
-            if drift > wallclock_tolerance:
+        if isinstance(old_elapsed, (int, float)) and old_elapsed > 0:
+            if not isinstance(new_elapsed, (int, float)):
                 regressions.append(
                     {
-                        "kind": "wallclock-drift",
+                        "kind": "wallclock-missing",
                         "scenario": scenario,
                         "condition": "(scenario)",
                         "old_seconds": old_elapsed,
                         "new_seconds": new_elapsed,
-                        "drift_pct": drift * 100,
                     }
                 )
+            else:
+                drift = (new_elapsed - old_elapsed) / old_elapsed
+                if drift > wallclock_tolerance:
+                    regressions.append(
+                        {
+                            "kind": "wallclock-drift",
+                            "scenario": scenario,
+                            "condition": "(scenario)",
+                            "old_seconds": old_elapsed,
+                            "new_seconds": new_elapsed,
+                            "drift_pct": drift * 100,
+                        }
+                    )
 
         # Scenario-level peak_memory_gb (live_preview / combined)
         old_peak = old_data.get("peak_memory_gb")
@@ -192,20 +216,26 @@ def diff_reports(
         # SSIM at scenario level (taef*_vs_vae only — live scenarios have no SSIM)
         old_ssim = old_data.get("ssim_median")
         new_ssim = new_data.get("ssim_median")
-        if (
-            isinstance(old_ssim, (int, float))
-            and isinstance(new_ssim, (int, float))
-            and (old_ssim - new_ssim) > ssim_tolerance
-        ):
-            regressions.append(
-                {
-                    "kind": "ssim-drop",
-                    "scenario": scenario,
-                    "old_ssim": old_ssim,
-                    "new_ssim": new_ssim,
-                    "drop": old_ssim - new_ssim,
-                }
-            )
+        if isinstance(old_ssim, (int, float)):
+            if not isinstance(new_ssim, (int, float)):
+                regressions.append(
+                    {
+                        "kind": "ssim-missing",
+                        "scenario": scenario,
+                        "old_ssim": old_ssim,
+                        "new_ssim": new_ssim,
+                    }
+                )
+            elif (old_ssim - new_ssim) > ssim_tolerance:
+                regressions.append(
+                    {
+                        "kind": "ssim-drop",
+                        "scenario": scenario,
+                        "old_ssim": old_ssim,
+                        "new_ssim": new_ssim,
+                        "drop": old_ssim - new_ssim,
+                    }
+                )
 
     return regressions
 

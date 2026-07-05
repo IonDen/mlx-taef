@@ -342,3 +342,47 @@ def test_peak_memory_field_removed_flagged_for_scenario() -> None:
     assert len(flagged) == 1
     assert flagged[0]["scenario"] == "live_preview"
     assert flagged[0]["condition"] == "(scenario)"
+
+
+def test_whole_scenario_missing_from_new_report_is_flagged() -> None:
+    """A scenario present in the baseline but absent from the new report must be flagged —
+    otherwise a partial re-run silently passes as 'no regressions'."""
+    from scripts.diff_showcase_report import diff_reports
+
+    old = {"scenarios": {"taef1_vs_vae": {"ssim_median": 0.95}, "live_preview": {"elapsed_s": 2.0}}}
+    new = {"scenarios": {"taef1_vs_vae": {"ssim_median": 0.95}}}  # live_preview dropped
+    regs = diff_reports(old, new)
+    kinds = {(r["kind"], r["scenario"]) for r in regs}
+    assert ("scenario-missing", "live_preview") in kinds
+
+
+def test_ssim_median_missing_from_new_report_is_flagged() -> None:
+    """A dropped ssim_median (baseline had it, new omits it) must be flagged, matching the
+    existing peak-memory-missing guard."""
+    from scripts.diff_showcase_report import diff_reports
+
+    old = {"scenarios": {"taef1_vs_vae": {"ssim_median": 0.95}}}
+    new = {"scenarios": {"taef1_vs_vae": {}}}  # ssim_median gone
+    regs = diff_reports(old, new)
+    assert any(r["kind"] == "ssim-missing" for r in regs)
+
+
+def test_condition_median_seconds_missing_from_new_report_is_flagged() -> None:
+    """A dropped per-condition median_seconds (baseline had it, new omits it) must flag —
+    otherwise a latency field can vanish and still pass as 'no regressions'."""
+    from scripts.diff_showcase_report import diff_reports
+
+    old = {"scenarios": {"taef1_vs_vae": {"taef": {"median_seconds": 0.18}}}}
+    new = {"scenarios": {"taef1_vs_vae": {"taef": {}}}}  # median_seconds gone
+    regs = diff_reports(old, new)
+    assert any(r["kind"] == "wallclock-missing" for r in regs)
+
+
+def test_scenario_elapsed_s_missing_from_new_report_is_flagged() -> None:
+    """A dropped scenario-level elapsed_s (live_preview/combined) must flag too."""
+    from scripts.diff_showcase_report import diff_reports
+
+    old = {"scenarios": {"live_preview": {"elapsed_s": 2.0}}}
+    new = {"scenarios": {"live_preview": {}}}  # elapsed_s gone
+    regs = diff_reports(old, new)
+    assert any(r["kind"] == "wallclock-missing" and r["condition"] == "(scenario)" for r in regs)
