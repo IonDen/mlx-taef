@@ -117,3 +117,50 @@ def test_main_persists_bn_stats_for_flux2(tmp_path: Path) -> None:
     assert {"latent", "bn_mean", "bn_var", "height", "width"} <= set(saved.keys())
     assert saved["bn_mean"].shape == (128,)
     assert saved["bn_var"].shape == (128,)
+
+
+def test_capture_flux1_latent_register_generate_retrieve() -> None:
+    """Drives the real register→generate→retrieve contract against the REAL mflux
+    CallbackRegistry (no model): register() duck-types call_after_loop into after_loop,
+    generate dispatches via after_loop_callbacks(), and the captured, eval'd array is returned.
+    Using the real registry means an mflux registration/dispatch change reddens this test."""
+    import mlx.core as mx
+    from mflux.callbacks.callback_registry import CallbackRegistry
+    from scripts._capture_latent import _capture_flux1_latent
+
+    class _FiringFlux:
+        def __init__(self, latent: mx.array) -> None:
+            self._latent = latent
+            self.callbacks = CallbackRegistry()
+
+        def generate_image(
+            self, *, seed, prompt, num_inference_steps, height, width, guidance
+        ) -> None:
+            for cb in self.callbacks.after_loop_callbacks():
+                cb.call_after_loop(seed=seed, prompt=prompt, latents=self._latent, config=None)
+
+    latent = mx.arange(4, dtype=mx.float32)
+    out = _capture_flux1_latent(
+        _FiringFlux(latent), prompt="p", seed=0, height=64, width=64, num_steps=1, guidance=1.0
+    )
+    assert out.shape == (4,)
+    assert bool(mx.all(out == latent))
+
+
+def test_capture_flux1_latent_raises_when_callback_never_fires() -> None:
+    """A generation that never dispatches to the callback must raise the package RuntimeError,
+    not silently return None. Real CallbackRegistry; generate_image simply never dispatches."""
+    from mflux.callbacks.callback_registry import CallbackRegistry
+    from scripts._capture_latent import _capture_flux1_latent
+
+    class _SilentFlux:
+        def __init__(self) -> None:
+            self.callbacks = CallbackRegistry()
+
+        def generate_image(self, **kwargs: object) -> None:
+            pass  # never dispatches to after-loop subscribers
+
+    with pytest.raises(RuntimeError, match="did not fire"):
+        _capture_flux1_latent(
+            _SilentFlux(), prompt="p", seed=0, height=64, width=64, num_steps=1, guidance=1.0
+        )
