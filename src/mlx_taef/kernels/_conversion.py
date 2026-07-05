@@ -29,21 +29,35 @@ def _verify_sha256(path: Path, expected: str | None) -> None:
         raise ConversionError(f"sha256 mismatch for {path}: got {digest}, expected {expected}")
 
 
+def _download_and_verify(source: WeightSource, filename: str) -> Path:
+    """Download `filename` from `source.repo`, pinned to `source.revision`.
+
+    Then verify `source.sha256` (both no-ops when None). All conversion strategies route
+    downloads through here so the supply-chain pin is enforced uniformly.
+    """
+    from huggingface_hub import hf_hub_download
+
+    path = hf_hub_download(repo_id=source.repo, filename=filename, revision=source.revision)
+    _verify_sha256(Path(path), source.sha256)
+    return Path(path)
+
+
 class DiffusersRemap:
     """Diffusers single-file source (FLUX.1/FLUX.2/Z-Image). Decoder keys get a +1 offset."""
 
     def _load_raw(self, source: WeightSource, role: Role) -> dict[str, np.ndarray]:
         """Download + key-remap the diffusers single-file source to Sequential keys."""
-        from huggingface_hub import hf_hub_download  # pragma: no cover
-        from safetensors.numpy import load_file as safetensors_load_numpy  # pragma: no cover
+        from safetensors.numpy import load_file as safetensors_load_numpy
 
-        from mlx_taef.convert import convert_diffusers_to_sequential  # pragma: no cover
+        from mlx_taef.convert import convert_diffusers_to_sequential
 
-        if source.filename is None:  # pragma: no cover
-            raise ValueError(f"Diffusers source {source.repo!r} has no filename")
-        path = hf_hub_download(repo_id=source.repo, filename=source.filename)  # pragma: no cover
-        full_sd = safetensors_load_numpy(path)  # pragma: no cover
-        return convert_diffusers_to_sequential(full_sd, role=role)  # pragma: no cover
+        if source.filename is None:
+            raise ValueError(
+                f"Diffusers source {source.repo!r} has no filename"
+            )  # pragma: no cover
+        path = _download_and_verify(source, source.filename)
+        full_sd = safetensors_load_numpy(str(path))
+        return convert_diffusers_to_sequential(full_sd, role=role)
 
     def convert(
         self, source: WeightSource, arch_module: object, *, role: Role
@@ -61,14 +75,15 @@ class UpstreamTwoFile:
 
     def _load_raw(self, source: WeightSource, role: Role) -> dict[str, np.ndarray]:
         """Download the upstream per-role safetensors (already Sequential-keyed)."""
-        from huggingface_hub import hf_hub_download  # pragma: no cover
-        from safetensors.numpy import load_file as safetensors_load_numpy  # pragma: no cover
+        from safetensors.numpy import load_file as safetensors_load_numpy
 
         fname = source.decoder_filename if role == "decoder" else source.encoder_filename
-        if fname is None:  # pragma: no cover
-            raise ValueError(f"Upstream source {source.repo!r} has no {role} filename")
-        path = hf_hub_download(repo_id=source.repo, filename=fname)  # pragma: no cover
-        return safetensors_load_numpy(path)  # pragma: no cover
+        if fname is None:
+            raise ValueError(
+                f"Upstream source {source.repo!r} has no {role} filename"
+            )  # pragma: no cover
+        path = _download_and_verify(source, fname)
+        return safetensors_load_numpy(str(path))
 
     def convert(
         self, source: WeightSource, arch_module: object, *, role: Role
@@ -103,16 +118,14 @@ class TaehvCombined:
 
     def _load_raw(self, source: WeightSource, role: Role) -> dict[str, np.ndarray]:
         """Download the combined safetensors and select this role's tensors."""
-        from huggingface_hub import hf_hub_download  # pragma: no cover
-        from safetensors.numpy import load_file as safetensors_load_numpy  # pragma: no cover
+        from safetensors.numpy import load_file as safetensors_load_numpy
 
-        if source.filename is None:  # pragma: no cover
-            raise ValueError(f"Combined taehv source {source.repo!r} has no filename")
-        path = hf_hub_download(  # pragma: no cover
-            repo_id=source.repo, filename=source.filename, revision=source.revision
-        )
-        _verify_sha256(Path(path), source.sha256)  # pragma: no cover
-        return self._select_role(safetensors_load_numpy(path), role)  # pragma: no cover
+        if source.filename is None:
+            raise ValueError(
+                f"Combined taehv source {source.repo!r} has no filename"
+            )  # pragma: no cover
+        path = _download_and_verify(source, source.filename)
+        return self._select_role(safetensors_load_numpy(str(path)), role)
 
     def convert(
         self, source: WeightSource, arch_module: object, *, role: Role
