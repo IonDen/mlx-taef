@@ -16,6 +16,7 @@ import statistics
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -273,8 +274,13 @@ def _install_memory_caps(applied_cap_gb: int | None) -> int:
     return wired_gb
 
 
-def _decode_taef1(latent: Any, height: int, width: int) -> Any:
-    """Packed (1, lH*lW, 64) → NHWC uint8 (1, H, W, 3) via TAEF1."""
+def _prep_taef1(latent: Any, height: int, width: int) -> Callable[[], Any]:
+    """Construct TAEF1 + unpack (UN-timed); return a thunk that decodes only.
+
+    Model construction and the latent unpack run here, outside the timed region, so the
+    caller measures the TAEF1 decode step in isolation. The unpack is eval'd so its work is
+    not lazily deferred into the timed decode.
+    """
     import mlx.core as mx
     from mflux.models.flux.latent_creator.flux_latent_creator import FluxLatentCreator
 
@@ -283,11 +289,16 @@ def _decode_taef1(latent: Any, height: int, width: int) -> Any:
     taef = TAEF1.from_pretrained(include_encoder=False)
     unpacked_nchw = FluxLatentCreator.unpack_latents(latent, height=height, width=width)
     unpacked_nhwc = mx.transpose(unpacked_nchw, (0, 2, 3, 1))
-    return taef.decode_image(unpacked_nhwc)
+    mx.eval(unpacked_nhwc)
+    return lambda: taef.decode_image(unpacked_nhwc)
 
 
-def _decode_taef2(latent: Any, height: int, width: int, bn_mean: Any, bn_var: Any) -> Any:
-    """Packed (1, lH*lW, 128) → NHWC uint8 (1, H, W, 3) via TAEF2 with BN denorm."""
+def _prep_taef2(
+    latent: Any, height: int, width: int, bn_mean: Any, bn_var: Any
+) -> Callable[[], Any]:
+    """Construct TAEF2 + unpack (BN denorm, UN-timed); return a thunk that decodes only."""
+    import mlx.core as mx
+
     from mlx_taef.api import TAEF2
     from mlx_taef.integrations.mflux import unpack_flux2_latent
 
@@ -301,27 +312,32 @@ def _decode_taef2(latent: Any, height: int, width: int, bn_mean: Any, bn_var: An
         bn_mean=bn_mean,
         bn_var=bn_var,
     )
-    return taef.decode_image(unpacked)
+    mx.eval(unpacked)
+    return lambda: taef.decode_image(unpacked)
 
 
-def _decode_zimage(latent: Any, height: int, width: int) -> Any:
-    """Packed Z-Image in-loop latent (16, 1, h, w) → NHWC uint8 (1, H, W, 3) via ZImage TAEF.
+def _prep_zimage(latent: Any, height: int, width: int) -> Callable[[], Any]:
+    """Construct ZImage TAEF + unpack (UN-timed); return a thunk that decodes only.
 
-    Returns `decode_image()` directly — it already produces uint8 NHWC.
+    The decode thunk returns `decode_image()` directly — it already produces uint8 NHWC.
     Do NOT pass through `_decoded_to_uint8_nhwc` (that helper is for full-VAE NCHW [-1,1]
     tensors and would transpose/renormalize uint8 into garbage).
     """
+    import mlx.core as mx
+
     from mlx_taef import ZImage
     from mlx_taef.kernels import UnpackContext
     from mlx_taef.kernels.zimage import unpack_zimage_latent
 
     taef = ZImage.from_pretrained(include_encoder=False)
     ctx = UnpackContext(latent_height=height // 8, latent_width=width // 8)
-    return taef.decode_image(unpack_zimage_latent(latent, ctx))  # already uint8 NHWC (1,H,W,3)
+    unpacked = unpack_zimage_latent(latent, ctx)
+    mx.eval(unpacked)
+    return lambda: taef.decode_image(unpacked)  # already uint8 NHWC (1,H,W,3)
 
 
-def _decode_full_vae_zimage(latent: Any, height: int, width: int) -> Any:
-    """Packed Z-Image latent → full mflux Z-Image VAE decode → NHWC uint8 image."""
+def _prep_full_vae_zimage(latent: Any, height: int, width: int) -> Callable[[], Any]:
+    """Construct full mflux Z-Image VAE + unpack (UN-timed); thunk decodes → NHWC uint8."""
     import mlx.core as mx
     from mflux.models.common.config.model_config import ModelConfig
     from mflux.models.common.vae.vae_util import VAEUtil
@@ -330,24 +346,27 @@ def _decode_full_vae_zimage(latent: Any, height: int, width: int) -> Any:
 
     model = MfluxZImage(quantize=4, model_config=ModelConfig.z_image_turbo())
     unpacked = ZImageLatentCreator.unpack_latents(latent, height, width)
-    decoded = VAEUtil.decode(vae=model.vae, latent=unpacked, tiling_config=None)
-    mx.eval(decoded)
-    return _decoded_to_uint8_nhwc(decoded)
+    mx.eval(unpacked)
+    return lambda: _decoded_to_uint8_nhwc(
+        VAEUtil.decode(vae=model.vae, latent=unpacked, tiling_config=None)
+    )
 
 
-def _decode_full_vae_flux1(latent: Any, height: int, width: int) -> Any:
-    """Packed → full FLUX.1 VAE decode → NHWC uint8 image."""
+def _prep_full_vae_flux1(latent: Any, height: int, width: int) -> Callable[[], Any]:
+    """Construct full FLUX.1 VAE + unpack (UN-timed); thunk decodes → NHWC uint8."""
+    import mlx.core as mx
     from mflux.models.flux.latent_creator.flux_latent_creator import FluxLatentCreator
     from mflux.models.flux.variants.txt2img.flux import Flux1
 
     flux = Flux1.from_name("dev", quantize=4)
     unpacked = FluxLatentCreator.unpack_latents(latent, height=height, width=width)
-    decoded = flux.vae.decode(unpacked)
-    return _decoded_to_uint8_nhwc(decoded)
+    mx.eval(unpacked)
+    return lambda: _decoded_to_uint8_nhwc(flux.vae.decode(unpacked))
 
 
-def _decode_full_vae_flux2(latent: Any, height: int, width: int) -> Any:
-    """Packed → full FLUX.2 Klein VAE decode → NHWC uint8 image."""
+def _prep_full_vae_flux2(latent: Any, height: int, width: int) -> Callable[[], Any]:
+    """Construct full FLUX.2 Klein VAE + unpack (UN-timed); thunk decodes → NHWC uint8."""
+    import mlx.core as mx
     from mflux.models.common.config.model_config import ModelConfig
     from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
 
@@ -357,8 +376,8 @@ def _decode_full_vae_flux2(latent: Any, height: int, width: int) -> Any:
     packed_nchw = latent.reshape(latent.shape[0], latent_h, latent_w, latent.shape[-1]).transpose(
         0, 3, 1, 2
     )
-    decoded = flux.vae.decode_packed_latents(packed_nchw)
-    return _decoded_to_uint8_nhwc(decoded)
+    mx.eval(packed_nchw)
+    return lambda: _decoded_to_uint8_nhwc(flux.vae.decode_packed_latents(packed_nchw))
 
 
 def _decoded_to_uint8_nhwc(decoded: Any) -> Any:
@@ -396,27 +415,33 @@ def _worker_main(args: argparse.Namespace) -> int:
     bn_mean = arrays.get("bn_mean")
     bn_var = arrays.get("bn_var")
 
-    mx.reset_peak_memory()
-    t0 = time.perf_counter()
+    # Setup (UN-timed): construct the model + unpack the latent. Excluding model construction
+    # and weight materialization from the timed region makes elapsed_s the decoder step in
+    # isolation; peak_gb likewise measures the decode working set on top of the already-resident
+    # model (reset_peak_memory is called after construction).
     if args.condition == "taef1":
-        image = _decode_taef1(latent, height, width)
+        decode_fn = _prep_taef1(latent, height, width)
     elif args.condition == "taef2":
         if bn_mean is None or bn_var is None:
             raise TaefError("taef2 condition requires bn_mean+bn_var in the latent safetensors")
-        image = _decode_taef2(latent, height, width, bn_mean, bn_var)
+        decode_fn = _prep_taef2(latent, height, width, bn_mean, bn_var)
     elif args.condition == "zimage":
-        image = _decode_zimage(latent, height, width)
+        decode_fn = _prep_zimage(latent, height, width)
     elif args.condition == "vanilla_vae":
         if args.flux_variant == "flux1-dev":
-            image = _decode_full_vae_flux1(latent, height, width)
+            decode_fn = _prep_full_vae_flux1(latent, height, width)
         elif args.flux_variant == "flux2-klein-base-4b":
-            image = _decode_full_vae_flux2(latent, height, width)
+            decode_fn = _prep_full_vae_flux2(latent, height, width)
         elif args.flux_variant == "z-image-turbo":
-            image = _decode_full_vae_zimage(latent, height, width)
+            decode_fn = _prep_full_vae_zimage(latent, height, width)
         else:  # pragma: no cover
             raise TaefError(f"unknown flux_variant: {args.flux_variant!r}")
     else:  # pragma: no cover
         raise TaefError(f"unknown condition: {args.condition!r}")
+
+    mx.reset_peak_memory()
+    t0 = time.perf_counter()
+    image = decode_fn()
     mx.eval(image)
     elapsed_s = time.perf_counter() - t0
     peak_gb = mx.get_peak_memory() / 1024**3
