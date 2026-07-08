@@ -228,19 +228,21 @@ def test_resolve_cap_gb_zimage_uses_registry_hint() -> None:
 
 
 def test_decode_zimage_returns_uint8_nhwc(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Regression guard: _decode_zimage must return decode_image() directly (uint8 NHWC),
-    NOT pass it through _decoded_to_uint8_nhwc (which would transpose/renormalize to garbage)."""
+    """Regression guard: the zimage decode thunk must return decode_image() directly (uint8
+    NHWC), NOT pass it through _decoded_to_uint8_nhwc (which would transpose/renormalize to
+    garbage). _prep_zimage builds the thunk; calling it runs the decode."""
     from pathlib import Path
 
     import mlx.core as mx
-    from scripts.bench_decode import _decode_zimage
+    from scripts.bench_decode import _prep_zimage
 
     from mlx_taef import ZImage
 
     weights = Path("tests/converted/taef1_decoder.safetensors")
     real = ZImage.from_pretrained_local(weights)
     monkeypatch.setattr(ZImage, "from_pretrained", classmethod(lambda cls, **kw: real))
-    out = _decode_zimage(mx.zeros((16, 1, 8, 8)), 64, 64)
+    decode_fn = _prep_zimage(mx.zeros((16, 1, 8, 8)), 64, 64)
+    out = decode_fn()
     assert out.shape == (1, 64, 64, 3)
     assert out.dtype == mx.uint8
 
