@@ -94,8 +94,10 @@ def test_download_and_verify_raises_on_sha_mismatch(
 
 
 def test_pinned_sources_route_through_a_verifying_strategy() -> None:
-    """Every kernel that pins sha256 must use a strategy that verifies it — guards against
-    adding a pin to a source whose strategy ignores it (the M1 bug)."""
+    """Every sha256-pinned kernel must use one of the known verifying strategy classes. This
+    guards against wiring a pinned source to a brand-new, unverified strategy type; the actual
+    sha256-verification behavior of each strategy is covered by the per-strategy routing tests
+    and test_download_and_verify_raises_on_sha_mismatch."""
     from mlx_taef.kernels import KERNELS
     from mlx_taef.kernels._conversion import (
         DiffusersRemap,

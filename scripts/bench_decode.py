@@ -277,9 +277,10 @@ def _install_memory_caps(applied_cap_gb: int | None) -> int:
 def _prep_taef1(latent: Any, height: int, width: int) -> Callable[[], Any]:
     """Construct TAEF1 + unpack (UN-timed); return a thunk that decodes only.
 
-    Model construction and the latent unpack run here, outside the timed region, so the
-    caller measures the TAEF1 decode step in isolation. The unpack is eval'd so its work is
-    not lazily deferred into the timed decode.
+    Model construction and the latent unpack run here, outside the timed region. The unpack is
+    eval'd so it is not lazily deferred into the timed decode; the caller warms the thunk once
+    (materializing the lazy mmap-backed weights and JIT-compiling the kernels) before timing a
+    second, steady-state decode.
     """
     import mlx.core as mx
     from mflux.models.flux.latent_creator.flux_latent_creator import FluxLatentCreator
@@ -415,10 +416,7 @@ def _worker_main(args: argparse.Namespace) -> int:
     bn_mean = arrays.get("bn_mean")
     bn_var = arrays.get("bn_var")
 
-    # Setup (UN-timed): construct the model + unpack the latent. Excluding model construction
-    # and weight materialization from the timed region makes elapsed_s the decoder step in
-    # isolation; peak_gb likewise measures the decode working set on top of the already-resident
-    # model (reset_peak_memory is called after construction).
+    # Setup (UN-timed): construct the model + unpack the latent.
     if args.condition == "taef1":
         decode_fn = _prep_taef1(latent, height, width)
     elif args.condition == "taef2":
@@ -438,6 +436,12 @@ def _worker_main(args: argparse.Namespace) -> int:
             raise TaefError(f"unknown flux_variant: {args.flux_variant!r}")
     else:  # pragma: no cover
         raise TaefError(f"unknown condition: {args.condition!r}")
+
+    # Warm up once, UN-timed: the first decode materializes the lazy mmap-backed weights and
+    # JIT-compiles the Metal kernels. Timing a second call then measures steady-state decode —
+    # the per-step cost a live preview pays after the first step — and, because the weights are
+    # already resident, peak_gb reflects the decode working set rather than one-time weight load.
+    mx.eval(decode_fn())
 
     mx.reset_peak_memory()
     t0 = time.perf_counter()
