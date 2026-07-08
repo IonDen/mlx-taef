@@ -13,8 +13,8 @@ Tiny AutoEncoders for diffusion latents on Apple Silicon, in pure MLX.
 `mlx-taef` is the first MLX port of the TAESD family — TAESD (SD1.x), TAESDXL (SDXL), TAEF1 (FLUX.1), TAEF2 (FLUX.2 Klein), and Z-Image (which reuses the TAEF1 weights for previews) — plus Qwen-Image / Qwen-Image-Edit on a port of the taew2.1 (Wan 2.1 VAE) autoencoder. All are distilled mini-autoencoders that decode diffusion latents to RGB in milliseconds using a few-MB model instead of multi-GB full VAEs.
 
 Use it for:
-- **Live previews** during long generations on Mac — TAEF1 decodes a 512×512 preview in ~183 ms and TAEF2 in ~258 ms on M1 Max (vs 2 s for the full VAE). [Watch a step-by-step decode](https://github.com/IonDen/mlx-taef/blob/main/PREVIEW.md), or see [COMPARISON.md](COMPARISON.md) for the measured table and reproducer.
-- **Low-memory fallbacks** when the full VAE OOMs on 16 GB Macs (TAEF2 peaks at ~0.6 GB decode memory vs ~2.6 GB for the full FLUX.2 VAE on the same latent).
+- **Live previews** during long generations on Mac — the decode step itself takes ~45 ms for both TAEF1 and TAEF2 on M1 Max, versus ~0.33 s for the full VAE decode (~7–8× faster). [Watch a step-by-step decode](https://github.com/IonDen/mlx-taef/blob/main/PREVIEW.md), or see [COMPARISON.md](COMPARISON.md) for the measured table and reproducer.
+- **Low-memory fallbacks** when the full VAE OOMs on 16 GB Macs (TAEF2 peaks at ~0.55 GB decode memory vs ~2.6 GB for the full FLUX.2 VAE on the same latent).
 - **Quick latent inspection** in notebooks and ML research.
 
 ```python
@@ -28,11 +28,11 @@ img_uint8 = taef.decode_image(latents)      # uint8 NHWC ready for PIL
 
 ## Which library do I need?
 
-**You want live previews or low-memory FLUX decode?** You're in the right place. `mlx-taef` decodes diffusion latents to RGB in ~260 ms (TAEF2) or ~185 ms (TAEF1) on M1 Max — vs ~2 seconds for the full VAE, with ~4× less peak memory. Drops into mflux via `LivePreviewCallback`.
+**You want live previews or low-memory FLUX decode?** You're in the right place. `mlx-taef`'s decode step takes ~45 ms on M1 Max, for either TAEF2 or TAEF1 — vs ~0.33 s for the full VAE decode, with ~5× less decode memory. Drops into mflux via `LivePreviewCallback`.
 
 **You want FLUX generation itself to be faster on Apple Silicon?** You want [`mlx-teacache`](https://github.com/IonDen/mlx-teacache) — it skips redundant denoising steps when the schedule is cacheable (measured 1.46× on FLUX.1-dev at 25 steps).
 
-**You want both: faster generation AND live previews?** Use them together — they compose cleanly. mflux 4-step Klein + TeaCache + TAEF2 previews = 1.30× wall-clock and 26% less peak memory vs vanilla.
+**You want both: faster generation AND live previews?** Use them together — they compose cleanly. mflux 4-step Klein + TeaCache + TAEF2 previews = 1.30× wall-clock and 48% less peak memory vs vanilla.
 
 ## Install
 
