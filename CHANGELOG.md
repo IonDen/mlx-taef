@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] — 2026-07-08
+
+A hardening and accuracy release. It hardens the live-preview callback and the converted-weight cache, and corrects the published decode-benchmark numbers after fixing how they were measured.
+
+### Fixed
+- The README's mflux live-preview quickstart called a `Flux2Klein` constructor that does not exist in any supported mflux version; it now uses the working `Flux2Klein(quantize=4, model_config=...)` form.
+- `LivePreviewCallback` rejects `every < 1` and a half-set BN pair (only `bn_mean` or only `bn_var`) at construction, rather than dividing by zero mid-generation or discarding the BN stats without a word.
+- `LivePreviewCallback` resets its step counter and frame gallery at the start of each generation. Reusing one callback across several `generate_image` calls no longer misaligns the `every` cadence or mixes preview frames from different runs.
+- The converted-weights cache key now includes a source's pinned revision and sha256, so bumping a pin re-converts instead of serving stale weights. Qwen-Image is the only pinned model today, so its users re-convert once on upgrade; the other models keep their existing cache.
+- Every conversion path now enforces a source's `revision` pin and, for single-file sources, verifies the `sha256`. Previously only the taew2.1 path did.
+
+### Changed
+- The decode benchmark now times the decode step by itself, with model construction moved outside the timed window. The published decode speedup is **~7–8×** — the earlier ~11× figure was mostly model-construction cost — and TAEF1 and TAEF2 both decode in about 45 ms. COMPARISON and EXAMPLES are re-measured, and the Z-Image decode and live-preview scenarios join the showcase.
+- The showcase harness writes its report after each scenario and records a failing scenario as an error instead of aborting the run. The report differ now flags a scenario or metric that vanishes between runs.
+
+### Internal
+- The `from_pretrained` `repo_id` mismatch guard is now tested; the latent-capture path is covered against the real mflux callback registry; shipped docstrings state the memory-cap constraint directly instead of pointing at a repo-local file; the local coverage gate matches CI at 95%.
+
 ## [0.6.1] — 2026-06-30
 
 A maintenance release: a cache-corruption fix, Python 3.14 support, sharper public-API types, and a live-preview demo.
