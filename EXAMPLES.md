@@ -10,9 +10,10 @@ Every measured number below was produced by the committed bench harness and is r
 the command shown in its section, except where a section marks its figures as pending or
 community-measured. Captures and timings: Apple M1 Max, 32 GB unified memory, macOS;
 mflux 0.18.0, MLX 0.31.2; weights quantized to int4 (`quantize=4`), bf16 activations. Decode
-times measure the decode step in isolation, outside of model construction, as the median over
-several timed reps; SSIM compares the tiny-decoder image against the full VAE on the same latent.
-Captured with mlx-taef v0.6.2 on 2026-07-08.
+times measure the decode step in isolation, outside of model construction and after one untimed
+warmup call, as the median over several timed reps — the steady-state per-step cost a live preview
+pays after its first step. SSIM compares the tiny-decoder image against the full VAE on the same
+latent. Captured with mlx-taef v0.6.2 on 2026-07-09.
 
 Runnable scripts live in [`examples/`](examples/).
 
@@ -35,8 +36,8 @@ What happened: the callback decodes the in-flight latent every step with TAEF1 a
 preview frame, while mflux finishes the run and decodes the final image with the full Z-Image
 VAE. By step 1 the composition is already readable.
 
-The gain: decoding the final Z-Image latent takes **58 ms** with TAEF1 versus **0.29 s** with the
-full Z-Image VAE, about **5.0× faster**, and it peaks at **0.55 GB** instead of 1.96 GB. Structural
+The gain: decoding the final Z-Image latent takes **30 ms** with TAEF1 versus **0.24 s** with the
+full Z-Image VAE, about **8.0× faster**, and it peaks at **0.55 GB** instead of 2.61 GB. Structural
 similarity between the two is **SSIM 0.94**, so the preview tracks the real image closely. The
 TAEF1 decoder is a few MB; the full VAE is hundreds. Reproduce:
 
@@ -83,8 +84,8 @@ Recipe: FLUX.2 Klein base 4B, same prompt/seed, 512×512, 4 steps, guidance 1.0,
 |---|---|---|
 | ![f21](_artifacts/showcase/live_preview/live_preview_step01.webp) | ![f23](_artifacts/showcase/live_preview/live_preview_step03.webp) | ![f2f](_artifacts/showcase/live_preview/live_preview_final.webp) |
 
-The gain: TAEF2 decodes a Klein latent in **46 ms** versus **0.33 s** for the full FLUX.2 VAE
-(~7.2× faster), at **0.55 GB** versus 2.57 GB peak. SSIM here is **0.616**, lower than the FLUX.1
+The gain: TAEF2 decodes a Klein latent in **31 ms** versus **0.28 s** for the full FLUX.2 VAE
+(~9.2× faster), at **0.59 GB** versus 2.80 GB peak. SSIM here is **0.616**, lower than the FLUX.1
 family because TAEF2 is a 4 MB preview decoder standing in for a ~340 MB VAE: it keeps the
 structure and color and fudges fine detail. That is the deliberate trade for a real-time preview;
 reach for the full VAE when you need final-quality fidelity. Reproduce:
@@ -102,8 +103,8 @@ than the FLUX.2 pair. Same red-apple latent, two decoders:
 |---|---|
 | ![f1v](_artifacts/showcase/taef1/vae/vanilla_vae_rep0.webp) | ![f1t](_artifacts/showcase/taef1/taef/taef1_rep0.webp) |
 
-TAEF1 decodes the same latent in **45 ms** versus **0.35 s** for the full FLUX.1 VAE (~7.9× faster),
-at **0.52 GB** versus 3.08 GB peak and **SSIM 0.94**. Reproduce:
+TAEF1 decodes the same latent in **30 ms** versus **0.30 s** for the full FLUX.1 VAE (~10.2× faster),
+at **0.55 GB** versus 3.70 GB peak and **SSIM 0.94**. Reproduce:
 
 ```
 uv run python scripts/run_showcase.py --scenario taef1_vs_vae
@@ -112,7 +113,7 @@ uv run python scripts/run_showcase.py --scenario taef1_vs_vae
 ## Low-memory decode
 
 The memory story is the other half of the point. Across all three models the tiny decoder peaks
-at roughly half a gigabyte (0.52–0.55 GB), while the full VAEs run 2–3 GB. On a 32 GB Mac shared
+at roughly half a gigabyte (0.55–0.59 GB), while the full VAEs run 2.6–3.7 GB. On a 32 GB Mac shared
 between the OS, the diffusion model, and the decoder, that headroom is what lets a preview run
 alongside generation without tipping into swap. If you only need to inspect a latent rather than
 ship a final image, decoding it with the matching TAEF variant avoids loading the multi-GB VAE.

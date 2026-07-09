@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.6.2] — 2026-07-08
+## [0.6.2] — 2026-07-09
 
 A hardening and accuracy release. It hardens the live-preview callback and the converted-weight cache, and corrects the published decode-benchmark numbers after fixing how they were measured.
 
@@ -17,7 +17,7 @@ A hardening and accuracy release. It hardens the live-preview callback and the c
 - Every conversion path now enforces a source's `revision` pin and, for single-file sources, verifies the `sha256`. Previously only the taew2.1 path did.
 
 ### Changed
-- The decode benchmark now times the decode step by itself, with model construction moved outside the timed window. The published decode speedup is **~7–8×** — the earlier ~11× figure was mostly model-construction cost — and TAEF1 and TAEF2 both decode in about 45 ms. COMPARISON and EXAMPLES are re-measured, and the Z-Image decode and live-preview scenarios join the showcase.
+- The decode benchmark now times the decode step at steady state, with model construction moved outside the timed window and one untimed warmup call before the clock starts. The tiny decoders run about 30 ms per step — the earlier releases' ~180–260 ms figure timed one-time model construction inside the decode window — for a **~8–10×** speedup over the full VAE decode. COMPARISON and EXAMPLES are re-measured, and the Z-Image decode and live-preview scenarios join the showcase.
 - The showcase harness writes its report after each scenario and records a failing scenario as an error instead of aborting the run. The report differ now flags a scenario or metric that vanishes between runs.
 
 ### Internal
