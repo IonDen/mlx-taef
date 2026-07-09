@@ -13,8 +13,8 @@ Tiny AutoEncoders for diffusion latents on Apple Silicon, in pure MLX.
 `mlx-taef` is the first MLX port of the TAESD family — TAESD (SD1.x), TAESDXL (SDXL), TAEF1 (FLUX.1), TAEF2 (FLUX.2 Klein), and Z-Image (which reuses the TAEF1 weights for previews) — plus Qwen-Image / Qwen-Image-Edit on a port of the taew2.1 (Wan 2.1 VAE) autoencoder. All are distilled mini-autoencoders that decode diffusion latents to RGB in milliseconds using a few-MB model instead of multi-GB full VAEs.
 
 Use it for:
-- **Live previews** during long generations on Mac — the decode step itself takes ~45 ms for both TAEF1 and TAEF2 on M1 Max, versus ~0.33 s for the full VAE decode (~7–8× faster). [Watch a step-by-step decode](https://github.com/IonDen/mlx-taef/blob/main/PREVIEW.md), or see [COMPARISON.md](COMPARISON.md) for the measured table and reproducer.
-- **Low-memory fallbacks** when the full VAE OOMs on 16 GB Macs (TAEF2 peaks at ~0.55 GB decode memory vs ~2.6 GB for the full FLUX.2 VAE on the same latent).
+- **Live previews** during long generations on Mac — the decode step itself takes ~30 ms for both TAEF1 and TAEF2 on M1 Max, versus ~0.3 s for the full VAE decode (~9–10× faster). [Watch a step-by-step decode](https://github.com/IonDen/mlx-taef/blob/main/PREVIEW.md), or see [COMPARISON.md](COMPARISON.md) for the measured table and reproducer.
+- **Low-memory fallbacks** when the full VAE OOMs on 16 GB Macs (TAEF2 peaks at ~0.59 GB decode memory vs ~2.8 GB for the full FLUX.2 VAE on the same latent).
 - **Quick latent inspection** in notebooks and ML research.
 
 ```python
@@ -28,11 +28,11 @@ img_uint8 = taef.decode_image(latents)      # uint8 NHWC ready for PIL
 
 ## Which library do I need?
 
-**You want live previews or low-memory FLUX decode?** You're in the right place. `mlx-taef`'s decode step takes ~45 ms on M1 Max, for either TAEF2 or TAEF1 — vs ~0.33 s for the full VAE decode, with ~5× less decode memory. Drops into mflux via `LivePreviewCallback`.
+**You want live previews or low-memory FLUX decode?** You're in the right place. `mlx-taef`'s decode step takes ~30 ms on M1 Max, for either TAEF2 or TAEF1 — vs ~0.3 s for the full VAE decode, with ~5× less decode memory. Drops into mflux via `LivePreviewCallback`.
 
 **You want FLUX generation itself to be faster on Apple Silicon?** You want [`mlx-teacache`](https://github.com/IonDen/mlx-teacache) — it skips redundant denoising steps when the schedule is cacheable (measured 1.46× on FLUX.1-dev at 25 steps).
 
-**You want both: faster generation AND live previews?** Use them together — they compose cleanly. mflux 4-step Klein + TeaCache + TAEF2 previews = 1.30× wall-clock and 48% less peak memory vs vanilla.
+**You want both: faster generation AND live previews?** Use them together — they compose cleanly. mflux 4-step Klein + TeaCache + TAEF2 previews = 1.30× wall-clock and 47% less peak memory vs vanilla.
 
 ## Install
 
@@ -137,7 +137,7 @@ See `docs/manual-verification.md` for the full verification recipe.
 - **v0.5.1 — released on PyPI** (2026-06-20). The `mflux` extra now installs against mflux 0.18.x as well as 0.17.x; the previous `<0.18` pin excluded 0.18, so users already on it could not install the extra without downgrading. The live-preview integration is verified against mflux 0.18.0 with no API or behavior change.
 - **v0.6.0 — released on PyPI** (2026-06-23). Qwen-Image / Qwen-Image-Edit live preview: a new `QwenImage` model ports madebyollin's taew2.1 tiny autoencoder (for the Wan 2.1 VAE's 16-channel latent) to pure MLX. Adds `LivePreviewCallback(variant="qwen-image")` and `mlx-taef bench --variant qwen-image`. Decode and encode match the upstream taew2.1 reference to ~3e-6 (committed parity fixtures). Live-preview quality against the full Wan VAE is community-measured — Qwen-Image is a ~20B model that won't fit a usable resolution on 32 GB.
 - **v0.6.1 — released on PyPI** (2026-06-30). Maintenance: converted-weights cache writes are now atomic (temp file + rename), so an interrupted download/convert can no longer leave a truncated file that later runs trust as valid. Adds Python 3.14 support, sharper public-API types (factories return their concrete subclass; the decoder/encoder role and preview variant are typed literals), and a linked live-preview demo page.
-- **v0.6.2 — released on PyPI** (2026-07-08). Hardening and accuracy. `LivePreviewCallback` now rejects `every < 1` and a half-set BN pair, and resets its state between generations. The converted-weights cache invalidates when a source's pinned revision or sha256 changes (Qwen-Image re-converts once on upgrade), and every conversion path enforces those pins. The decode benchmark now measures the decode step in isolation: the honest speedup is ~7–8× (the earlier ~11× included model-construction cost), and COMPARISON / EXAMPLES are re-measured with two Z-Image scenarios added. Also fixes the mflux quickstart earlier in this README.
+- **v0.6.2 — released on PyPI** (2026-07-09). Hardening and accuracy. `LivePreviewCallback` now rejects `every < 1` and a half-set BN pair, and resets its state between generations. The converted-weights cache invalidates when a source's pinned revision or sha256 changes (Qwen-Image re-converts once on upgrade), and every conversion path enforces those pins. The decode benchmark now measures the decode step at steady state, in isolation from one-time model construction: the tiny decoders run ~30 ms per step (earlier releases reported ~180–260 ms because they timed model construction inside the decode window), a ~8–10× speedup over the full VAE decode. COMPARISON / EXAMPLES are re-measured with two Z-Image scenarios added. Also fixes the mflux quickstart earlier in this README.
 
 Track future releases via the [PyPI history](https://pypi.org/project/mlx-taef/#history) or `gh release list -R IonDen/mlx-taef`.
 

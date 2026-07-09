@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-07-08T15:12:38.129678+00:00",
+  "generated_at": "2026-07-09T12:05:54.842133+00:00",
   "hardware": {
     "chip": "Apple M1 Max",
     "ram_gb": 32,
     "machine": "arm64",
     "os": "Darwin 25.5.0",
-    "git_sha": "d0cd59a4d855014df843f02cce50007fe7d9fd2f",
+    "git_sha": "b94b52e560e6f4572b9828617b7e304100b443cf",
     "mlx_taef_version": "0.6.2.dev11+gdb25e9748.d20260705",
     "mlx_teacache_version": "0.9.1",
     "mflux_version": "0.18.0",
@@ -16,7 +16,7 @@
     "dtype": "bf16"
   },
   "isolation": "subprocess-per-rep",
-  "prior_artifacts_moved_to": "/Users/ionden/.Trash/mlx-taef-showcase-2026-07-08-171238",
+  "prior_artifacts_moved_to": "/Users/ionden/.Trash/mlx-taef-showcase-2026-07-09-140554",
   "scenarios": {
     "taef2_vs_vae": {
       "status": "ok",
@@ -29,23 +29,23 @@
         "installed_cap_gb": 2,
         "reps": 5,
         "per_rep_seconds": [
-          0.048046624986454844,
-          0.04592474992386997,
-          0.04581154207699001,
-          0.043537958059459925,
-          0.04371062503196299
+          0.03061704197898507,
+          0.03032991709187627,
+          0.030573875177651644,
+          0.03168945899233222,
+          0.030390833970159292
         ],
-        "median_seconds": 0.04581154207699001,
-        "min_seconds": 0.043537958059459925,
-        "max_seconds": 0.048046624986454844,
+        "median_seconds": 0.030573875177651644,
+        "min_seconds": 0.03032991709187627,
+        "max_seconds": 0.03168945899233222,
         "per_rep_peak_memory_gb": [
-          0.5452783890068531,
-          0.5452783890068531,
-          0.5452783890068531,
-          0.5416098311543465,
-          0.5416098311543465
+          0.5855616182088852,
+          0.5855616182088852,
+          0.5855616182088852,
+          0.5855616182088852,
+          0.5855616182088852
         ],
-        "median_peak_memory_gb": 0.5452783890068531,
+        "median_peak_memory_gb": 0.5855616182088852,
         "image_path": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/taef2/taef/taef2_rep4.webp",
         "per_rep_failures": []
       },
@@ -55,19 +55,19 @@
         "installed_cap_gb": 12,
         "reps": 3,
         "per_rep_seconds": [
-          0.32877229200676084,
-          0.3316525409463793,
-          0.3284926249179989
+          0.2813379999715835,
+          0.2822743330616504,
+          0.2787599579896778
         ],
-        "median_seconds": 0.32877229200676084,
-        "min_seconds": 0.3284926249179989,
-        "max_seconds": 0.3316525409463793,
+        "median_seconds": 0.2813379999715835,
+        "min_seconds": 0.2787599579896778,
+        "max_seconds": 0.2822743330616504,
         "per_rep_peak_memory_gb": [
-          2.574856460094452,
-          2.5748412013053894,
-          2.4741503596305847
+          2.7956192027777433,
+          2.795603943988681,
+          2.7956192027777433
         ],
-        "median_peak_memory_gb": 2.5748412013053894,
+        "median_peak_memory_gb": 2.7956192027777433,
         "image_path": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/taef2/vae/vanilla_vae_rep2.webp",
         "per_rep_failures": []
       },
@@ -101,23 +101,23 @@
         "installed_cap_gb": 1,
         "reps": 5,
         "per_rep_seconds": [
-          0.045782958157360554,
-          0.042277458822354674,
-          0.044740666868165135,
-          0.04543733294121921,
-          0.04417262505739927
+          0.02941162488423288,
+          0.030535250203683972,
+          0.029485167004168034,
+          0.02952858293429017,
+          0.029476833064109087
         ],
-        "median_seconds": 0.044740666868165135,
-        "min_seconds": 0.042277458822354674,
-        "max_seconds": 0.045782958157360554,
+        "median_seconds": 0.029485167004168034,
+        "min_seconds": 0.02941162488423288,
+        "max_seconds": 0.030535250203683972,
         "per_rep_peak_memory_gb": [
-          0.5204612873494625,
-          0.5204612873494625,
-          0.5204612873494625,
-          0.5204612873494625,
-          0.5204612873494625
+          0.5463402010500431,
+          0.5463402010500431,
+          0.5463402010500431,
+          0.5463402010500431,
+          0.5463402010500431
         ],
-        "median_peak_memory_gb": 0.5204612873494625,
+        "median_peak_memory_gb": 0.5463402010500431,
         "image_path": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/taef1/taef/taef1_rep4.webp",
         "per_rep_failures": []
       },
@@ -127,19 +127,19 @@
         "installed_cap_gb": 6,
         "reps": 3,
         "per_rep_seconds": [
-          0.35442579188384116,
-          0.3521932081785053,
-          0.351946874987334
+          0.30187216703779995,
+          0.29776045912876725,
+          0.2998754170257598
         ],
-        "median_seconds": 0.3521932081785053,
-        "min_seconds": 0.351946874987334,
-        "max_seconds": 0.35442579188384116,
+        "median_seconds": 0.2998754170257598,
+        "min_seconds": 0.29776045912876725,
+        "max_seconds": 0.30187216703779995,
         "per_rep_peak_memory_gb": [
-          3.0834277495741844,
-          3.0834277495741844,
-          3.0834277495741844
+          3.698693875223398,
+          3.698693875223398,
+          3.698693875223398
         ],
-        "median_peak_memory_gb": 3.0834277495741844,
+        "median_peak_memory_gb": 3.698693875223398,
         "image_path": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/taef1/vae/vanilla_vae_rep2.webp",
         "per_rep_failures": []
       },
@@ -173,15 +173,15 @@
         "installed_cap_gb": 1,
         "reps": 5,
         "per_rep_seconds": [
-          0.05804904201067984,
-          0.059825625037774444,
-          0.057707666885107756,
-          0.056577208917587996,
-          0.05663387500680983
+          0.0295049159321934,
+          0.029408250004053116,
+          0.030926083913072944,
+          0.030407957965508103,
+          0.029284083051607013
         ],
-        "median_seconds": 0.057707666885107756,
-        "min_seconds": 0.056577208917587996,
-        "max_seconds": 0.059825625037774444,
+        "median_seconds": 0.0295049159321934,
+        "min_seconds": 0.029284083051607013,
+        "max_seconds": 0.030926083913072944,
         "per_rep_peak_memory_gb": [
           0.5460960566997528,
           0.5460960566997528,
@@ -199,19 +199,19 @@
         "installed_cap_gb": 4,
         "reps": 3,
         "per_rep_seconds": [
-          0.2899016661103815,
-          0.2863054999615997,
-          0.2835633750073612
+          0.23328958312049508,
+          0.23751220805570483,
+          0.23500175005756319
         ],
-        "median_seconds": 0.2863054999615997,
-        "min_seconds": 0.2835633750073612,
-        "max_seconds": 0.2899016661103815,
+        "median_seconds": 0.23500175005756319,
+        "min_seconds": 0.23328958312049508,
+        "max_seconds": 0.23751220805570483,
         "per_rep_peak_memory_gb": [
-          1.9590810388326645,
-          1.9590810388326645,
-          1.9590810388326645
+          2.607147829607129,
+          2.6071630883961916,
+          2.607147829607129
         ],
-        "median_peak_memory_gb": 1.9590810388326645,
+        "median_peak_memory_gb": 2.607147829607129,
         "image_path": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/zimage/vae/vanilla_vae_rep2.webp",
         "per_rep_failures": []
       },
@@ -237,8 +237,8 @@
     "live_preview": {
       "status": "ok",
       "scenario_dir": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/live_preview",
-      "elapsed_s": 11.507945708930492,
-      "peak_memory_gb": 10.664300916716456,
+      "elapsed_s": 11.375838957959786,
+      "peak_memory_gb": 10.664285395294428,
       "applied_cap_gb": 20,
       "num_steps": 4,
       "guidance": 1.0,
@@ -258,8 +258,8 @@
     "zimage_live_preview": {
       "status": "ok",
       "scenario_dir": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/zimage_live_preview",
-      "elapsed_s": 36.84289204212837,
-      "peak_memory_gb": 25.919760828837752,
+      "elapsed_s": 44.161361041944474,
+      "peak_memory_gb": 25.919760536402464,
       "applied_cap_gb": 20,
       "num_steps": 4,
       "guidance": 0.0,
@@ -279,8 +279,8 @@
     "combined": {
       "status": "ok",
       "scenario_dir": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/combined",
-      "elapsed_s": 8.828812792198732,
-      "peak_memory_gb": 5.552997345104814,
+      "elapsed_s": 8.772021374898031,
+      "peak_memory_gb": 5.6980140171945095,
       "applied_cap_gb": 20,
       "num_steps": 4,
       "guidance": 1.0,
