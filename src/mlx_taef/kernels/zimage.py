@@ -13,9 +13,8 @@ from mlx_taef.kernels._types import (
     MfluxBinding,
     ModelKernel,
     UnpackContext,
-    WeightSource,
 )
-from mlx_taef.kernels.flux import TAESD2D
+from mlx_taef.kernels.flux import TAEF1, TAESD2D
 
 
 def unpack_zimage_latent(latent: mx.array, ctx: UnpackContext) -> mx.array:
@@ -41,7 +40,7 @@ ZIMAGE = ModelKernel(
     arch=TAESD2D,
     conversion=DiffusersRemap(),
     latent=LatentSpec(channels=16),
-    source=WeightSource(repo="madebyollin/taef1", filename="diffusion_pytorch_model.safetensors"),
+    source=TAEF1.source,
     integration=MfluxBinding(
         mflux_models=("z-image", "z-image-turbo"),
         unpack=unpack_zimage_latent,

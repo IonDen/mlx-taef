@@ -9,6 +9,8 @@ this file was rewritten.
 """
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +24,7 @@ def _make_vs_vae_report(
 ) -> dict[str, Any]:
     """Build a report shaped like run_showcase.py's `taef2_vs_vae` output."""
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": "2026-05-26T00:00:00Z",
         "scenarios": {
             "taef2_vs_vae": {
@@ -46,7 +48,7 @@ def _make_vs_vae_report(
 
 def _make_live_report(elapsed_s: float, *, peak_memory_gb: float = 10.0) -> dict[str, Any]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": "2026-05-26T00:00:00Z",
         "scenarios": {
             "live_preview": {
@@ -67,7 +69,7 @@ def _make_combined_report(
     """Build a report shaped like run_showcase.py's `combined` scenario,
     which carries the TeaCache `skipped_count` the integration headline depends on."""
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": "2026-05-26T00:00:00Z",
         "scenarios": {
             "combined": {
@@ -138,6 +140,27 @@ def test_main_exit_zero_on_clean_diff(tmp_path: Path) -> None:
     assert main([str(old_path), str(new_path)]) == 0
 
 
+def test_documented_direct_script_invocation_can_import_sibling_module(tmp_path: Path) -> None:
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps(_make_vs_vae_report(0.1, 0.85)))
+    repo_root = Path(__file__).parent.parent
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(repo_root / "scripts" / "diff_showcase_report.py"),
+            str(report),
+            str(report),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+
+
 def test_main_exit_nonzero_on_regression(tmp_path: Path) -> None:
     from scripts.diff_showcase_report import main
 
@@ -147,6 +170,21 @@ def test_main_exit_nonzero_on_regression(tmp_path: Path) -> None:
     new_path.write_text(json.dumps(_make_vs_vae_report(0.2, 0.85)))  # 100% slower
 
     assert main([str(old_path), str(new_path)]) == 1
+
+
+def test_main_rejects_unknown_schema_before_diff(tmp_path: Path) -> None:
+    import pytest
+    from scripts.diff_showcase_report import main
+
+    from mlx_taef.errors import SchemaVersionError
+
+    old_path = tmp_path / "old.json"
+    new_path = tmp_path / "new.json"
+    old_path.write_text(json.dumps({"schema_version": 99, "scenarios": {}}))
+    new_path.write_text(json.dumps({"schema_version": 2, "scenarios": {}}))
+
+    with pytest.raises(SchemaVersionError, match="schema_version"):
+        main([str(old_path), str(new_path)])
 
 
 def test_committed_showcase_report_against_itself_finds_no_regression() -> None:

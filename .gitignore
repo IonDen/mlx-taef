@@ -21,5 +21,9 @@ src/mlx_taef/_version.py
 docs/superpowers/
 notes/
 
-# per-repo Claude guidance — local-only working state, never committed
+# per-repo agent guidance — local-only working state, never committed
 /CLAUDE.md
+/AGENTS.md
+
+# durable live-benchmark worker checkpoints; the consolidated report is tracked
+/_artifacts/.*-partials/

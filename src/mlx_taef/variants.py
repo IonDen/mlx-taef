@@ -8,7 +8,8 @@ working. New code should import from `mlx_taef.kernels`.
 import logging
 from dataclasses import dataclass
 
-from mlx_taef.kernels import KERNELS, MIDBLOCK_GN, ModelKernel
+from mlx_taef.errors import UnknownKernelError
+from mlx_taef.kernels import KERNELS, ModelKernel
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ def _from_kernel(k: ModelKernel) -> TaesdVariantConfig:
     return TaesdVariantConfig(
         name=k.name,
         latent_channels=k.latent.channels,
-        arch_variant="flux_2" if MIDBLOCK_GN.get(k.name, False) else None,
+        arch_variant="flux_2" if k.midblock_gn else None,
         key_format="diffusers" if is_diffusers else "upstream",
         hf_repo=k.source.repo,
         hf_filename=k.source.filename,
@@ -73,10 +74,10 @@ def get_memory_cap_hint(variant: str) -> int | None:
         KeyError: if `variant` is not a known variant name.
     """
     try:
-        cfg = VARIANTS[variant]
+        kernel = KERNELS[variant]
     except KeyError as e:
-        raise KeyError(f"unknown variant: {variant!r}") from e
-    return cfg.memory_cap_hint_gb
+        raise UnknownKernelError(f"unknown variant: {variant!r}") from e
+    return kernel.memory_cap_hint_gb
 
 
 __all__ = [

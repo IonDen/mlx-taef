@@ -27,3 +27,8 @@ def test_unpack_qwen_matches_mflux_qwen_latent_creator():
 def test_unpack_qwen_rejects_non_64_channels():
     with pytest.raises(ValueError, match="64-channel"):
         unpack_qwen_latent(mx.zeros((1, 24, 16)), UnpackContext(latent_height=4, latent_width=6))
+
+
+def test_unpack_qwen_rejects_sequence_length_mismatch() -> None:
+    with pytest.raises(ValueError, match=r"expected 6.*got 5"):
+        unpack_qwen_latent(mx.zeros((1, 5, 64)), UnpackContext(latent_height=2, latent_width=3))

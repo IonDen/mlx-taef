@@ -10,6 +10,7 @@ Provides:
 Install with: `pip install "mlx-taef[mflux]"`.
 """
 
+import importlib
 import logging
 from pathlib import Path
 from typing import Literal
@@ -20,9 +21,7 @@ import numpy as np
 from mlx_taef.errors import MfluxNotInstalledError
 
 try:
-    from mflux.callbacks.callback import (  # type: ignore[import-untyped,import-not-found]
-        InLoopCallback,
-    )
+    importlib.import_module("mflux.callbacks.callback")
 except ImportError as e:  # pragma: no cover
     raise MfluxNotInstalledError() from e
 
@@ -54,6 +53,8 @@ def unpack_flux2_latent(
     with the `(latent, UnpackContext)` signature; this wrapper preserves the original
     keyword call shape for existing callers.
     """
+    if (bn_mean is None) != (bn_var is None):
+        raise ValueError("bn_mean and bn_var must be set together")
     from mlx_taef.kernels import UnpackContext
     from mlx_taef.kernels.flux import unpack_flux2_latent as _kernel_unpack
 
@@ -127,13 +128,14 @@ def _resolve_latent_dims(
     return int(h) // downscale, int(w) // downscale
 
 
-class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
+class LivePreviewCallback:
     """mflux callback that writes a low-quality preview image every N iterations.
 
-    Drops into `mflux.Flux2Klein.generate_image(callbacks=[...])`. On the
-    iteration indices that match `every`, unpacks the in-flight latent, runs
-    the kernel's decode (TAEF2 for FLUX.2; TAEF1 for FLUX.1 and Z-Image), and
-    writes a PIL image to disk.
+    Register with ``model.callbacks.register(preview)`` before calling
+    ``model.generate_image(...)``. On iteration indices matching `every`, the callback
+    unpacks the in-flight latent, runs the tiny decoder, and writes an image to disk.
+    Each emission creates a periodic unified-memory and I/O spike; raise `every` or omit
+    the callback when memory headroom is tight.
 
     Args:
         flux: optional reference to the mflux model instance the callback will be
@@ -166,6 +168,11 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
         latent_width: latent spatial width; None auto-detects (see latent_height).
         bn_mean: optional BN running_mean for TAEF2 (see `unpack_flux2_latent`).
         bn_var: optional BN running_var for TAEF2.
+        bn_eps: epsilon for explicit BN statistics. Default 1e-4. Auto-extracted model
+            statistics use the model's epsilon when available.
+        on_error: runtime emission policy. ``"disable"`` logs the first failure and disables
+            previews for the current generation; ``"raise"`` propagates it. Constructor
+            validation always raises regardless of this setting.
     """
 
     def __init__(
@@ -181,6 +188,8 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
         latent_width: int | None = None,
         bn_mean: mx.array | None = None,
         bn_var: mx.array | None = None,
+        bn_eps: float = 1e-4,
+        on_error: Literal["disable", "raise"] = "disable",
     ) -> None:
         """Initialise LivePreviewCallback. See class docstring for argument descriptions."""
         if (latent_height is None) != (latent_width is None):
@@ -198,6 +207,10 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
                 f"bn_mean={'set' if bn_mean is not None else None}, "
                 f"bn_var={'set' if bn_var is not None else None}."
             )
+        if bn_eps <= 0:
+            raise ValueError(f"bn_eps must be positive, got {bn_eps!r}.")
+        if on_error not in ("disable", "raise"):
+            raise ValueError(f"on_error must be 'disable' or 'raise', got {on_error!r}.")
         try:
             model_cls = _VARIANT_CLASSES[variant]
         except KeyError:
@@ -210,6 +223,8 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
         self._packed_downscale: int | None = _binding.packed_latent_downscale
         self.flux = flux
         self.auto_bn = auto_bn
+        self._variant = variant
+        self.on_error = on_error
         # Numbered-frame mode emits every step (galleries capture progression);
         # caller's `every` is honored only in single-frame mode.
         self.numbered_frames = numbered_frames
@@ -220,7 +235,7 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
         self.bn_mean = bn_mean
         self.bn_var = bn_var
         self.saved_paths: list[Path] = []
-        self.bn_eps: float = 1e-4
+        self.bn_eps = bn_eps
         # Resolve BN source. Precedence:
         #   explicit (user passed bn_mean + bn_var)
         #     > auto (auto_bn=True + variant=="taef2" + flux.vae.bn extractable)
@@ -245,7 +260,13 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
                 )
                 self.resolved_bn = "none"
         else:
-            if auto_bn and flux is not None and variant != "taef2":
+            if auto_bn and variant == "taef2":
+                logger.warning(
+                    "auto_bn=True for taef2 but no flux instance was provided; falling back "
+                    "to identity BN (previews may be color-shifted). Pass flux=model or "
+                    "explicit bn_mean/bn_var."
+                )
+            elif auto_bn and flux is not None:
                 logger.info(
                     "auto_bn=True is a no-op for variant=%r: BN denormalization is "
                     "TAEF2-only, so previews use identity BN (correct for %s — it has "
@@ -255,6 +276,7 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
                 )
             self.resolved_bn = "none"
         self._iter = 0
+        self._disabled = False
 
     def call_before_loop(
         self,
@@ -276,6 +298,7 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
         """
         self._iter = 0
         self.saved_paths = []
+        self._disabled = False
 
     def call_in_loop(
         self,
@@ -289,9 +312,26 @@ class LivePreviewCallback(InLoopCallback):  # type: ignore[misc]
         """Decode latent + save image every Nth iteration (counted by our own iter, not `t`)."""
         idx = self._iter
         self._iter += 1
+        if self._disabled:
+            return
         if idx % self.every != 0:
             return  # pragma: no cover
 
+        if self.on_error == "raise":
+            self._emit_preview(idx, latents, config)
+            return
+        try:
+            self._emit_preview(idx, latents, config)
+        except Exception as e:
+            self._disabled = True
+            logger.warning(
+                "live preview failed at step %d: %s; disabling previews for this generation",
+                idx,
+                e,
+            )
+
+    def _emit_preview(self, idx: int, latents: mx.array, config: object) -> None:
+        """Decode and save one preview emission."""
         from mlx_taef.kernels import UnpackContext
 
         binding = self.model._kernel.integration

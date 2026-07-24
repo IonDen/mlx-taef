@@ -142,6 +142,19 @@ def test_unknown_kernel_error_hierarchy():
     assert issubclass(UnknownKernelError, KeyError)
 
 
+def test_unknown_kernel_error_string_has_no_keyerror_outer_quotes() -> None:
+    from mlx_taef.errors import UnknownKernelError
+
+    assert str(UnknownKernelError("unknown kernel: 'missing'")) == "unknown kernel: 'missing'"
+
+
+def test_unknown_architecture_error_hierarchy() -> None:
+    from mlx_taef.errors import TaefError, UnknownArchitectureError
+
+    assert issubclass(UnknownArchitectureError, TaefError)
+    assert issubclass(UnknownArchitectureError, KeyError)
+
+
 def test_mflux_not_installed_error_is_taef_and_import_error() -> None:
     from mlx_taef.errors import MfluxNotInstalledError, TaefError
 

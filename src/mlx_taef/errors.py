@@ -6,6 +6,7 @@ Hierarchy:
     ├── MfluxNotInstalledError             (+ ImportError) mflux integration dep missing
     ├── MlxTeacacheNotInstalledError       (+ ImportError) showcase teacache dep missing
     ├── UnknownKernelError                 (+ KeyError) name not in the kernel registry
+    ├── UnknownArchitectureError           (+ KeyError) arch/role has no registered builder
     ├── SchemaVersionError                 raised by the bundled showcase tooling
     └── FixtureLatentMissingError          (+ FileNotFoundError) bundled showcase tooling
 
@@ -77,3 +78,15 @@ class FixtureLatentMissingError(TaefError, FileNotFoundError):
 
 class UnknownKernelError(TaefError, KeyError):
     """Raised when a kernel name is not in the registry."""
+
+    def __str__(self) -> str:
+        """Render the message without KeyError's repr-style outer quotes."""
+        return str(self.args[0]) if self.args else ""
+
+
+class UnknownArchitectureError(TaefError, KeyError):
+    """Raised when an architecture name/role has no registered builder."""
+
+    def __str__(self) -> str:
+        """Render the message without KeyError's repr-style outer quotes."""
+        return str(self.args[0]) if self.args else ""

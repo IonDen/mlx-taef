@@ -33,13 +33,13 @@ def test_scenario_dispatch_table() -> None:
 
 
 def test_json_schema_version_round_trip(tmp_path: Path) -> None:
-    from scripts.run_showcase import _load_report, _write_report
+    from scripts.run_showcase import SCHEMA_VERSION, _load_report, _write_report
 
     report = {
-        "schema_version": 1,
+        "schema_version": SCHEMA_VERSION,
         "generated_at": "2026-05-26T00:00:00Z",
         "hardware": {"chip": "Apple M1 Max", "ram_gb": 32},
-        "isolation": "subprocess-per-rep",
+        "isolation": "subprocess-per-condition",
         "scenarios": {},
     }
     out = tmp_path / "report.json"
@@ -47,6 +47,107 @@ def test_json_schema_version_round_trip(tmp_path: Path) -> None:
 
     loaded = _load_report(out)
     assert loaded == report
+
+
+def test_live_scenario_runs_in_child_and_reads_partial(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import argparse
+
+    import scripts.run_showcase as rs
+
+    captured: dict[str, object] = {}
+
+    def _fake_run(command: list[str], **kwargs: object) -> object:
+        captured["command"] = command
+        result_path = Path(command[command.index("--live-result") + 1])
+        result_path.parent.mkdir(parents=True, exist_ok=True)
+        result_path.write_text('{"status":"ok","worker":true}')
+        return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(rs.subprocess, "run", _fake_run)
+    args = argparse.Namespace(report=tmp_path / "report.json", cap_gb=7)
+
+    result = rs._run_live_scenario_subprocess("live_preview", args)
+
+    assert result == {"status": "ok", "worker": True}
+    command = captured["command"]
+    assert isinstance(command, list)
+    assert command[command.index("--live-worker") + 1] == "live_preview"
+    assert command[command.index("--cap-gb") + 1] == "7"
+
+
+def test_live_worker_mode_runs_one_raw_scenario(tmp_path: Path, monkeypatch) -> None:
+    import scripts.run_showcase as rs
+
+    calls: list[str] = []
+    watchdog_events: list[str] = []
+
+    class _FakeWatchdog:
+        def stop(self) -> None:
+            watchdog_events.append("stopped")
+
+    def _fake_install(result_path: Path, scenario: str) -> _FakeWatchdog:
+        assert result_path == tmp_path / "partial.json"
+        watchdog_events.append(f"installed:{scenario}")
+        return _FakeWatchdog()
+
+    monkeypatch.setattr(rs, "_install_live_watchdog", _fake_install)
+    monkeypatch.setattr(
+        rs,
+        "_SCENARIO_DISPATCH",
+        {"live_preview": lambda args: calls.append("live_preview") or {"status": "ok"}},
+    )
+    result_path = tmp_path / "partial.json"
+
+    assert (
+        rs.main(
+            [
+                "--live-worker",
+                "live_preview",
+                "--live-result",
+                str(result_path),
+                "--no-trash-prior",
+            ]
+        )
+        == 0
+    )
+    assert calls == ["live_preview"]
+    assert watchdog_events == ["installed:live_preview", "stopped"]
+    assert json.loads(result_path.read_text()) == {"status": "ok"}
+
+
+def test_hardware_metadata_names_generation_and_decode_dtypes() -> None:
+    from scripts.run_showcase import _build_hardware_metadata
+
+    metadata = _build_hardware_metadata()
+
+    assert metadata["generation_dtype"] == "bf16"
+    assert metadata["taef_decode_dtype"] == "float32"
+    assert "dtype" not in metadata
+
+
+def test_live_watchdog_breach_reason_checks_memory_before_wall() -> None:
+    from scripts.run_showcase import _live_watchdog_breach_reason
+
+    assert (
+        _live_watchdog_breach_reason(
+            active_bytes=28, ceiling_bytes=28, elapsed_s=10, wall_budget_s=5
+        )
+        == "memory_ceiling"
+    )
+    assert (
+        _live_watchdog_breach_reason(
+            active_bytes=20, ceiling_bytes=28, elapsed_s=6, wall_budget_s=5
+        )
+        == "wall_budget"
+    )
+    assert (
+        _live_watchdog_breach_reason(
+            active_bytes=20, ceiling_bytes=28, elapsed_s=4, wall_budget_s=5
+        )
+        is None
+    )
 
 
 def test_json_schema_rejects_unknown_version(tmp_path: Path) -> None:

@@ -1,6 +1,9 @@
 """Offline tests for download.get_or_convert: caching + role dispatch, no network."""
 
+import stat
+
 import mlx.core as mx
+import pytest
 
 from mlx_taef import download
 from mlx_taef.kernels import get_kernel
@@ -38,6 +41,8 @@ def test_get_or_convert_caches_and_dispatches_role(monkeypatch, tmp_path):
     p_enc = download.get_or_convert(k, role="encoder")
     assert p_enc != p_dec
     assert calls == ["encoder"]
+    cache_mode = stat.S_IMODE((tmp_path / "converted").stat().st_mode)
+    assert cache_mode == 0o700
 
 
 def test_get_or_convert_rejects_bad_role(tmp_path, monkeypatch):
@@ -74,3 +79,18 @@ def test_get_or_convert_leaves_no_partial_cache_on_interrupted_write(monkeypatch
     out_path = cache_dir / f"{k.source.cache_key(role='decoder')}.mlx.safetensors"
     assert not out_path.exists(), "an interrupted write must not leave a usable-looking cache file"
     assert list(cache_dir.glob("*")) == [], "an interrupted write must not leave stray temp files"
+
+
+@pytest.mark.network
+@pytest.mark.parametrize("kernel_name", ["taesd", "taesdxl", "taef1", "taef2", "qwen-image"])
+@pytest.mark.parametrize("role", ["decoder", "encoder"])
+def test_pinned_runtime_source_downloads_verifies_and_converts(
+    kernel_name: str, role: str, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Live trust-chain gate: immutable download -> role digest -> conversion -> MLX cache."""
+    monkeypatch.setattr(download, "CACHE_ROOT", tmp_path / kernel_name)
+
+    path = download.get_or_convert(get_kernel(kernel_name), role=role)
+
+    assert path.exists()
+    assert mx.load(str(path))

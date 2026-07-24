@@ -61,6 +61,11 @@ def test_flux2_klein_generate_image_has_no_callbacks_kwarg() -> None:
     assert "callbacks" not in sig.parameters, (
         "If mflux added a callbacks kwarg, update the README to use it directly."
     )
+    doc = LivePreviewCallback.__doc__ or ""
+    assert "callbacks.register" in doc
+    assert "generate_image(callbacks=" not in doc
+    assert "memory" in doc.lower()
+    assert "I/O" in doc
 
 
 def test_unpack_with_bn_stats_differs_from_identity_bn() -> None:
@@ -110,6 +115,15 @@ def test_resolved_bn_is_none_when_no_bn_and_no_flux(offline_taef2: object) -> No
     cb = LivePreviewCallback(variant="taef2", save_to="/tmp/preview.png")
     assert cb.resolved_bn == "none"
     assert cb.flux is None
+
+
+def test_taef2_auto_bn_without_flux_warns(offline_taef2: object, caplog) -> None:
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="mlx_taef"):
+        LivePreviewCallback(variant="taef2", save_to="/tmp/preview.png")
+
+    assert any("flux" in message and "identity BN" in message for message in caplog.messages)
 
 
 @dataclass
@@ -245,7 +259,7 @@ def test_auto_bn_resolved_none_when_flux_missing_vae(offline_taef2: object, capl
         )
     assert cb.resolved_bn == "none"
     assert cb.bn_mean is None
-    assert any("auto_bn" in r.message for r in caplog.records)
+    assert any("auto_bn" in message for message in caplog.messages)
 
 
 def test_auto_bn_resolved_none_when_variant_not_taef2(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -334,7 +348,11 @@ def test_zimage_callback_rejects_packed_flux_latent(
     monkeypatch.setattr(ZImage, "from_pretrained", classmethod(lambda cls, **kw: real_zimage))
 
     cb = LivePreviewCallback(
-        variant="zimage", save_to=tmp_path / "p.png", latent_height=8, latent_width=8
+        variant="zimage",
+        save_to=tmp_path / "p.png",
+        latent_height=8,
+        latent_width=8,
+        on_error="raise",
     )
     packed_flux = mx.zeros((1, 64, 64))  # ndim 3 -> unpack_zimage_latent must reject
     with pytest.raises(ValueError, match=r"16, 1, h, w"):
@@ -516,6 +534,18 @@ def test_bn_eps_defaults_to_1e_4_without_flux(offline_taef2: object) -> None:
     assert cb.bn_eps == 1e-4
 
 
+def test_explicit_bn_eps_is_stored(offline_taef2: object) -> None:
+    cb = LivePreviewCallback(
+        variant="taef2",
+        save_to="/tmp/preview.png",
+        bn_mean=mx.ones(128),
+        bn_var=mx.ones(128),
+        bn_eps=2e-5,
+    )
+
+    assert cb.bn_eps == 2e-5
+
+
 def test_auto_bn_with_bn_missing_eps_falls_back_to_default(offline_taef2: object) -> None:
     """bn exposes running_mean/var but NO `eps` attribute: resolved_bn stays 'auto' (mean+var
     present) and bn_eps falls back to the 1e-4 default. Pins the asymmetric path where eps is
@@ -690,6 +720,154 @@ def test_bn_var_without_mean_rejected(offline_taef2: object) -> None:
 
     with pytest.raises(ValueError, match="bn_mean and bn_var"):
         LivePreviewCallback(variant="taef2", save_to="/tmp/p.png", bn_var=mx.ones(128))
+
+
+@pytest.mark.parametrize(
+    ("bn_mean", "bn_var"),
+    [(mx.ones(128), None), (None, mx.ones(128))],
+)
+def test_unpack_wrapper_rejects_half_bn_pair(
+    bn_mean: mx.array | None, bn_var: mx.array | None
+) -> None:
+    with pytest.raises(ValueError, match="bn_mean and bn_var"):
+        unpack_flux2_latent(
+            mx.zeros((1, 1, 128)),
+            latent_height=1,
+            latent_width=1,
+            bn_mean=bn_mean,
+            bn_var=bn_var,
+        )
+
+
+def test_on_error_rejects_unknown_policy_before_model_load(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mlx_taef import TAEF2
+
+    def _boom(cls: object, **kw: object) -> object:
+        raise AssertionError("model load reached before policy validation")
+
+    monkeypatch.setattr(TAEF2, "from_pretrained", classmethod(_boom))
+    with pytest.raises(ValueError, match="on_error"):
+        LivePreviewCallback(on_error="ignore", variant="taef2")  # type: ignore[arg-type]
+
+
+def test_default_error_policy_warns_once_and_disables_current_generation(
+    offline_taef2: object, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
+    import logging
+
+    cb = LivePreviewCallback(
+        variant="taef2", save_to=tmp_path / "p.png", latent_height=1, latent_width=1
+    )
+    saves = 0
+
+    def _fail_save(image: mx.array, target: Path) -> None:
+        nonlocal saves
+        saves += 1
+        raise OSError("disk full")
+
+    monkeypatch.setattr(cb, "_save_image", _fail_save)
+    packed = mx.zeros((1, 1, 128))
+    with caplog.at_level(logging.WARNING, logger="mlx_taef"):
+        cb.call_in_loop(0, 0, "", packed, None, None)
+        cb.call_in_loop(0, 0, "", packed, None, None)
+
+    assert saves == 1
+    assert cb._disabled is True
+    assert sum("disk full" in message for message in caplog.messages) == 1
+
+
+def test_strict_error_policy_propagates_runtime_failure(
+    offline_taef2: object, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cb = LivePreviewCallback(
+        variant="taef2",
+        save_to=tmp_path / "p.png",
+        latent_height=1,
+        latent_width=1,
+        on_error="raise",
+    )
+
+    def _fail_save(image: mx.array, target: Path) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(cb, "_save_image", _fail_save)
+    with pytest.raises(OSError, match="disk full"):
+        cb.call_in_loop(0, 0, "", mx.zeros((1, 1, 128)), None, None)
+
+
+def test_before_loop_resets_disabled_state(offline_taef2: object) -> None:
+    cb = LivePreviewCallback(variant="taef2")
+    cb._disabled = True
+
+    cb.call_before_loop(0, "", mx.zeros((1, 1, 128)), None)
+
+    assert cb._disabled is False
+
+
+def test_try_extract_bn_failure_shapes_return_none() -> None:
+    from mlx_taef.integrations.mflux import _try_extract_bn
+
+    class _Raises:
+        @property
+        def vae(self) -> object:
+            raise RuntimeError("unexpected mflux shape")
+
+    assert _try_extract_bn(object()) == (None, None, None)
+    assert _try_extract_bn(type("Flux", (), {"vae": object()})()) == (None, None, None)
+    assert _try_extract_bn(type("Flux", (), {"vae": type("VAE", (), {"bn": None})()})()) == (
+        None,
+        None,
+        None,
+    )
+    assert _try_extract_bn(type("Flux", (), {"vae": type("VAE", (), {"bn": object()})()})()) == (
+        None,
+        None,
+        None,
+    )
+    assert _try_extract_bn(_Raises()) == (None, None, None)
+
+
+def test_bn_eps_must_be_positive_before_model_load(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mlx_taef import TAEF2
+
+    def _boom(cls: object, **kw: object) -> object:
+        raise AssertionError("model load reached before bn_eps validation")
+
+    monkeypatch.setattr(TAEF2, "from_pretrained", classmethod(_boom))
+    with pytest.raises(ValueError, match="bn_eps"):
+        LivePreviewCallback(variant="taef2", bn_eps=0)
+
+
+def test_numbered_frames_write_distinct_paths(offline_taef2: object, tmp_path: Path) -> None:
+    cb = LivePreviewCallback(
+        variant="taef2",
+        numbered_frames=True,
+        save_to=tmp_path / "preview.webp",
+        latent_height=1,
+        latent_width=1,
+    )
+    packed = mx.zeros((1, 1, 128))
+    cb.call_in_loop(0, 0, "", packed, None, None)
+    cb.call_in_loop(0, 0, "", packed, None, None)
+
+    assert [path.name for path in cb.saved_paths] == ["preview_step00.webp", "preview_step01.webp"]
+    assert all(path.exists() for path in cb.saved_paths)
+
+
+def test_missing_binding_raises_under_strict_policy(offline_taef2: object) -> None:
+    cb = LivePreviewCallback(variant="taef2", on_error="raise")
+
+    class _NoBindingKernel:
+        name = "broken"
+        integration = None
+
+    class _NoBindingModel:
+        _kernel = _NoBindingKernel()
+
+    cb.model = _NoBindingModel()  # type: ignore[assignment]
+
+    with pytest.raises(ValueError, match="no mflux binding"):
+        cb.call_in_loop(0, 0, "", mx.zeros((1, 1, 128)), None, None)
 
 
 def test_call_before_loop_resets_iter_and_saved_paths(

@@ -15,6 +15,9 @@ import mlx.core as mx
 Role = Literal["decoder", "encoder"]
 """The two weight roles a kernel converts/caches independently."""
 
+CONVERTER_VERSION = 1
+"""Converted-cache format. Bump whenever source-to-MLX transforms change."""
+
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class LatentSpec:
@@ -56,27 +59,35 @@ class WeightSource:
     revision: str | None = None
     """Optional HF commit revision (full SHA) to pin the download to a fixed checkpoint."""
     sha256: str | None = None
-    """Optional sha256 of the source file; verified after download when set (supply-chain pin)."""
+    """SHA-256 for a shared single-file source, verified after download."""
+    decoder_sha256: str | None = None
+    """Decoder SHA-256 for a two-file source."""
+    encoder_sha256: str | None = None
+    """Encoder SHA-256 for a two-file source."""
 
     def __post_init__(self) -> None:
-        # A single sha256 cannot verify two distinct role files. Reject a sha256 pin on a
-        # two-file (decoder/encoder) source until per-role digests exist — otherwise one role
-        # would silently verify the wrong file's digest. Only single-file sources are pinned
-        # today; this guards a future two-file pin.
-        if self.sha256 is not None and self.filename is None:
+        has_role_sha = self.decoder_sha256 is not None or self.encoder_sha256 is not None
+        if self.filename is not None and has_role_sha:
             raise ValueError(
-                "sha256 pinning is only supported for single-file sources (filename=...). "
-                "This two-file source (decoder_filename/encoder_filename) would verify both "
-                "roles against one digest; add per-role digests before pinning sha256."
+                "single-file sources use sha256; decoder_sha256/encoder_sha256 are only for "
+                "two-file sources"
             )
+        if self.filename is None and self.sha256 is not None:
+            raise ValueError("two-file sources require decoder_sha256 and encoder_sha256")
+        if (self.decoder_sha256 is None) != (self.encoder_sha256 is None):
+            raise ValueError("decoder_sha256 and encoder_sha256 must be set together")
+
+    def sha256_for(self, role: Role) -> str | None:
+        """Return the digest that verifies `role` for this source."""
+        if self.filename is not None:
+            return self.sha256
+        return self.decoder_sha256 if role == "decoder" else self.encoder_sha256
 
     def cache_key(self, *, role: Role) -> str:
         """Return a stable cache filename stem for (this weight source, role).
 
-        Includes revision + sha256 (when pinned) so bumping a source's pinned revision or
-        sha256 changes the key — an existing cache is never silently reused for a new pin.
-        Unpinned sources (taef1/taef2/taesd/taesdxl) keep their pre-0.6.2 key, so they do
-        NOT re-convert on upgrade.
+        Includes converter version, revision, and the role-selected sha256 so a transform or
+        source-pin change never silently reuses stale converted weights.
         """
         if self.filename is not None:
             fname = self.filename
@@ -85,11 +96,17 @@ class WeightSource:
         else:
             fname = self.encoder_filename or ""
         safe_fname = fname.replace("/", "_").replace("..", "_")
-        parts = [self.repo.replace("/", "_"), safe_fname, role]
+        parts = [
+            self.repo.replace("/", "_"),
+            safe_fname,
+            role,
+            f"converter-v{CONVERTER_VERSION}",
+        ]
         if self.revision is not None:
             parts.append(f"rev-{self.revision[:12]}")
-        if self.sha256 is not None:
-            parts.append(f"sha-{self.sha256[:12]}")
+        role_sha256 = self.sha256_for(role)
+        if role_sha256 is not None:
+            parts.append(f"sha-{role_sha256[:12]}")
         return "__".join(parts)
 
 
@@ -150,3 +167,5 @@ class ModelKernel:
     source: WeightSource
     integration: MfluxBinding | None = None
     memory_cap_hint_gb: int | None = None
+    midblock_gn: bool = False
+    """Whether taesd2d residual blocks include the FLUX.2 GroupNorm branch."""

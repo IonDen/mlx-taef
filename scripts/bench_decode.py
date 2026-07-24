@@ -78,13 +78,8 @@ def _build_argparser() -> argparse.ArgumentParser:
 
 def _resolve_cap_gb(*, condition: str, flux_variant: str = "flux2-klein-base-4b") -> int | None:
     """Per-condition cap policy. See spec Section 3 'Per-condition cap policy'."""
-    if condition in ("taef1", "taef2"):
+    if condition in ("taef1", "taef2", "zimage"):
         return get_memory_cap_hint(condition)
-    if condition == "zimage":
-        # Route via the registry — the legacy shim raises on "zimage".
-        from mlx_taef.kernels import KERNELS
-
-        return KERNELS["zimage"].memory_cap_hint_gb
     if condition == "vanilla_vae":
         return FULL_VAE_CAP_GB[flux_variant]
     raise TaefError(f"unknown condition: {condition!r}")
@@ -437,18 +432,7 @@ def _worker_main(args: argparse.Namespace) -> int:
     else:  # pragma: no cover
         raise TaefError(f"unknown condition: {args.condition!r}")
 
-    # Warm up once, UN-timed: the first decode materializes the lazy mmap-backed weights and
-    # JIT-compiles the Metal kernels. Timing a second call then measures steady-state decode —
-    # the per-step cost a live preview pays after the first step — and, because the weights are
-    # already resident, peak_gb reflects the decode working set rather than one-time weight load.
-    mx.eval(decode_fn())
-
-    mx.reset_peak_memory()
-    t0 = time.perf_counter()
-    image = decode_fn()
-    mx.eval(image)
-    elapsed_s = time.perf_counter() - t0
-    peak_gb = mx.get_peak_memory() / 1024**3
+    image, elapsed_s, peak_gb = _measure_steady_state(decode_fn)
 
     _save_webp(image, args.save_to)
 
@@ -467,6 +451,20 @@ def _worker_main(args: argparse.Namespace) -> int:
         )
     )
     return 0
+
+
+def _measure_steady_state(decode_fn: Callable[[], Any]) -> tuple[Any, float, float]:
+    """Warm once, then time and measure the second decode in steady state."""
+    import mlx.core as mx
+
+    mx.eval(decode_fn())
+    mx.reset_peak_memory()
+    t0 = time.perf_counter()
+    image = decode_fn()
+    mx.eval(image)
+    elapsed_s = time.perf_counter() - t0
+    peak_gb = mx.get_peak_memory() / 1024**3
+    return image, elapsed_s, peak_gb
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -8,7 +8,7 @@ from typing import get_args
 
 import mlx.core as mx
 
-from mlx_taef.kernels import MIDBLOCK_GN, ModelKernel, Role
+from mlx_taef.kernels import ModelKernel, Role
 from mlx_taef.kernels._arch import build_arch
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,8 @@ def get_or_convert(kernel: ModelKernel, *, role: Role = "decoder") -> Path:
     if role not in get_args(Role):
         raise ValueError(f"role must be 'decoder' or 'encoder', got {role!r}")
     cache_dir = CACHE_ROOT / "converted"
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    cache_dir.chmod(0o700)
     out_path = cache_dir / f"{kernel.source.cache_key(role=role)}.mlx.safetensors"
     if not out_path.resolve().is_relative_to(cache_dir.resolve()):  # pragma: no cover - defensive
         raise ValueError(f"refusing to write cache outside {cache_dir}: {out_path}")
@@ -36,7 +37,7 @@ def get_or_convert(kernel: ModelKernel, *, role: Role = "decoder") -> Path:
 
     logger.info("Downloading + converting %s %s from %s", kernel.name, role, kernel.source.repo)
     ch = kernel.latent.channels
-    mbgn = MIDBLOCK_GN.get(kernel.name, False)
+    mbgn = kernel.midblock_gn
     arch_module = build_arch(kernel.arch.name, role=role, latent_channels=ch, midblock_gn=mbgn)
     converted = kernel.conversion.convert(kernel.source, arch_module, role=role)
     # Atomic write: a process killed mid-save must not leave a truncated file at the

@@ -24,11 +24,11 @@ def test_weightsource_cache_key_always_includes_role():
     )
     assert (
         diffusers.cache_key(role="decoder")
-        == "madebyollin_taef1__diffusion_pytorch_model.safetensors__decoder"
+        == "madebyollin_taef1__diffusion_pytorch_model.safetensors__decoder__converter-v1"
     )
     assert (
         diffusers.cache_key(role="encoder")
-        == "madebyollin_taef1__diffusion_pytorch_model.safetensors__encoder"
+        == "madebyollin_taef1__diffusion_pytorch_model.safetensors__encoder__converter-v1"
     )
     assert diffusers.cache_key(role="decoder") != diffusers.cache_key(role="encoder")
     upstream = WeightSource(
@@ -38,11 +38,11 @@ def test_weightsource_cache_key_always_includes_role():
     )
     assert (
         upstream.cache_key(role="decoder")
-        == "madebyollin_taesd__taesd_decoder.safetensors__decoder"
+        == "madebyollin_taesd__taesd_decoder.safetensors__decoder__converter-v1"
     )
     assert (
         upstream.cache_key(role="encoder")
-        == "madebyollin_taesd__taesd_encoder.safetensors__encoder"
+        == "madebyollin_taesd__taesd_encoder.safetensors__encoder__converter-v1"
     )
 
 
