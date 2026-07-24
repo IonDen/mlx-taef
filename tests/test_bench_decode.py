@@ -180,10 +180,11 @@ def test_resolve_cap_gb_raises_on_unknown_condition() -> None:
         _resolve_cap_gb(condition="totally-bogus")
 
 
-def test_orchestrator_records_failed_rep_and_continues() -> None:
-    """When a worker subprocess fails, the rep is recorded with the
-    error and the orchestrator moves on."""
+def test_orchestrator_rejects_partial_rep_sample_after_attempting_all_reps() -> None:
+    """A release median must never be computed from an undersized survivor sample."""
     from scripts.bench_decode import _run_orchestrator
+
+    from mlx_taef.errors import TaefError
 
     with patch("scripts.bench_decode._run_one_rep") as mock_rep:
         # Rep 0 fails, rep 1 succeeds, rep 2 succeeds.
@@ -192,16 +193,15 @@ def test_orchestrator_records_failed_rep_and_continues() -> None:
             {"condition": "taef2", "rep": 1, "elapsed_s": 0.1, "peak_memory_gb": 1.5},
             {"condition": "taef2", "rep": 2, "elapsed_s": 0.1, "peak_memory_gb": 1.5},
         ]
-        result = _run_orchestrator(
-            latent_path=Path("/tmp/x.safetensors"),
-            condition="taef2",
-            reps=3,
-            save_dir=Path("/tmp"),
-        )
+        with pytest.raises(TaefError, match=r"1 of 3 reps failed.*OOM"):
+            _run_orchestrator(
+                latent_path=Path("/tmp/x.safetensors"),
+                condition="taef2",
+                reps=3,
+                save_dir=Path("/tmp"),
+            )
 
-    assert len(result["per_rep_seconds"]) == 2  # only successful reps
-    assert len(result["per_rep_failures"]) == 1
-    assert result["per_rep_failures"][0]["error"] == "OOM"
+    assert mock_rep.call_count == 3
 
 
 def test_orchestrator_exits_nonzero_if_all_reps_fail() -> None:

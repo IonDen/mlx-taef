@@ -347,6 +347,7 @@ def _live_generation(
         save_to=save_dir / f"{scenario_dir}.webp",
         latent_height=height // latent_height_divisor,
         latent_width=width // latent_width_divisor,
+        on_error="raise",
     )
     flux.callbacks.register(callback)
 
@@ -364,10 +365,8 @@ def _live_generation(
 
     # Save the final full-VAE image too.
     final_path = save_dir / f"{scenario_dir}_final.webp"
-    try:
-        generated.image.save(final_path, "WEBP", quality=92)
-    except Exception as e:  # pragma: no cover
-        logger.warning("could not save final image: %s", e)
+    generated.image.save(final_path, "WEBP", quality=92)
+    _validate_live_artifacts(callback.saved_paths, final_path, expected_count=num_steps)
 
     if handle is not None:
         teacache_stats = {
@@ -389,9 +388,21 @@ def _live_generation(
         "height": height,
         "width": width,
         "preview_paths": [str(p) for p in callback.saved_paths],
+        "preview_count": len(callback.saved_paths),
         "final_path": str(final_path),
         "teacache": teacache_stats,
     }
+
+
+def _validate_live_artifacts(
+    preview_paths: list[Path], final_path: Path, *, expected_count: int
+) -> None:
+    """Require a complete, non-empty preview gallery and final image."""
+    if len(preview_paths) != expected_count:
+        raise TaefError(f"expected {expected_count} preview frames, got {len(preview_paths)}")
+    for path in [*preview_paths, final_path]:
+        if not path.is_file() or path.stat().st_size == 0:
+            raise TaefError(f"missing or empty live artifact: {path}")
 
 
 _SCENARIO_DISPATCH = {
@@ -434,7 +445,8 @@ def _build_hardware_metadata() -> dict[str, Any]:
         "machine": platform.machine(),
         "os": f"{platform.system()} {platform.release()}",
         "git_sha": _detect_git_sha(),
-        "mlx_taef_version": _safe_version("mlx-taef") or "0.0.0+dev",
+        "mlx_taef_version": _detect_source_version(),
+        "mlx_taef_distribution_version": _safe_version("mlx-taef") or "unknown",
         "mlx_teacache_version": _safe_version("mlx-teacache"),
         "mflux_version": _safe_version("mflux") or "unknown",
         "mlx_version": _safe_version("mlx") or "unknown",
@@ -507,8 +519,50 @@ def _detect_git_sha() -> str | None:
     return None
 
 
+def _detect_source_version() -> str:
+    """Return a git-derived version tied to the source being benchmarked."""
+    try:
+        result = subprocess.run(
+            ["git", "describe", "--tags", "--long", "--dirty", "--always"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+            cwd=_REPO_ROOT,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except (OSError, subprocess.SubprocessError):  # pragma: no cover
+        pass
+    return "unknown"
+
+
+def _migrate_report_v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
+    """Deterministically adapt the committed v0.6.2 report to schema v2."""
+    migrated = dict(data)
+    hardware = dict(migrated.get("hardware", {}))
+    if "dtype" in hardware:
+        hardware.setdefault("generation_dtype", hardware.pop("dtype"))
+    hardware.setdefault("taef_decode_dtype", "float32")
+    hardware.setdefault(
+        "mlx_taef_distribution_version", hardware.get("mlx_taef_version", "unknown")
+    )
+    migrated["hardware"] = hardware
+    scenarios: dict[str, Any] = {}
+    for name, raw_scenario in migrated.get("scenarios", {}).items():
+        scenario = dict(raw_scenario) if isinstance(raw_scenario, dict) else raw_scenario
+        if isinstance(scenario, dict) and isinstance(scenario.get("preview_paths"), list):
+            scenario.setdefault("preview_count", len(scenario["preview_paths"]))
+        scenarios[name] = scenario
+    migrated["scenarios"] = scenarios
+    migrated["schema_version"] = SCHEMA_VERSION
+    return migrated
+
+
 def _load_report(path: Path) -> dict[str, Any]:
     data = json.loads(path.read_text())
+    if data.get("schema_version") == 1:
+        return _migrate_report_v1_to_v2(data)
     if data.get("schema_version") != SCHEMA_VERSION:
         raise SchemaVersionError(
             f"unknown schema_version: got {data.get('schema_version')!r}, expected {SCHEMA_VERSION}"
@@ -720,12 +774,13 @@ def _run_scenarios(
     scenarios_to_run: list[str],
     args: argparse.Namespace,
     report: dict[str, Any],
-) -> None:
+) -> int:
     """Run each scenario, recording an error entry (not aborting) if one raises.
 
     Write the report to disk after EACH scenario so a later failure or interruption
     never discards results already computed (subprocess-per-rep runs are minutes each).
     """
+    failures = 0
     for scenario in scenarios_to_run:
         try:
             if scenario in _LIVE_SCENARIOS:
@@ -734,6 +789,7 @@ def _run_scenarios(
                 result = _SCENARIO_DISPATCH[scenario](args)
             report["scenarios"][scenario] = result
         except Exception as e:  # noqa: BLE001, RUF100 - deliberate broad catch per spec
+            failures += 1
             logger.warning("scenario %s failed: %s", scenario, e)
             report["scenarios"][scenario] = {
                 "status": "error",
@@ -741,6 +797,7 @@ def _run_scenarios(
                 "reason": str(e),
             }
         _write_report(args.report, report)
+    return failures
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -776,9 +833,9 @@ def main(argv: list[str] | None = None) -> int:
         list(_SCENARIO_DISPATCH.keys()) if args.scenario == "all" else [args.scenario]
     )
 
-    _run_scenarios(scenarios_to_run, args, report)
+    failures = _run_scenarios(scenarios_to_run, args, report)
     print(f"Wrote {args.report}")
-    return 0
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":

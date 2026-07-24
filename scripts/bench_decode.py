@@ -213,8 +213,11 @@ def _run_orchestrator(
         else:
             successes.append(result)
 
-    if not successes:
-        raise TaefError(f"all reps failed for condition={condition}: {failures}")
+    if failures:
+        failure_summary = (
+            "all reps failed" if len(failures) == reps else f"{len(failures)} of {reps} reps failed"
+        )
+        raise TaefError(f"{failure_summary} for condition={condition}: {failures}")
 
     per_rep_seconds = [r["elapsed_s"] for r in successes]
     per_rep_peak = [r.get("peak_memory_gb", 0.0) for r in successes]

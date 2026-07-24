@@ -91,17 +91,11 @@ def test_cli_convert_variant_choices_include_all_kernels(
         assert name in err
 
 
-def test_cli_convert_excludes_zimage_choice(capsys: pytest.CaptureFixture[str]) -> None:
-    """convert routes through the legacy shim; zimage (no distinct weights) must not be offered.
-
-    Use an invalid value that ISN'T 'zimage' so argparse doesn't echo 'zimage' as the rejected
-    value — then the only way 'zimage' could appear is in the listed valid choices, which it must not.
-    """
+def test_cli_convert_choices_cover_the_kernel_registry(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit):
         main(["convert", "--variant", "not-a-variant", "--dst", "/tmp/x.safetensors"])
     err = capsys.readouterr().err
-    assert "zimage" not in err  # zimage is not among convert's valid choices
-    for name in ("taesd", "taesdxl", "taef1", "taef2"):
+    for name in ("taesd", "taesdxl", "taef1", "taef2", "zimage", "qwen-image"):
         assert name in err
 
 
@@ -119,27 +113,27 @@ def test_bench_cls_by_name_covers_every_kernel() -> None:
     assert set(_BENCH_CLS_BY_NAME) == set(KERNELS)
 
 
-def test_cli_convert_routes_role_to_correct_converter(
+def test_cli_convert_routes_through_pinned_kernel_cache(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Offline: fake the converters and verify --role encoder/decoder dispatch is correct."""
-    from mlx_taef.variants import VARIANTS
+    """The public converter must use the same verified source path as runtime loading."""
+    from mlx_taef.kernels import KERNELS
 
-    calls: list[tuple[str, Path, object]] = []
+    calls: list[tuple[object, str]] = []
+    cached = tmp_path / "cached.safetensors"
+    cached.write_bytes(b"verified converted weights")
 
-    def fake_enc(*, out_path: Path, config: object) -> None:
-        calls.append(("encoder", out_path, config))
+    def fake_get_or_convert(kernel: object, *, role: str) -> Path:
+        calls.append((kernel, role))
+        return cached
 
-    def fake_dec(*, out_path: Path, config: object) -> None:
-        calls.append(("decoder", out_path, config))
-
-    monkeypatch.setattr("mlx_taef.convert.convert_hf_encoder_to_mlx", fake_enc)
-    monkeypatch.setattr("mlx_taef.convert.convert_hf_decoder_to_mlx", fake_dec)
+    monkeypatch.setattr("mlx_taef.download.get_or_convert", fake_get_or_convert)
 
     out = tmp_path / "out.safetensors"
     assert main(["convert", "--variant", "taef1", "--role", "encoder", "--dst", str(out)]) == 0
-    assert calls == [("encoder", out, VARIANTS["taef1"])]
+    assert calls == [(KERNELS["taef1"], "encoder")]
+    assert out.read_bytes() == b"verified converted weights"
 
     calls.clear()
     assert main(["convert", "--variant", "taef1", "--role", "decoder", "--dst", str(out)]) == 0
-    assert calls == [("decoder", out, VARIANTS["taef1"])]
+    assert calls == [(KERNELS["taef1"], "decoder")]

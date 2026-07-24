@@ -127,6 +127,22 @@ def test_hardware_metadata_names_generation_and_decode_dtypes() -> None:
     assert "dtype" not in metadata
 
 
+def test_hardware_metadata_separates_source_and_installed_versions(monkeypatch) -> None:
+    import scripts.run_showcase as rs
+
+    monkeypatch.setattr(rs, "_detect_source_version", lambda: "v0.6.2-3-gabc1234")
+    monkeypatch.setattr(
+        rs,
+        "_pkg_version",
+        lambda package: "0.6.2" if package == "mlx-taef" else f"test-{package}",
+    )
+
+    metadata = rs._build_hardware_metadata()
+
+    assert metadata["mlx_taef_version"] == "v0.6.2-3-gabc1234"
+    assert metadata["mlx_taef_distribution_version"] == "0.6.2"
+
+
 def test_live_watchdog_breach_reason_checks_memory_before_wall() -> None:
     from scripts.run_showcase import _live_watchdog_breach_reason
 
@@ -284,8 +300,9 @@ def test_run_scenarios_records_error_and_writes_incrementally(
 
     report: dict[str, object] = {"scenarios": {}}
     args = argparse.Namespace(report=tmp_path / "r.json")
-    run_showcase._run_scenarios(["a", "b", "c"], args, report)
+    failures = run_showcase._run_scenarios(["a", "b", "c"], args, report)
 
+    assert failures == 1
     assert report["scenarios"]["b"]["error_type"] == "RuntimeError"
     assert report["scenarios"]["c"] == {"status": "ok"}  # ran despite b failing
     # Exact write progression proves the report is written AFTER EACH scenario (an
@@ -296,3 +313,105 @@ def test_run_scenarios_records_error_and_writes_incrementally(
         {"a": "ok", "b": "error"},
         {"a": "ok", "b": "error", "c": "ok"},
     ]
+
+
+def test_showcase_main_exits_nonzero_when_a_scenario_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import scripts.run_showcase as rs
+
+    def _boom(args: object) -> dict[str, str]:
+        raise RuntimeError("broken scenario")
+
+    monkeypatch.setattr(rs, "_SCENARIO_DISPATCH", {"broken": _boom})
+
+    assert (
+        rs.main(
+            [
+                "--scenario",
+                "broken",
+                "--report",
+                str(tmp_path / "report.json"),
+                "--no-trash-prior",
+            ]
+        )
+        == 1
+    )
+
+
+def test_live_generation_uses_strict_callback_and_requires_complete_gallery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import argparse
+
+    import scripts.run_showcase as rs
+
+    callback_kwargs: dict[str, object] = {}
+
+    class _FakeCallback:
+        def __init__(self, **kwargs: object) -> None:
+            callback_kwargs.update(kwargs)
+            self.save_to = Path(str(kwargs["save_to"]))
+            self.saved_paths: list[Path] = []
+
+    class _Registry:
+        def __init__(self) -> None:
+            self.callback: _FakeCallback | None = None
+
+        def register(self, callback: _FakeCallback) -> None:
+            self.callback = callback
+
+    class _FinalImage:
+        def save(self, path: Path, *args: object, **kwargs: object) -> None:
+            path.write_bytes(b"final")
+
+    class _Flux:
+        def __init__(self) -> None:
+            self.callbacks = _Registry()
+
+        def generate_image(self, *, num_inference_steps: int, **kwargs: object) -> object:
+            callback = self.callbacks.callback
+            assert callback is not None
+            for idx in range(num_inference_steps):
+                path = callback.save_to.with_name(
+                    f"{callback.save_to.stem}_step{idx:02d}{callback.save_to.suffix}"
+                )
+                path.write_bytes(b"frame")
+                callback.saved_paths.append(path)
+            return type("Generated", (), {"image": _FinalImage()})()
+
+    monkeypatch.setattr(rs, "_ARTIFACTS_DIR", tmp_path)
+    monkeypatch.setattr("mlx_taef._memory_caps.install_memory_caps", lambda: (20, 22))
+    monkeypatch.setattr("mlx_taef.integrations.mflux.LivePreviewCallback", _FakeCallback)
+
+    result = rs._live_generation(
+        args=argparse.Namespace(cap_gb=None),
+        model_factory=_Flux,
+        callback_variant="taef2",
+        latent_height_divisor=16,
+        latent_width_divisor=16,
+        prompt="test",
+        num_steps=2,
+        guidance=1.0,
+        with_teacache=False,
+        auto_bn=True,
+        scenario_dir="strict",
+    )
+
+    assert callback_kwargs["on_error"] == "raise"
+    assert result["preview_count"] == 2
+    assert result["status"] == "ok"
+
+
+def test_live_artifact_validation_rejects_incomplete_gallery(tmp_path: Path) -> None:
+    from scripts.run_showcase import _validate_live_artifacts
+
+    from mlx_taef.errors import TaefError
+
+    frame = tmp_path / "step00.webp"
+    frame.write_bytes(b"frame")
+    final = tmp_path / "final.webp"
+    final.write_bytes(b"final")
+
+    with pytest.raises(TaefError, match="expected 2 preview frames, got 1"):
+        _validate_live_artifacts([frame], final, expected_count=2)
