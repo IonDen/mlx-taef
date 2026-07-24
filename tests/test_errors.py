@@ -180,7 +180,7 @@ def test_mflux_not_installed_error_raised_when_mflux_import_fails(monkeypatch) -
 
     from mlx_taef.errors import MfluxNotInstalledError
 
-    # Make `from mflux.callbacks.callback import InLoopCallback` fail at import time.
+    # Make importing `mflux.callbacks.callback` fail at import time.
     monkeypatch.setitem(sys.modules, "mflux.callbacks.callback", None)
     monkeypatch.delitem(sys.modules, "mlx_taef.integrations.mflux", raising=False)
     with pytest.raises(MfluxNotInstalledError):
@@ -213,3 +213,9 @@ def test_no_docstring_references_a_nonexistent_exception() -> None:
         if isinstance(obj, type):
             blob += obj.__doc__ or ""
     assert "TaefMfluxNotInstalledError" not in blob
+
+
+def test_unknown_architecture_error_string_has_no_keyerror_outer_quotes() -> None:
+    from mlx_taef.errors import UnknownArchitectureError
+
+    assert str(UnknownArchitectureError("unknown arch: 'missing'")) == "unknown arch: 'missing'"

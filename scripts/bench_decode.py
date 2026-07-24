@@ -30,6 +30,18 @@ from mlx_taef.errors import TaefError  # noqa: E402  (after sys.path tweak)
 from mlx_taef.variants import get_memory_cap_hint  # noqa: E402
 from scripts._caps import FULL_VAE_CAP_GB  # noqa: E402
 
+
+def _repo_relative(path: Path) -> str:
+    """Render an artifact path repo-relative for reports; foreign paths keep only the name.
+
+    Committed reports must not carry absolute paths (they leak the local home directory).
+    """
+    try:
+        return str(path.resolve().relative_to(_REPO_ROOT))
+    except ValueError:
+        return path.name
+
+
 SENTINEL_PREFIX = "::BENCH_RESULT::"
 
 # Per-condition subprocess timeouts (seconds). Full-VAE workers cold-load
@@ -236,6 +248,7 @@ def _run_orchestrator(
         "per_rep_peak_memory_gb": per_rep_peak,
         "median_peak_memory_gb": statistics.median(per_rep_peak),
         "image_path": str(successes[-1].get("image_path", "")),
+        # Always [] here — any failure raises above. Kept so the report shape is stable.
         "per_rep_failures": failures,
     }
 
@@ -447,7 +460,7 @@ def _worker_main(args: argparse.Namespace) -> int:
                 "status": "ok",
                 "elapsed_s": elapsed_s,
                 "peak_memory_gb": peak_gb,
-                "image_path": str(args.save_to),
+                "image_path": _repo_relative(args.save_to),
                 "requested_cap_gb": args.applied_cap_gb,
                 "installed_cap_gb": installed_cap_gb,
             }

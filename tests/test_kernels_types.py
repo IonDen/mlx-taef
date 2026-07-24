@@ -82,3 +82,19 @@ def test_role_is_exported_with_the_two_roles():
     from mlx_taef.kernels import Role
 
     assert get_args(Role) == ("decoder", "encoder")
+
+
+def test_cache_key_tracks_converter_version_constant(monkeypatch) -> None:
+    """cache_key must interpolate CONVERTER_VERSION, so bumping it invalidates caches."""
+    from mlx_taef.kernels import _types
+    from mlx_taef.kernels._types import WeightSource
+
+    source = WeightSource(repo="acme/models", filename="weights.safetensors")
+    before = source.cache_key(role="decoder")
+    assert f"converter-v{_types.CONVERTER_VERSION}" in before
+
+    monkeypatch.setattr(_types, "CONVERTER_VERSION", 99)
+    after = source.cache_key(role="decoder")
+
+    assert "converter-v99" in after
+    assert after != before

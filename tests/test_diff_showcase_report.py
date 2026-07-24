@@ -466,3 +466,24 @@ def test_scenario_elapsed_s_missing_from_new_report_is_flagged() -> None:
     new = {"scenarios": {"live_preview": {}}}  # elapsed_s gone
     regs = diff_reports(old, new)
     assert any(r["kind"] == "wallclock-missing" and r["condition"] == "(scenario)" for r in regs)
+
+
+def test_migration_populates_distribution_version_fallback(tmp_path: Path) -> None:
+    """A v1 report's single mlx_taef_version feeds the v2 distribution-version field."""
+    from scripts.run_showcase import _load_report
+
+    old = tmp_path / "old.json"
+    old.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "hardware": {"dtype": "bf16", "mlx_taef_version": "0.6.2"},
+                "isolation": "subprocess-per-rep",
+                "scenarios": {},
+            }
+        )
+    )
+
+    migrated = _load_report(old)
+
+    assert migrated["hardware"]["mlx_taef_distribution_version"] == "0.6.2"
