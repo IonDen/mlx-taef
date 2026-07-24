@@ -20,12 +20,15 @@ This release makes live previews resilient to runtime errors and closes the rema
 - Four-dimensional convolution weights are always transposed during conversion. Ambiguous equal-sized channel dimensions can no longer skip the required layout change.
 - `UnknownKernelError` and `UnknownArchitectureError` render without `KeyError`'s extra quote layer. Direct `Taef()` construction, memory-cap lookup, and `mlx-taef info` failures now return clear, stable errors.
 - The documented direct invocation of `scripts/diff_showcase_report.py` works from any current directory.
+- `mlx-taef convert` now uses the kernel registry and the runtime download cache, so its downloads enforce the same immutable revision and sha256 checks as `from_pretrained()`.
+- The showcase command exits nonzero if any scenario fails after checkpointing the remaining results. Decode medians now require every requested repetition, and live scenarios require one non-empty preview per inference step plus a non-empty final image.
 
 ### Changed
 - Converted-weight cache keys include a converter-format version as well as the source revision and digest. The first load after this upgrade rebuilds each converted cache once. Converted cache directories are created with owner-only permissions.
 - CI installs from the lockfile with `uv sync --frozen` on every supported Python version.
 - Live showcase generations run in separate worker processes. Each worker has a 55-minute wall budget and a 28 GiB active-memory ceiling on the 32 GiB reference Mac, writes an abort record before exit, and leaves completed scenario results checkpointed. The report schema is now version 2 and records generation and tiny-decoder dtypes separately.
-- The benchmark report was re-measured on Apple M1 Max at implementation commit `7aead40`. All six scenarios completed, and the regression checker found no latency, memory, SSIM, or TeaCache regression against v0.6.2.
+- Benchmark metadata records both the source-derived git version and the installed distribution version. The report loader migrates the committed v0.6.2 schema when comparing releases, and the regression checker also guards the number of preview frames.
+- The benchmark report was re-measured on Apple M1 Max at commit `1e79c29`. All six scenarios completed with every requested repetition and preview frame, and the regression checker found no latency, memory, SSIM, TeaCache, or gallery regression against v0.6.2.
 
 ### Internal
 - The kernel registry is the source of truth for mid-block GroupNorm and memory-cap metadata. The old `MIDBLOCK_GN` mapping remains as a derived compatibility view.

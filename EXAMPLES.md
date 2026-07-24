@@ -13,7 +13,7 @@ mflux 0.18.0, MLX 0.31.2; weights quantized to int4 (`quantize=4`), bf16 generat
 times measure the decode step in isolation, outside of model construction and after one untimed
 warmup call, as the median over several timed reps — the steady-state per-step cost a live preview
 pays after its first step. SSIM compares the tiny-decoder image against the full VAE on the same
-latent. Captured for mlx-taef v0.7.0 at implementation commit `7aead40` on 2026-07-24.
+latent. Captured for mlx-taef v0.7.0 at commit `1e79c29` on 2026-07-24.
 
 Runnable scripts live in [`examples/`](examples/).
 
@@ -36,8 +36,8 @@ What happened: the callback decodes the in-flight latent every step with TAEF1 a
 preview frame, while mflux finishes the run and decodes the final image with the full Z-Image
 VAE. By step 1 the composition is already readable.
 
-The gain: decoding the final Z-Image latent takes **32 ms** with TAEF1 versus **0.24 s** with the
-full Z-Image VAE, about **7.5× faster**, and it peaks at **0.55 GB** instead of 2.61 GB. Structural
+The gain: decoding the final Z-Image latent takes **30 ms** with TAEF1 versus **0.24 s** with the
+full Z-Image VAE, about **8.0× faster**, and it peaks at **0.55 GB** instead of 2.61 GB. Structural
 similarity between the two is **SSIM 0.94**, so the preview tracks the real image closely. The
 TAEF1 decoder is a few MB; the full VAE is hundreds. Reproduce:
 
@@ -85,7 +85,7 @@ Recipe: FLUX.2 Klein base 4B, same prompt/seed, 512×512, 4 steps, guidance 1.0,
 | ![f21](_artifacts/showcase/live_preview/live_preview_step01.webp) | ![f23](_artifacts/showcase/live_preview/live_preview_step03.webp) | ![f2f](_artifacts/showcase/live_preview/live_preview_final.webp) |
 
 The gain: TAEF2 decodes a Klein latent in **31 ms** versus **0.28 s** for the full FLUX.2 VAE
-(~9.1× faster), at **0.59 GB** versus 2.80 GB peak. SSIM here is **0.616**, lower than the FLUX.1
+(~9.3× faster), at **0.59 GB** versus 2.80 GB peak. SSIM here is **0.616**, lower than the FLUX.1
 family because TAEF2 is a 4 MB preview decoder standing in for a ~340 MB VAE: it keeps the
 structure and color and fudges fine detail. That is the deliberate trade for a real-time preview;
 reach for the full VAE when you need final-quality fidelity. Reproduce:
@@ -103,7 +103,7 @@ than the FLUX.2 pair. Same red-apple latent, two decoders:
 |---|---|
 | ![f1v](_artifacts/showcase/taef1/vae/vanilla_vae_rep0.webp) | ![f1t](_artifacts/showcase/taef1/taef/taef1_rep0.webp) |
 
-TAEF1 decodes the same latent in **29 ms** versus **0.30 s** for the full FLUX.1 VAE (~10.3× faster),
+TAEF1 decodes the same latent in **30 ms** versus **0.30 s** for the full FLUX.1 VAE (~10.0× faster),
 at **0.55 GB** versus 3.70 GB peak and **SSIM 0.94**. Reproduce:
 
 ```
