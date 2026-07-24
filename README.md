@@ -32,7 +32,7 @@ img_uint8 = taef.decode_image(latents)      # uint8 NHWC ready for PIL
 
 **You want FLUX generation itself to be faster on Apple Silicon?** You want [`mlx-teacache`](https://github.com/IonDen/mlx-teacache) — it skips redundant denoising steps when the schedule is cacheable (measured 1.46× on FLUX.1-dev at 25 steps).
 
-**You want both: faster generation AND live previews?** Use them together — they compose cleanly. mflux 4-step Klein + TeaCache + TAEF2 previews = 1.30× wall-clock and 47% less peak memory vs vanilla.
+**You want both: faster generation AND live previews?** Use them together. mflux 4-step Klein + TeaCache + TAEF2 previews measured 1.34× faster with 44% less peak memory than the same generation without TeaCache.
 
 ## Install
 
@@ -55,7 +55,7 @@ uv add "mlx-taef[mflux]"
 Pin an exact version in a project that needs reproducibility:
 
 ```bash
-pip install "mlx-taef==0.6.2"
+pip install "mlx-taef==0.7.0"
 ```
 
 Verify the install:
@@ -89,7 +89,7 @@ with real captured frames, final images, and the measured gain. Runnable compani
 
 Side-by-side images + measured timings: see [COMPARISON.md](COMPARISON.md).
 
-All numbers there come from `scripts/run_showcase.py` (subprocess-per-rep bench harness) and the committed `_artifacts/showcase_report.json`. Per-rep raw arrays are preserved so reviewers can see variance, not just summary stats.
+All numbers there come from `scripts/run_showcase.py` (subprocess-per-condition bench harness) and the committed `_artifacts/showcase_report.json`. Per-rep raw arrays are preserved so reviewers can see variance, not just summary stats.
 
 The previous v0.1.x README claim — *"~100 ms decode at 1024×1024, 50–100× faster than the full Flux VAE; ~1 GB peak vs ~9.6 GB"* — was a same-process measurement under v0.1's `tests/test_perf.py`. v0.2.0 re-measures under subprocess-per-rep with per-condition memory caps; see COMPARISON.md for the honest replacement numbers.
 
@@ -121,6 +121,8 @@ model.generate_image(
 
 Passing `flux=model` lets the callback auto-extract `model.vae.bn.running_mean` and `running_var` so TAEF2 previews are color-correct out of the box (`callback.resolved_bn == "auto"`). If you have a custom integration where `flux=` isn't convenient, pass `bn_mean=` and `bn_var=` explicitly — those take precedence (`resolved_bn == "explicit"`). Without either path you get identity-BN previews with correct structure but shifted colors (`resolved_bn == "none"`).
 
+Preview failures default to `on_error="disable"`: the callback logs one warning, stops previewing for the rest of that generation, and lets mflux finish the image. Use `on_error="raise"` when an integration or test needs fail-fast behavior. Calling the same callback in a later generation resets the disabled state.
+
 See `docs/manual-verification.md` for the full verification recipe.
 
 ## Status
@@ -138,6 +140,7 @@ See `docs/manual-verification.md` for the full verification recipe.
 - **v0.6.0 — released on PyPI** (2026-06-23). Qwen-Image / Qwen-Image-Edit live preview: a new `QwenImage` model ports madebyollin's taew2.1 tiny autoencoder (for the Wan 2.1 VAE's 16-channel latent) to pure MLX. Adds `LivePreviewCallback(variant="qwen-image")` and `mlx-taef bench --variant qwen-image`. Decode and encode match the upstream taew2.1 reference to ~3e-6 (committed parity fixtures). Live-preview quality against the full Wan VAE is community-measured — Qwen-Image is a ~20B model that won't fit a usable resolution on 32 GB.
 - **v0.6.1 — released on PyPI** (2026-06-30). Maintenance: converted-weights cache writes are now atomic (temp file + rename), so an interrupted download/convert can no longer leave a truncated file that later runs trust as valid. Adds Python 3.14 support, sharper public-API types (factories return their concrete subclass; the decoder/encoder role and preview variant are typed literals), and a linked live-preview demo page.
 - **v0.6.2 — released on PyPI** (2026-07-09). Hardening and accuracy. `LivePreviewCallback` now rejects `every < 1` and a half-set BN pair, and resets its state between generations. The converted-weights cache invalidates when a source's pinned revision or sha256 changes (Qwen-Image re-converts once on upgrade), and every conversion path enforces those pins. The decode benchmark now measures the decode step at steady state, in isolation from one-time model construction: the tiny decoders run ~30 ms per step (earlier releases reported ~180–260 ms because they timed model construction inside the decode window), a ~8–10× speedup over the full VAE decode. COMPARISON / EXAMPLES are re-measured with two Z-Image scenarios added. Also fixes the mflux quickstart earlier in this README.
+- **v0.7.0: release prepared** (2026-07-24). `LivePreviewCallback` gains configurable runtime failure handling: it warns once and disables previews for the current generation by default, while `on_error="raise"` preserves strict behavior. All built-in weight sources now have immutable revisions and role-specific sha256 pins, conversion caches include a format version, and CI installs from the lockfile. Error messages and packed-latent validation are clearer. The six-scenario benchmark now isolates live generations, records separate bf16 generation and fp32 decode dtypes, and guards each worker with memory and wall-time limits. The measured report shows no regression against v0.6.2.
 
 Track future releases via the [PyPI history](https://pypi.org/project/mlx-taef/#history) or `gh release list -R IonDen/mlx-taef`.
 
