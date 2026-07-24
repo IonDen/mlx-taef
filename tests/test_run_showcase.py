@@ -415,3 +415,142 @@ def test_live_artifact_validation_rejects_incomplete_gallery(tmp_path: Path) -> 
 
     with pytest.raises(TaefError, match="expected 2 preview frames, got 1"):
         _validate_live_artifacts([frame], final, expected_count=2)
+
+
+def test_committed_report_contains_no_absolute_paths() -> None:
+    """Path fields in the committed report stay repo-relative — no $HOME or username leak."""
+    report_path = Path(__file__).resolve().parent.parent / "_artifacts" / "showcase_report.json"
+    report = json.loads(report_path.read_text())
+
+    offenders: list[str] = []
+
+    def _walk(node: object, trail: str, leaf_key: str) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                _walk(value, f"{trail}.{key}", key)
+        elif isinstance(node, list):
+            for i, value in enumerate(node):
+                _walk(value, f"{trail}[{i}]", leaf_key)
+        elif (
+            isinstance(node, str)
+            and node.startswith("/")
+            and (
+                leaf_key.endswith(("path", "paths", "dir"))
+                or leaf_key == "prior_artifacts_moved_to"
+            )
+        ):
+            offenders.append(f"{trail} = {node}")
+
+    _walk(report, "report", "")
+    assert offenders == []
+
+
+def test_watchdog_abort_skipped_when_generation_already_stopped(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """A breach observed after stop() must not overwrite the worker's real result."""
+    import threading
+
+    import scripts.run_showcase as rs
+
+    writes: list[object] = []
+    exits: list[int] = []
+    monkeypatch.setattr(rs, "_write_report", lambda path, payload: writes.append(payload))
+    monkeypatch.setattr(rs.os, "_exit", lambda code: exits.append(code))
+
+    stop_event = threading.Event()
+    stop_event.set()
+    rs._commit_watchdog_abort(tmp_path / "r.json", {"status": "aborted"}, stop_event=stop_event)
+
+    assert writes == []
+    assert exits == []
+
+
+def test_watchdog_abort_writes_then_exits_70(monkeypatch, tmp_path: Path) -> None:
+    import threading
+
+    import scripts.run_showcase as rs
+
+    events: list[object] = []
+    monkeypatch.setattr(
+        rs, "_write_report", lambda path, payload: events.append(("write", payload))
+    )
+    monkeypatch.setattr(rs.os, "_exit", lambda code: events.append(("exit", code)))
+
+    payload = {"status": "aborted", "reason": "memory_ceiling"}
+    rs._commit_watchdog_abort(tmp_path / "r.json", payload, stop_event=threading.Event())
+
+    assert events == [("write", payload), ("exit", 70)]
+
+
+def test_watchdog_abort_exits_even_when_write_fails(monkeypatch, tmp_path: Path) -> None:
+    """The worker must still die (honestly, via exit 70) if the abort record can't be written."""
+    import threading
+
+    import scripts.run_showcase as rs
+
+    exits: list[int] = []
+
+    def _broken_write(path: object, payload: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(rs, "_write_report", _broken_write)
+    monkeypatch.setattr(rs.os, "_exit", lambda code: exits.append(code))
+
+    with pytest.raises(OSError, match="disk full"):
+        rs._commit_watchdog_abort(
+            tmp_path / "r.json", {"status": "aborted"}, stop_event=threading.Event()
+        )
+    assert exits == [70]
+
+
+@pytest.mark.parametrize(
+    ("cap_gb", "device_wired_gb", "expected"),
+    [
+        (5, 20, 5),
+        (30, 20, 20),
+        (30, 0, None),
+    ],
+)
+def test_resolve_override_wired_gb_clamps_to_device(
+    cap_gb: int, device_wired_gb: int, expected: int | None
+) -> None:
+    """An operator --cap-gb override never exceeds the device ceiling and is skipped
+    entirely when the device reports no Metal working-set size."""
+    from scripts.run_showcase import _resolve_override_wired_gb
+
+    assert _resolve_override_wired_gb(cap_gb, device_wired_gb) == expected
+
+
+def test_run_scenarios_routes_live_scenarios_through_subprocess_runner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Live scenarios must go through the watchdog-protected subprocess runner,
+    never the in-process dispatch table."""
+    import argparse
+
+    import scripts.run_showcase as rs
+
+    routed: list[str] = []
+    monkeypatch.setattr(
+        rs,
+        "_run_live_scenario_subprocess",
+        lambda scenario, args: routed.append(scenario) or {"status": "ok"},
+    )
+    monkeypatch.setattr(
+        rs,
+        "_SCENARIO_DISPATCH",
+        {
+            "live_preview": lambda args: pytest.fail(
+                "live scenario ran in-process, bypassing the watchdog subprocess"
+            )
+        },
+    )
+    args = argparse.Namespace(report=tmp_path / "report.json")
+    report: dict[str, object] = {"scenarios": {}}
+
+    failures = rs._run_scenarios(["live_preview"], args, report)
+
+    assert failures == 0
+    assert routed == ["live_preview"]
+    assert report["scenarios"]["live_preview"] == {"status": "ok"}

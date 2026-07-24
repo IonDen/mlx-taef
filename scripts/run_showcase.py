@@ -52,6 +52,7 @@ from mlx_taef.errors import (  # noqa: E402
     SchemaVersionError,
     TaefError,
 )
+from scripts.bench_decode import _repo_relative  # noqa: E402
 
 logger = logging.getLogger("mlx_taef.showcase")
 
@@ -316,10 +317,11 @@ def _live_generation(
     applied_cap_gb: int | None = None
     if args.cap_gb is not None:
         device_wired_gb, _ = compute_safe_caps_gb()
-        wired_gb = min(args.cap_gb, device_wired_gb) if device_wired_gb else args.cap_gb
-        mem_gb = min(wired_gb + 2, 22)
-        mx.set_wired_limit(wired_gb * 1024**3)
-        mx.set_memory_limit(mem_gb * 1024**3)
+        wired_gb = _resolve_override_wired_gb(args.cap_gb, device_wired_gb)
+        if wired_gb is not None:
+            mem_gb = min(wired_gb + 2, 22)
+            mx.set_wired_limit(wired_gb * 1024**3)
+            mx.set_memory_limit(mem_gb * 1024**3)
         applied_cap_gb = wired_gb
     else:
         applied_cap_gb, _ = install_memory_caps()
@@ -377,7 +379,7 @@ def _live_generation(
 
     return {
         "status": "ok",
-        "scenario_dir": str(save_dir),
+        "scenario_dir": _repo_relative(save_dir),
         "elapsed_s": elapsed_s,
         "peak_memory_gb": peak_gb,
         "applied_cap_gb": applied_cap_gb,
@@ -387,9 +389,9 @@ def _live_generation(
         "prompt": prompt,
         "height": height,
         "width": width,
-        "preview_paths": [str(p) for p in callback.saved_paths],
+        "preview_paths": [_repo_relative(p) for p in callback.saved_paths],
         "preview_count": len(callback.saved_paths),
-        "final_path": str(final_path),
+        "final_path": _repo_relative(final_path),
         "teacache": teacache_stats,
     }
 
@@ -590,6 +592,35 @@ def _live_watchdog_breach_reason(
     return None
 
 
+def _commit_watchdog_abort(
+    result_path: Path, payload: dict[str, Any], *, stop_event: threading.Event
+) -> None:
+    """Durably record a watchdog abort, then kill the worker with exit code 70.
+
+    Skips entirely when generation already signalled completion (`stop_event` set),
+    so a breach observed in the same instant can't overwrite a real result. The
+    exit still fires even if the abort record can't be written — dying without an
+    artifact beats surviving past the safety ceiling.
+    """
+    if stop_event.is_set():
+        return
+    try:
+        _write_report(result_path, payload)
+    finally:
+        os._exit(70)
+
+
+def _resolve_override_wired_gb(cap_gb: int, device_wired_gb: int) -> int | None:
+    """Clamp an operator `--cap-gb` override to the device's safe wired ceiling.
+
+    Returns None when the device reports no Metal working-set size — in that case
+    no wired limit is applied at all rather than trusting the raw override.
+    """
+    if not device_wired_gb:
+        return None
+    return min(cap_gb, device_wired_gb)
+
+
 class _LiveWatchdog:
     """Cooperatively stop a live-worker watchdog thread after generation."""
 
@@ -631,7 +662,7 @@ def _install_live_watchdog(
             )
             if reason is None:
                 continue
-            _write_report(
+            _commit_watchdog_abort(
                 result_path,
                 {
                     "status": "aborted",
@@ -642,8 +673,8 @@ def _install_live_watchdog(
                     "elapsed_s": elapsed_s,
                     "wall_budget_s": wall_budget_s,
                 },
+                stop_event=stop_event,
             )
-            os._exit(70)
 
     thread = threading.Thread(target=_watch, name=f"{scenario}-watchdog", daemon=True)
     thread.start()
@@ -825,7 +856,7 @@ def main(argv: list[str] | None = None) -> int:
         "generated_at": datetime.datetime.now(datetime.UTC).isoformat(),
         "hardware": _build_hardware_metadata(),
         "isolation": "subprocess-per-condition",
-        "prior_artifacts_moved_to": str(trashed) if trashed else None,
+        "prior_artifacts_moved_to": trashed.name if trashed else None,
         "scenarios": {},
     }
 

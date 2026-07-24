@@ -904,3 +904,22 @@ def test_callback_registers_as_before_loop_subscriber(offline_taef2: object) -> 
     reg.register(cb)
     assert cb in reg.before_loop_callbacks()
     assert cb in reg.in_loop_callbacks()
+
+
+def test_strict_error_policy_emits_preview_on_success(
+    offline_taef2: object, tmp_path: Path
+) -> None:
+    """on_error="raise" with a healthy save emits exactly one preview per step —
+    a dropped early-return would double-emit through the fallthrough handler."""
+    cb = LivePreviewCallback(
+        variant="taef2",
+        save_to=tmp_path / "p.png",
+        latent_height=1,
+        latent_width=1,
+        on_error="raise",
+    )
+
+    cb.call_in_loop(0, 0, "", mx.zeros((1, 1, 128)), None, None)
+
+    assert len(cb.saved_paths) == 1
+    assert cb.saved_paths[0].exists()

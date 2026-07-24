@@ -18,7 +18,7 @@
     "taef_decode_dtype": "float32"
   },
   "isolation": "subprocess-per-condition",
-  "prior_artifacts_moved_to": "/Users/ionden/.Trash/mlx-taef-showcase-2026-07-24-125827",
+  "prior_artifacts_moved_to": "mlx-taef-showcase-2026-07-24-125827",
   "scenarios": {
     "taef2_vs_vae": {
       "status": "ok",
@@ -48,7 +48,7 @@
           0.5855616182088852
         ],
         "median_peak_memory_gb": 0.5855616182088852,
-        "image_path": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/taef2/taef/taef2_rep4.webp",
+        "image_path": "_artifacts/showcase/taef2/taef/taef2_rep4.webp",
         "per_rep_failures": []
       },
       "vanilla_vae": {
@@ -70,7 +70,7 @@
           2.795603943988681
         ],
         "median_peak_memory_gb": 2.795603943988681,
-        "image_path": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/taef2/vae/vanilla_vae_rep2.webp",
+        "image_path": "_artifacts/showcase/taef2/vae/vanilla_vae_rep2.webp",
         "per_rep_failures": []
       },
       "ssim_per_pair": [
@@ -120,7 +120,7 @@
           0.5463402010500431
         ],
         "median_peak_memory_gb": 0.5463402010500431,
-        "image_path": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/taef1/taef/taef1_rep4.webp",
+        "image_path": "_artifacts/showcase/taef1/taef/taef1_rep4.webp",
         "per_rep_failures": []
       },
       "vanilla_vae": {
@@ -142,7 +142,7 @@
           3.6986786164343357
         ],
         "median_peak_memory_gb": 3.698693875223398,
-        "image_path": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/taef1/vae/vanilla_vae_rep2.webp",
+        "image_path": "_artifacts/showcase/taef1/vae/vanilla_vae_rep2.webp",
         "per_rep_failures": []
       },
       "ssim_per_pair": [
@@ -192,7 +192,7 @@
           0.5460960566997528
         ],
         "median_peak_memory_gb": 0.5460960566997528,
-        "image_path": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/zimage/taef/zimage_rep4.webp",
+        "image_path": "_artifacts/showcase/zimage/taef/zimage_rep4.webp",
         "per_rep_failures": []
       },
       "vanilla_vae": {
@@ -214,7 +214,7 @@
           2.607147829607129
         ],
         "median_peak_memory_gb": 2.607147829607129,
-        "image_path": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/zimage/vae/vanilla_vae_rep2.webp",
+        "image_path": "_artifacts/showcase/zimage/vae/vanilla_vae_rep2.webp",
         "per_rep_failures": []
       },
       "ssim_per_pair": [
@@ -238,7 +238,7 @@
     },
     "live_preview": {
       "status": "ok",
-      "scenario_dir": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/live_preview",
+      "scenario_dir": "_artifacts/showcase/live_preview",
       "elapsed_s": 11.177533042035066,
       "peak_memory_gb": 10.726788256317377,
       "applied_cap_gb": 20,
@@ -249,18 +249,18 @@
       "height": 512,
       "width": 512,
       "preview_paths": [
-        "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/live_preview/live_preview_step00.webp",
-        "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/live_preview/live_preview_step01.webp",
-        "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/live_preview/live_preview_step02.webp",
-        "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/live_preview/live_preview_step03.webp"
+        "_artifacts/showcase/live_preview/live_preview_step00.webp",
+        "_artifacts/showcase/live_preview/live_preview_step01.webp",
+        "_artifacts/showcase/live_preview/live_preview_step02.webp",
+        "_artifacts/showcase/live_preview/live_preview_step03.webp"
       ],
       "preview_count": 4,
-      "final_path": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/live_preview/live_preview_final.webp",
+      "final_path": "_artifacts/showcase/live_preview/live_preview_final.webp",
       "teacache": null
     },
     "zimage_live_preview": {
       "status": "ok",
-      "scenario_dir": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/zimage_live_preview",
+      "scenario_dir": "_artifacts/showcase/zimage_live_preview",
       "elapsed_s": 25.113760333973914,
       "peak_memory_gb": 25.919755291193724,
       "applied_cap_gb": 20,
@@ -271,18 +271,18 @@
       "height": 512,
       "width": 512,
       "preview_paths": [
-        "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/zimage_live_preview/zimage_live_preview_step00.webp",
-        "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/zimage_live_preview/zimage_live_preview_step01.webp",
-        "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/zimage_live_preview/zimage_live_preview_step02.webp",
-        "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/zimage_live_preview/zimage_live_preview_step03.webp"
+        "_artifacts/showcase/zimage_live_preview/zimage_live_preview_step00.webp",
+        "_artifacts/showcase/zimage_live_preview/zimage_live_preview_step01.webp",
+        "_artifacts/showcase/zimage_live_preview/zimage_live_preview_step02.webp",
+        "_artifacts/showcase/zimage_live_preview/zimage_live_preview_step03.webp"
       ],
       "preview_count": 4,
-      "final_path": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/zimage_live_preview/zimage_live_preview_final.webp",
+      "final_path": "_artifacts/showcase/zimage_live_preview/zimage_live_preview_final.webp",
       "teacache": null
     },
     "combined": {
       "status": "ok",
-      "scenario_dir": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/combined",
+      "scenario_dir": "_artifacts/showcase/combined",
       "elapsed_s": 8.536725374986418,
       "peak_memory_gb": 6.152032118290663,
       "applied_cap_gb": 20,
@@ -293,13 +293,13 @@
       "height": 512,
       "width": 512,
       "preview_paths": [
-        "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/combined/combined_step00.webp",
-        "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/combined/combined_step01.webp",
-        "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/combined/combined_step02.webp",
-        "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/combined/combined_step03.webp"
+        "_artifacts/showcase/combined/combined_step00.webp",
+        "_artifacts/showcase/combined/combined_step01.webp",
+        "_artifacts/showcase/combined/combined_step02.webp",
+        "_artifacts/showcase/combined/combined_step03.webp"
       ],
       "preview_count": 4,
-      "final_path": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/combined/combined_final.webp",
+      "final_path": "_artifacts/showcase/combined/combined_final.webp",
       "teacache": {
         "skipped_count": 1,
         "computed_count": 1,

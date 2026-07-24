@@ -114,7 +114,7 @@ Same generation as `live_preview`, but with `apply_teacache(flux)` wrapping the 
 A few honest notes on this number:
 
 - 1 skip out of 4 is a small sample. The full speedup curve scales with step count — at 28 steps and the same rel-l1 threshold, the skip count is far higher.
-- The 44% peak-memory drop is partly the skipped transformer call (whose activations never materialise) and partly the mflux compiled-path interaction noted in mlx-teacache's own release notes. Be careful attributing it all to one cause.
+- The 43% peak-memory drop is partly the skipped transformer call (whose activations never materialise) and partly the mflux compiled-path interaction noted in mlx-teacache's own release notes. Be careful attributing it all to one cause.
 - The two libraries compose cleanly: mlx-teacache wraps the transformer, mlx-taef hooks the callback registry. Neither knows about the other.
 
 ## Reproducing these numbers

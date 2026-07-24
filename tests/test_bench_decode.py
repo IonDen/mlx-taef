@@ -305,3 +305,59 @@ def test_malformed_sentinel_json_marks_rep_failed_not_aborted() -> None:
         )
     assert result["status"] == "failed"
     assert "malformed sentinel JSON" in result["error"]
+
+
+def test_repo_relative_maps_artifact_paths_and_foreign_paths(tmp_path: Path) -> None:
+    from scripts.bench_decode import _REPO_ROOT, _repo_relative
+
+    inside = _REPO_ROOT / "_artifacts" / "showcase" / "taef2" / "taef" / "taef2_rep0.webp"
+    assert _repo_relative(inside) == "_artifacts/showcase/taef2/taef/taef2_rep0.webp"
+
+    outside = tmp_path / "elsewhere" / "out.webp"
+    assert _repo_relative(outside) == "out.webp"
+
+
+def test_worker_main_routes_through_steady_state_measurement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """_worker_main must time via _measure_steady_state (warmup included), not inline."""
+    import argparse
+
+    import mlx.core as mx
+    import scripts.bench_decode as bench
+
+    latent_file = tmp_path / "latent.safetensors"
+    mx.save_safetensors(
+        str(latent_file),
+        {
+            "latent": mx.zeros((1, 2, 2, 16)),
+            "height": mx.array(16),
+            "width": mx.array(16),
+        },
+    )
+
+    def _fake_decode() -> str:
+        return "IMG"
+
+    measured: list[object] = []
+    monkeypatch.setattr(bench, "_install_memory_caps", lambda cap: 1)
+    monkeypatch.setattr(bench, "_prep_taef1", lambda latent, h, w: _fake_decode)
+    monkeypatch.setattr(
+        bench,
+        "_measure_steady_state",
+        lambda decode_fn: measured.append(decode_fn) or ("IMG", 0.25, 2.0),
+    )
+    monkeypatch.setattr(bench, "_save_webp", lambda image, target: None)
+
+    args = argparse.Namespace(
+        condition="taef1",
+        rep=0,
+        latent=latent_file,
+        save_to=tmp_path / "out.webp",
+        applied_cap_gb=1,
+        flux_variant="flux1-dev",
+    )
+
+    assert bench._worker_main(args) == 0
+    assert measured == [_fake_decode]
+    assert '"elapsed_s": 0.25' in capsys.readouterr().out
