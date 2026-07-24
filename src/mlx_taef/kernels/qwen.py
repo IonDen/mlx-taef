@@ -26,10 +26,16 @@ def unpack_qwen_latent(latent: mx.array, ctx: UnpackContext) -> mx.array:
     taew2.1 consumes the normalized diffusion latent directly (the Wan per-channel mean/std is
     baked into its weights), exactly as TAEF1 consumes the raw FLUX latent.
     """
-    b, _, c = latent.shape
+    b, sequence_length, c = latent.shape
     if c != 64:
         raise ValueError(f"Expected 64-channel packed Qwen-Image latent, got {c}")
     lh, lw = ctx.latent_height, ctx.latent_width
+    expected = lh * lw
+    if sequence_length != expected:
+        raise ValueError(
+            f"packed Qwen-Image latent length mismatch: expected {expected} from "
+            f"latent_height*latent_width ({lh}*{lw}), got {sequence_length}"
+        )
     x = latent.reshape(b, lh, lw, 16, 2, 2)
     x = x.transpose(0, 3, 1, 4, 2, 5)  # (b, 16, lh, 2, lw, 2)
     x = x.reshape(b, 16, lh * 2, lw * 2)

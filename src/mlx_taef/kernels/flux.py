@@ -25,10 +25,16 @@ def unpack_flux1_latent(latent: mx.array, ctx: UnpackContext) -> mx.array:
     (reshape `(1, lh, lw, 16, 2, 2)` -> transpose `(0,3,1,4,2,5)` -> `(1,16,lh*2,lw*2)`),
     then NCHW->NHWC for TAEF1.
     """
-    b, _, c = latent.shape
+    b, sequence_length, c = latent.shape
     if c != 64:
         raise ValueError(f"Expected 64-channel packed FLUX.1 latent, got {c}")
     lh, lw = ctx.latent_height, ctx.latent_width
+    expected = lh * lw
+    if sequence_length != expected:
+        raise ValueError(
+            f"packed FLUX.1 latent length mismatch: expected {expected} from "
+            f"latent_height*latent_width ({lh}*{lw}), got {sequence_length}"
+        )
     x = latent.reshape(b, lh, lw, 16, 2, 2)
     x = x.transpose(0, 3, 1, 4, 2, 5)  # (b, 16, lh, 2, lw, 2)
     x = x.reshape(b, 16, lh * 2, lw * 2)
@@ -41,10 +47,16 @@ def unpack_flux2_latent(latent: mx.array, ctx: UnpackContext) -> mx.array:
     BN denormalize (128-ch stats) + unpatchify + NCHW->NHWC. BN stats come from ctx; absent
     -> identity BN. Transpose order matches the shipped pre-refactor unpack_flux2_latent.
     """
-    b, _, c = latent.shape
+    b, sequence_length, c = latent.shape
     if c != 128:
         raise ValueError(f"Expected 128-channel packed FLUX.2 latent, got {c}")
     lh, lw = ctx.latent_height, ctx.latent_width
+    expected = lh * lw
+    if sequence_length != expected:
+        raise ValueError(
+            f"packed FLUX.2 latent length mismatch: expected {expected} from "
+            f"latent_height*latent_width ({lh}*{lw}), got {sequence_length}"
+        )
     latents = latent.reshape(b, lh, lw, c).transpose(0, 3, 1, 2)
     if ctx.bn_mean is not None and ctx.bn_var is not None:
         mean = ctx.bn_mean.reshape(1, -1, 1, 1)
@@ -61,7 +73,12 @@ TAEF1 = ModelKernel(
     arch=TAESD2D,
     conversion=DiffusersRemap(),
     latent=LatentSpec(channels=16),
-    source=WeightSource(repo="madebyollin/taef1", filename="diffusion_pytorch_model.safetensors"),
+    source=WeightSource(
+        repo="madebyollin/taef1",
+        filename="diffusion_pytorch_model.safetensors",
+        revision="b1b2d00e9e440cfbf3dedb34266864da86016ceb",
+        sha256="47a6c2bff850da04b267cab70fe3553fef57255eb9a8e76852baa0a87850e54d",
+    ),
     integration=MfluxBinding(
         mflux_models=("flux1", "flux-dev", "flux-schnell"),
         unpack=unpack_flux1_latent,
@@ -75,11 +92,17 @@ TAEF2 = ModelKernel(
     arch=TAESD2D,
     conversion=DiffusersRemap(),
     latent=LatentSpec(channels=32),
-    source=WeightSource(repo="madebyollin/taef2", filename="taef2.safetensors"),
+    source=WeightSource(
+        repo="madebyollin/taef2",
+        filename="taef2.safetensors",
+        revision="bd244ebfe4398c84fbf312a2f1c868c676b500e3",
+        sha256="701d31c0ecbef3b609fe236e2e3a65ffb17f3a94237acdd771e8ea3194df557a",
+    ),
     integration=MfluxBinding(
         mflux_models=("flux2", "flux2-klein"),
         unpack=unpack_flux2_latent,
         packed_latent_downscale=16,
     ),
     memory_cap_hint_gb=2,
+    midblock_gn=True,
 )

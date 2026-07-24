@@ -12,7 +12,7 @@ import mlx.core as mx
 import mlx.nn as nn
 
 from mlx_taef.errors import TaefError
-from mlx_taef.kernels import KERNELS, MIDBLOCK_GN, ModelKernel
+from mlx_taef.kernels import KERNELS, ModelKernel
 from mlx_taef.kernels._arch import build_arch
 
 logger = logging.getLogger(__name__)
@@ -27,11 +27,16 @@ class Taef(nn.Module):  # type: ignore[misc,name-defined]
 
     def __init__(self) -> None:
         """Build decoder + encoder from `self._kernel`."""
+        if getattr(type(self), "_kernel", None) is None:
+            raise TaefError(
+                "Taef is a base class; construct TAEF1, TAEF2, TAESD, TAESDXL, ZImage, "
+                "QwenImage, or use Taef.from_kernel(...)."
+            )
         super().__init__()
         self._decoder_loaded = False
         self._encoder_loaded = False
         ch = self._kernel.latent.channels
-        mbgn = MIDBLOCK_GN.get(self._kernel.name, False)
+        mbgn = self._kernel.midblock_gn
         self.decoder = build_arch(
             self._kernel.arch.name, role="decoder", latent_channels=ch, midblock_gn=mbgn
         )

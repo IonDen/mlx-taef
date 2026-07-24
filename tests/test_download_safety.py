@@ -66,7 +66,7 @@ def test_download_and_verify_pins_revision_and_returns_path(
     src = WeightSource(
         repo="x/y", filename="w.safetensors", revision="abc123def456", sha256=good_sha
     )
-    out = _download_and_verify(src, "w.safetensors")
+    out = _download_and_verify(src, "w.safetensors", role="decoder")
     assert out == f
     assert captured["revision"] == "abc123def456"
     assert captured["repo_id"] == "x/y"
@@ -90,7 +90,7 @@ def test_download_and_verify_raises_on_sha_mismatch(
     )
     src = WeightSource(repo="x/y", filename="w.safetensors", sha256="0" * 64)
     with pytest.raises(ConversionError, match="sha256 mismatch"):
-        _download_and_verify(src, "w.safetensors")
+        _download_and_verify(src, "w.safetensors", role="decoder")
 
 
 def test_pinned_sources_route_through_a_verifying_strategy() -> None:
@@ -107,7 +107,7 @@ def test_pinned_sources_route_through_a_verifying_strategy() -> None:
 
     verifying = (DiffusersRemap, UpstreamTwoFile, TaehvCombined)
     for name, kernel in KERNELS.items():
-        if kernel.source.sha256 is not None:
+        if any(kernel.source.sha256_for(role) is not None for role in ("decoder", "encoder")):
             assert isinstance(kernel.conversion, verifying), (
                 f"kernel {name!r} pins sha256 but its strategy does not verify it"
             )
@@ -127,9 +127,10 @@ def test_diffusers_remap_load_raw_routes_through_download_and_verify(
 
     captured: dict[str, object] = {}
 
-    def _fake_dav(source: object, filename: str) -> Path:
+    def _fake_dav(source: object, filename: str, *, role: str) -> Path:
         captured["source"] = source
         captured["filename"] = filename
+        captured["role"] = role
         return Path("/tmp/fake.safetensors")
 
     monkeypatch.setattr(conv, "_download_and_verify", _fake_dav)
@@ -142,6 +143,7 @@ def test_diffusers_remap_load_raw_routes_through_download_and_verify(
     out = DiffusersRemap()._load_raw(src, "decoder")
     assert captured["filename"] == "w.safetensors"
     assert captured["source"] is src
+    assert captured["role"] == "decoder"
     assert out == {"remapped": "decoder"}
 
 
@@ -157,8 +159,9 @@ def test_upstream_two_file_load_raw_routes_through_download_and_verify(
 
     captured: dict[str, object] = {}
 
-    def _fake_dav(source: object, filename: str) -> Path:
+    def _fake_dav(source: object, filename: str, *, role: str) -> Path:
         captured["filename"] = filename
+        captured["role"] = role
         return Path("/tmp/fake.safetensors")
 
     monkeypatch.setattr(conv, "_download_and_verify", _fake_dav)
@@ -169,16 +172,16 @@ def test_upstream_two_file_load_raw_routes_through_download_and_verify(
     )
     out = UpstreamTwoFile()._load_raw(src, "encoder")
     assert captured["filename"] == "enc.safetensors"  # role-selected file routed through helper
+    assert captured["role"] == "encoder"
     assert out == {"raw": 1}
 
 
-def test_cache_key_unchanged_for_unpinned_source() -> None:
-    """Unpinned sources keep the exact pre-0.6.2 key so an upgrade forces no re-convert."""
+def test_unpinned_source_cache_key_includes_converter_version() -> None:
     from mlx_taef.kernels._types import WeightSource
 
     src = WeightSource(repo="madebyollin/taef1", filename="diffusion_pytorch_model.safetensors")
     assert src.cache_key(role="decoder") == (
-        "madebyollin_taef1__diffusion_pytorch_model.safetensors__decoder"
+        "madebyollin_taef1__diffusion_pytorch_model.safetensors__decoder__converter-v1"
     )
 
 
@@ -215,19 +218,73 @@ def test_cache_key_stays_path_safe_with_pins() -> None:
     assert "sha-04766eac0221" in key
 
 
-def test_weightsource_rejects_sha256_on_two_file_source() -> None:
-    """A single sha256 cannot verify two distinct role files; reject the pin at construction so
-    a future two-file sha256 pin fails fast instead of verifying one role against the wrong
-    digest (see Task 6 scope note)."""
+def test_weightsource_accepts_complete_role_sha256_pair() -> None:
+    src = WeightSource(
+        repo="x/y",
+        decoder_filename="dec.safetensors",
+        encoder_filename="enc.safetensors",
+        decoder_sha256="a" * 64,
+        encoder_sha256="b" * 64,
+    )
+
+    assert src.sha256_for("decoder") == "a" * 64
+    assert src.sha256_for("encoder") == "b" * 64
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"decoder_sha256": "a" * 64},
+        {"encoder_sha256": "b" * 64},
+        {"sha256": "c" * 64, "decoder_sha256": "a" * 64, "encoder_sha256": "b" * 64},
+    ],
+)
+def test_weightsource_rejects_partial_or_mixed_role_sha256(kwargs: dict[str, str]) -> None:
     from mlx_taef.kernels._types import WeightSource
 
-    with pytest.raises(ValueError, match="single-file"):
+    with pytest.raises(ValueError, match="sha256"):
         WeightSource(
             repo="x/y",
             decoder_filename="dec.safetensors",
             encoder_filename="enc.safetensors",
-            sha256="a" * 64,
+            **kwargs,
         )
+
+
+def test_single_file_sha256_applies_to_both_roles() -> None:
+    src = WeightSource(repo="x/y", filename="both.safetensors", sha256="a" * 64)
+
+    assert src.sha256_for("decoder") == "a" * 64
+    assert src.sha256_for("encoder") == "a" * 64
+
+
+def test_every_registered_source_is_revision_and_digest_pinned() -> None:
+    from mlx_taef.kernels import KERNELS
+
+    for name, kernel in KERNELS.items():
+        source = kernel.source
+        assert source.revision is not None, name
+        assert len(source.revision) == 40, name
+        assert source.sha256_for("decoder") is not None, name
+        assert source.sha256_for("encoder") is not None, name
+
+
+def test_cache_key_contains_converter_version_and_role_digest() -> None:
+    from mlx_taef.kernels._types import CONVERTER_VERSION
+
+    src = WeightSource(
+        repo="x/y",
+        decoder_filename="dec.safetensors",
+        encoder_filename="enc.safetensors",
+        decoder_sha256="a" * 64,
+        encoder_sha256="b" * 64,
+    )
+
+    decoder_key = src.cache_key(role="decoder")
+    encoder_key = src.cache_key(role="encoder")
+    assert f"converter-v{CONVERTER_VERSION}" in decoder_key
+    assert "sha-aaaaaaaaaaaa" in decoder_key
+    assert "sha-bbbbbbbbbbbb" in encoder_key
 
 
 def test_taehv_combined_load_raw_routes_through_download_and_verify(
@@ -243,8 +300,9 @@ def test_taehv_combined_load_raw_routes_through_download_and_verify(
 
     captured: dict[str, object] = {}
 
-    def _fake_dav(source: object, filename: str) -> Path:
+    def _fake_dav(source: object, filename: str, *, role: str) -> Path:
         captured["filename"] = filename
+        captured["role"] = role
         return Path("/tmp/fake.safetensors")
 
     monkeypatch.setattr(conv, "_download_and_verify", _fake_dav)
@@ -260,5 +318,6 @@ def test_taehv_combined_load_raw_routes_through_download_and_verify(
     src = WeightSource(repo="x/y", filename="combined.safetensors")
     out = TaehvCombined()._load_raw(src, "decoder")
     assert captured["filename"] == "combined.safetensors"
+    assert captured["role"] == "decoder"
     assert list(out.keys()) == ["w"]  # role prefix stripped by _select_role
     assert out["w"].dtype == np.float32  # fp16 -> fp32 cast

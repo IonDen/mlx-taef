@@ -25,6 +25,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# Keep the documented `python scripts/diff_showcase_report.py` invocation
+# working even when the caller's current directory is outside the repository.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 # Condition keys inside a `taef*_vs_vae` scenario whose `median_seconds`
 # we compare. Keep this list narrow so we don't accidentally compare
 # unrelated dict-shaped fields.
@@ -250,8 +256,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--memory-tolerance", type=float, default=0.10)
     args = parser.parse_args(argv)
 
-    old = json.loads(args.old.read_text())
-    new = json.loads(args.new.read_text())
+    from scripts.run_showcase import _load_report
+
+    old = _load_report(args.old)
+    new = _load_report(args.new)
 
     regressions = diff_reports(
         old,

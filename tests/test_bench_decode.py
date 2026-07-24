@@ -11,6 +11,33 @@ from unittest.mock import patch
 import pytest
 
 
+def test_steady_state_measurement_warms_before_reset_and_timer(monkeypatch) -> None:
+    import mlx.core as mx
+    import scripts.bench_decode as bench
+
+    events: list[str] = []
+    calls = 0
+
+    def _decode() -> str:
+        nonlocal calls
+        calls += 1
+        events.append(f"decode-{calls}")
+        return f"image-{calls}"
+
+    monkeypatch.setattr(mx, "eval", lambda image: events.append(f"eval-{image}"))
+    monkeypatch.setattr(mx, "reset_peak_memory", lambda: events.append("reset"))
+    monkeypatch.setattr(mx, "get_peak_memory", lambda: 2 * 1024**3)
+    times = iter([10.0, 10.25])
+    monkeypatch.setattr(bench.time, "perf_counter", lambda: next(times))
+
+    image, elapsed_s, peak_gb = bench._measure_steady_state(_decode)
+
+    assert events == ["decode-1", "eval-image-1", "reset", "decode-2", "eval-image-2"]
+    assert image == "image-2"
+    assert elapsed_s == 0.25
+    assert peak_gb == 2.0
+
+
 def test_argparse_orchestrator_mode() -> None:
     from scripts.bench_decode import _build_argparser
 

@@ -2,6 +2,7 @@
 
 import argparse
 import logging
+import sys
 import time
 from pathlib import Path
 
@@ -69,7 +70,11 @@ def _cmd_convert(args: argparse.Namespace) -> int:
 
 
 def _cmd_info(args: argparse.Namespace) -> int:
-    weights = mx.load(str(args.path))
+    try:
+        weights = mx.load(str(args.path))
+    except (OSError, RuntimeError, ValueError) as e:
+        print(f"mlx-taef info: could not read {args.path}: {e}", file=sys.stderr)
+        return 2
     print(f"File: {args.path}")
     print(f"Total tensors: {len(weights)}")
     total_params = sum(int(w.size) for w in weights.values())  # type: ignore[misc,union-attr]
@@ -82,7 +87,7 @@ def _cmd_bench(args: argparse.Namespace) -> int:  # pragma: no cover
 
     model = cls.from_pretrained(include_encoder=False)
     # 1024x1024 image with 8x downsample = 128x128 latent
-    latent = mx.random.normal((1, 128, 128, cls._kernel.latent.channels)).astype(mx.float16)
+    latent = mx.random.normal((1, 128, 128, cls._kernel.latent.channels)).astype(mx.float32)
     mx.eval(latent)
 
     # Warm-up
@@ -94,7 +99,7 @@ def _cmd_bench(args: argparse.Namespace) -> int:  # pragma: no cover
         mx.eval(model.decode(latent))
         times.append(time.perf_counter() - start)
     median_ms = sorted(times)[len(times) // 2] * 1000
-    print(f"{args.variant} decode median: {median_ms:.1f} ms over {len(times)} runs")
+    print(f"{args.variant} fp32 decode median: {median_ms:.1f} ms over {len(times)} runs")
     return 0
 
 

@@ -40,6 +40,13 @@ def test_taef2_loads_from_local_path() -> None:
     assert taef2.decoder.layers[1].weight.shape[-1] == 32
 
 
+def test_direct_taef_construction_raises_guided_package_error() -> None:
+    from mlx_taef.errors import TaefError
+
+    with pytest.raises(TaefError, match=r"TAEF1|from_kernel"):
+        Taef()
+
+
 def test_taef2_decode_produces_correct_shape() -> None:
     taef2 = TAEF2.from_pretrained_local(CONVERTED_DIR / "taef2_decoder.safetensors")
     latent = mx.zeros((1, 64, 64, 32))

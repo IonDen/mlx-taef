@@ -29,16 +29,15 @@ def _verify_sha256(path: Path, expected: str | None) -> None:
         raise ConversionError(f"sha256 mismatch for {path}: got {digest}, expected {expected}")
 
 
-def _download_and_verify(source: WeightSource, filename: str) -> Path:
+def _download_and_verify(source: WeightSource, filename: str, *, role: Role) -> Path:
     """Download `filename` from `source.repo`, pinned to `source.revision`.
 
-    Then verify `source.sha256` (both no-ops when None). All conversion strategies route
-    downloads through here so the supply-chain pin is enforced uniformly.
+    Then verify the role-selected digest. All strategies route downloads through here.
     """
     from huggingface_hub import hf_hub_download
 
     path = hf_hub_download(repo_id=source.repo, filename=filename, revision=source.revision)
-    _verify_sha256(Path(path), source.sha256)
+    _verify_sha256(Path(path), source.sha256_for(role))
     return Path(path)
 
 
@@ -55,7 +54,7 @@ class DiffusersRemap:
             raise ValueError(
                 f"Diffusers source {source.repo!r} has no filename"
             )  # pragma: no cover
-        path = _download_and_verify(source, source.filename)
+        path = _download_and_verify(source, source.filename, role=role)
         full_sd = safetensors_load_numpy(str(path))
         return convert_diffusers_to_sequential(full_sd, role=role)
 
@@ -82,7 +81,7 @@ class UpstreamTwoFile:
             raise ValueError(
                 f"Upstream source {source.repo!r} has no {role} filename"
             )  # pragma: no cover
-        path = _download_and_verify(source, fname)
+        path = _download_and_verify(source, fname, role=role)
         return safetensors_load_numpy(str(path))
 
     def convert(
@@ -124,7 +123,7 @@ class TaehvCombined:
             raise ValueError(
                 f"Combined taehv source {source.repo!r} has no filename"
             )  # pragma: no cover
-        path = _download_and_verify(source, source.filename)
+        path = _download_and_verify(source, source.filename, role=role)
         return self._select_role(safetensors_load_numpy(str(path)), role)
 
     def convert(

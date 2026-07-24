@@ -52,7 +52,8 @@ def convert_diffusers_to_sequential(
                 idx += 1
             new_key = f"{idx}." + ".".join(parts[2:])
         else:  # pragma: no cover
-            new_key = suffix
+            logger.debug("Skipping non-layers Diffusers key %s", k)
+            continue
         out[new_key] = v
     return out
 
@@ -141,14 +142,10 @@ def _build_mlx_state_dict(
             # Skip keys that don't map to the MLX module structure
             # (e.g., extra Diffusers-specific keys we don't need)
             continue
-        # Conv2d weight transpose NCHW (out, in, kH, kW) -> NHWC (out, kH, kW, in)
-        # Detected when source is 4D and expected MLX shape matches the transposed shape.
-        if arr.ndim == 4 and expected_shapes[dst_key] == (
-            arr.shape[0],
-            arr.shape[2],
-            arr.shape[3],
-            arr.shape[1],
-        ):
+        # Every supported 4-D source parameter is a Conv2d weight. Transpose NCHW
+        # (out,in,kH,kW) -> MLX NHWC (out,kH,kW,in) unconditionally; shape-based detection
+        # is ambiguous for the encoder's collision-shaped (out,3,3,3) convolution.
+        if arr.ndim == 4:
             arr = np.transpose(arr, (0, 2, 3, 1)).copy()
         converted[dst_key] = mx.array(arr)
     _verify_conversion_coverage(converted, expected_shapes)

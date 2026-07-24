@@ -32,5 +32,7 @@ def test_all_variants_and_dict_present():
 def test_get_memory_cap_hint_reexported():
     assert v.get_memory_cap_hint("taef2") == 2
     assert v.get_memory_cap_hint("taesd") is None
+    assert v.get_memory_cap_hint("zimage") == 1
+    assert v.get_memory_cap_hint("qwen-image") == 1
     with pytest.raises(KeyError, match="unknown variant"):
         v.get_memory_cap_hint("nope")

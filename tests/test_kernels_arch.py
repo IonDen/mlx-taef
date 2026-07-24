@@ -27,5 +27,16 @@ def test_midblock_gn_toggles_pool_branch():
 def test_unknown_arch_raises():
     import pytest
 
-    with pytest.raises(KeyError, match="unknown arch"):
+    from mlx_taef.errors import UnknownArchitectureError
+
+    with pytest.raises(UnknownArchitectureError, match="unknown arch"):
         build_arch("nope", role="decoder", latent_channels=16, midblock_gn=False)
+
+
+def test_unknown_role_raises_package_architecture_error() -> None:
+    import pytest
+
+    from mlx_taef.errors import UnknownArchitectureError
+
+    with pytest.raises(UnknownArchitectureError, match="unknown arch/role"):
+        build_arch("taesd2d", role="sideways", latent_channels=16, midblock_gn=False)

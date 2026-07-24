@@ -85,6 +85,31 @@ def test_build_mlx_state_dict_transposes_4d_conv_weights() -> None:
     assert np.array_equal(w, np.transpose(nchw, (0, 2, 3, 1)))
 
 
+def test_build_mlx_state_dict_transposes_collision_shaped_conv_weight() -> None:
+    """Mutation: restoring the expected-shape heuristic leaves this sentinel on the wrong axis."""
+    nchw = np.zeros((2, 3, 3, 3), dtype=np.float32)
+    nchw[0, 1, 2, 0] = 42.0
+
+    out = _build_mlx_state_dict(
+        {"1.weight": nchw}, expected_shapes={"layers.1.weight": (2, 3, 3, 3)}
+    )
+    weight = np.array(out["layers.1.weight"])
+
+    assert weight[0, 2, 0, 1] == 42.0
+    assert weight[0, 1, 2, 0] == 0.0
+
+
+def test_diffusers_key_mapper_logs_and_skips_non_layers_key(caplog) -> None:
+    with caplog.at_level("DEBUG", logger="mlx_taef.convert"):
+        mapped = convert_diffusers_to_sequential(
+            {"decoder.layers.0.weight": "kept", "decoder.quant_conv.weight": "extra"},
+            role="decoder",
+        )
+
+    assert mapped == {"1.weight": "kept"}
+    assert any("quant_conv" in message for message in caplog.messages)
+
+
 def test_build_mlx_state_dict_drops_extra_source_keys() -> None:
     """Extra source keys (e.g. Diffusers-only) are dropped as long as every
     expected param is still produced — dropping unused keys is not an error."""

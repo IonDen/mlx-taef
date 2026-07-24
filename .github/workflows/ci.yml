@@ -16,7 +16,7 @@ jobs:
       - name: Install uv
         run: pip install uv
       - name: Sync
-        run: uv sync --group lint
+        run: uv sync --frozen --group lint
       - name: Ruff check
         run: uv run ruff check .
       - name: Ruff format check
@@ -32,7 +32,7 @@ jobs:
       - name: Install uv
         run: pip install uv
       - name: Sync
-        run: uv sync --group typecheck
+        run: uv sync --frozen --group typecheck
       - name: Mypy
         run: uv run mypy src/mlx_taef
 
@@ -50,7 +50,7 @@ jobs:
       - name: Install uv
         run: pip install uv
       - name: Sync (test group only — keep CI light)
-        run: uv sync --group test
+        run: uv sync --frozen --group test
       - name: Run unit + parity tests
         run: |
           uv run pytest \

@@ -9,6 +9,7 @@ from collections.abc import Callable
 
 import mlx.nn as nn
 
+from mlx_taef.errors import UnknownArchitectureError
 from mlx_taef.model import Block, Clamp, make_conv
 
 
@@ -86,5 +87,5 @@ def build_arch(
     try:
         builder = ARCH_BUILDERS[arch_name][role]
     except KeyError as e:
-        raise KeyError(f"unknown arch/role: {arch_name!r}/{role!r}") from e
+        raise UnknownArchitectureError(f"unknown arch/role: {arch_name!r}/{role!r}") from e
     return builder(latent_channels, midblock_gn=midblock_gn)

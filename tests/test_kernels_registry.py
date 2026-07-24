@@ -48,10 +48,19 @@ def test_get_kernel_unknown_raises_taef_error():
 def test_taef1_and_zimage_would_share_cache_key():
     taef1 = get_kernel("taef1")
     assert taef1.source.cache_key(role="decoder") == (
-        "madebyollin_taef1__diffusion_pytorch_model.safetensors__decoder"
+        "madebyollin_taef1__diffusion_pytorch_model.safetensors__decoder__converter-v1"
+        "__rev-b1b2d00e9e44__sha-47a6c2bff850"
     )
 
 
 def test_registry_is_immutable():
     with pytest.raises(TypeError):
         KERNELS["x"] = object()  # type: ignore[index]
+
+
+def test_midblock_gn_is_kernel_owned_and_compat_view_is_exact() -> None:
+    from mlx_taef.kernels import MIDBLOCK_GN
+
+    assert {name: kernel.midblock_gn for name, kernel in KERNELS.items()} == dict(MIDBLOCK_GN)
+    assert KERNELS["taef2"].midblock_gn is True
+    assert all(kernel.midblock_gn is False for name, kernel in KERNELS.items() if name != "taef2")

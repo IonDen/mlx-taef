@@ -28,8 +28,11 @@ import datetime
 import hashlib
 import json
 import logging
+import os
 import platform
+import subprocess
 import sys
+import threading
 import time
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
@@ -47,12 +50,13 @@ from mlx_taef.errors import (  # noqa: E402
     FixtureLatentMissingError,
     MlxTeacacheNotInstalledError,
     SchemaVersionError,
+    TaefError,
 )
 
 logger = logging.getLogger("mlx_taef.showcase")
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def _import_apply_teacache() -> Any:
@@ -92,6 +96,8 @@ def _build_argparser() -> argparse.ArgumentParser:
             "Trash with a dated suffix (generated artifacts are moved to the Trash, never deleted)."
         ),
     )
+    parser.add_argument("--live-worker", choices=sorted(_LIVE_SCENARIOS), help=argparse.SUPPRESS)
+    parser.add_argument("--live-result", type=Path, help=argparse.SUPPRESS)
     return parser
 
 
@@ -397,6 +403,10 @@ _SCENARIO_DISPATCH = {
     "combined": _run_combined,
 }
 
+_LIVE_SCENARIOS = frozenset({"live_preview", "zimage_live_preview", "combined"})
+_LIVE_WALL_BUDGET_S = 3300.0
+_MEMORY_HEADROOM_BYTES = 4 * 1024**3
+
 
 # ---------------------------------------------------------------------------
 # JSON I/O (testable in isolation)
@@ -430,7 +440,8 @@ def _build_hardware_metadata() -> dict[str, Any]:
         "mlx_version": _safe_version("mlx") or "unknown",
         "python_version": platform.python_version(),
         "quantize": 4,
-        "dtype": "bf16",
+        "generation_dtype": "bf16",
+        "taef_decode_dtype": "float32",
     }
 
 
@@ -510,6 +521,81 @@ def _write_report(path: Path, report: dict[str, Any]) -> None:
     path.write_text(json.dumps(report, indent=2))
 
 
+def _live_watchdog_breach_reason(
+    *,
+    active_bytes: int,
+    ceiling_bytes: int,
+    elapsed_s: float,
+    wall_budget_s: float,
+) -> str | None:
+    """Return the first live-worker safety limit that has been breached."""
+    if active_bytes >= ceiling_bytes:
+        return "memory_ceiling"
+    if elapsed_s > wall_budget_s:
+        return "wall_budget"
+    return None
+
+
+class _LiveWatchdog:
+    """Cooperatively stop a live-worker watchdog thread after generation."""
+
+    def __init__(self, stop_event: threading.Event, thread: threading.Thread) -> None:
+        self._stop_event = stop_event
+        self._thread = thread
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        self._thread.join(timeout=5)
+
+
+def _install_live_watchdog(
+    result_path: Path,
+    scenario: str,
+    *,
+    interval_s: float = 0.5,
+    wall_budget_s: float = _LIVE_WALL_BUDGET_S,
+) -> _LiveWatchdog:
+    """Abort a live worker before it exhausts unified memory or its wall budget."""
+    import mlx.core as mx
+
+    memory_size = int(mx.device_info().get("memory_size", 0))
+    if memory_size <= _MEMORY_HEADROOM_BYTES:
+        raise TaefError(f"could not establish a safe memory ceiling from {memory_size} bytes")
+    ceiling_bytes = memory_size - _MEMORY_HEADROOM_BYTES
+    stop_event = threading.Event()
+    started = time.monotonic()
+
+    def _watch() -> None:
+        while not stop_event.wait(interval_s):
+            elapsed_s = time.monotonic() - started
+            active_bytes = int(mx.get_active_memory())
+            reason = _live_watchdog_breach_reason(
+                active_bytes=active_bytes,
+                ceiling_bytes=ceiling_bytes,
+                elapsed_s=elapsed_s,
+                wall_budget_s=wall_budget_s,
+            )
+            if reason is None:
+                continue
+            _write_report(
+                result_path,
+                {
+                    "status": "aborted",
+                    "scenario": scenario,
+                    "reason": reason,
+                    "active_memory_bytes": active_bytes,
+                    "ceiling_bytes": ceiling_bytes,
+                    "elapsed_s": elapsed_s,
+                    "wall_budget_s": wall_budget_s,
+                },
+            )
+            os._exit(70)
+
+    thread = threading.Thread(target=_watch, name=f"{scenario}-watchdog", daemon=True)
+    thread.start()
+    return _LiveWatchdog(stop_event, thread)
+
+
 # ---------------------------------------------------------------------------
 # Latent fixture handling
 # ---------------------------------------------------------------------------
@@ -584,6 +670,52 @@ def _compute_ssim(refs: list[Path], cands: list[Path]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _run_live_scenario_subprocess(scenario: str, args: argparse.Namespace) -> dict[str, Any]:
+    """Run one live scenario in a fresh process and load its durable partial result."""
+    partial_dir = args.report.parent / f".{args.report.stem}-partials"
+    partial_dir.mkdir(parents=True, exist_ok=True)
+    result_path = partial_dir / f"{scenario}.json"
+    _write_report(result_path, {"status": "running", "scenario": scenario})
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--live-worker",
+        scenario,
+        "--live-result",
+        str(result_path),
+        "--no-trash-prior",
+    ]
+    if args.cap_gb is not None:
+        command.extend(["--cap-gb", str(args.cap_gb)])
+    completed = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=3600,
+    )
+    if completed.returncode != 0:
+        try:
+            partial = json.loads(result_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            partial = None
+        if isinstance(partial, dict) and partial.get("status") == "aborted":
+            raise TaefError(
+                f"live scenario worker {scenario!r} aborted: {partial.get('reason', 'unknown')} "
+                f"(active={partial.get('active_memory_bytes')} bytes, "
+                f"ceiling={partial.get('ceiling_bytes')} bytes, "
+                f"elapsed={partial.get('elapsed_s')}s)"
+            )
+        raise TaefError(
+            f"live scenario worker {scenario!r} failed with exit {completed.returncode}: "
+            f"{completed.stderr[-1000:]}"
+        )
+    if not result_path.exists():
+        raise TaefError(f"live scenario worker {scenario!r} produced no result at {result_path}")
+    result: dict[str, Any] = json.loads(result_path.read_text())
+    return result
+
+
 def _run_scenarios(
     scenarios_to_run: list[str],
     args: argparse.Namespace,
@@ -596,7 +728,11 @@ def _run_scenarios(
     """
     for scenario in scenarios_to_run:
         try:
-            report["scenarios"][scenario] = _SCENARIO_DISPATCH[scenario](args)
+            if scenario in _LIVE_SCENARIOS:
+                result = _run_live_scenario_subprocess(scenario, args)
+            else:
+                result = _SCENARIO_DISPATCH[scenario](args)
+            report["scenarios"][scenario] = result
         except Exception as e:  # noqa: BLE001, RUF100 - deliberate broad catch per spec
             logger.warning("scenario %s failed: %s", scenario, e)
             report["scenarios"][scenario] = {
@@ -612,6 +748,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_argparser()
     args = parser.parse_args(argv)
 
+    if args.live_worker is not None:
+        if args.live_result is None:
+            parser.error("--live-result is required with --live-worker")
+        watchdog = _install_live_watchdog(args.live_result, args.live_worker)
+        try:
+            result = _SCENARIO_DISPATCH[args.live_worker](args)
+        finally:
+            watchdog.stop()
+        _write_report(args.live_result, result)
+        return 0
+
     trashed = None
     if not args.no_trash_prior:
         trashed = _move_prior_artifacts_to_trash(_ARTIFACTS_DIR)
@@ -620,7 +767,7 @@ def main(argv: list[str] | None = None) -> int:
         "schema_version": SCHEMA_VERSION,
         "generated_at": datetime.datetime.now(datetime.UTC).isoformat(),
         "hardware": _build_hardware_metadata(),
-        "isolation": "subprocess-per-rep",
+        "isolation": "subprocess-per-condition",
         "prior_artifacts_moved_to": str(trashed) if trashed else None,
         "scenarios": {},
     }

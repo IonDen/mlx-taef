@@ -11,6 +11,14 @@ def test_unpack_flux1_rejects_non_64_channels():
         unpack_flux1_latent(mx.zeros((1, 16, 16)), UnpackContext(latent_height=4, latent_width=4))
 
 
+def test_flux_unpacks_reject_sequence_length_mismatch() -> None:
+    ctx = UnpackContext(latent_height=2, latent_width=3)
+    with pytest.raises(ValueError, match=r"expected 6.*got 5"):
+        unpack_flux1_latent(mx.zeros((1, 5, 64)), ctx)
+    with pytest.raises(ValueError, match=r"expected 6.*got 5"):
+        unpack_flux2_latent(mx.zeros((1, 5, 128)), ctx)
+
+
 def test_unpack_flux1_matches_mflux_unpack_latents_oracle():
     pytest.importorskip("mflux")
     from mflux.models.flux.latent_creator.flux_latent_creator import FluxLatentCreator

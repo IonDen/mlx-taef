@@ -25,14 +25,28 @@ def test_cli_info_prints_total_params(capsys: pytest.CaptureFixture[str]) -> Non
     assert "Total tensors:" in captured.out
 
 
-def test_cli_info_rejects_missing_file(tmp_path: Path) -> None:
+def test_cli_info_reports_missing_file_cleanly(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     nonexistent = tmp_path / "does_not_exist.safetensors"
-    # mx.load raises RuntimeError on a missing file. Match on our own filename
-    # (which mlx includes in the message) rather than mlx's prefix wording, so a
-    # future mlx error-message reword doesn't false-fail this test; RuntimeError
-    # (vs bare Exception) already excludes unrelated SystemExit/ImportError.
-    with pytest.raises(RuntimeError, match="does_not_exist"):
-        main(["info", str(nonexistent)])
+    assert main(["info", str(nonexistent)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.count("\n") == 1
+    assert "does_not_exist.safetensors" in captured.err
+
+
+def test_cli_info_reports_invalid_safetensors_cleanly(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    invalid = tmp_path / "invalid.safetensors"
+    invalid.write_bytes(b"not safetensors")
+
+    assert main(["info", str(invalid)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.count("\n") == 1
+    assert "invalid.safetensors" in captured.err
 
 
 def test_cli_no_subcommand_returns_nonzero(capsys: pytest.CaptureFixture[str]) -> None:
