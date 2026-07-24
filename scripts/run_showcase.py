@@ -523,7 +523,7 @@ def _detect_source_version() -> str:
     """Return a git-derived version tied to the source being benchmarked."""
     try:
         result = subprocess.run(
-            ["git", "describe", "--tags", "--long", "--dirty", "--always"],
+            ["git", "describe", "--tags", "--long", "--always"],
             capture_output=True,
             text=True,
             check=False,
