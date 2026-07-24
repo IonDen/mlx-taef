@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-07-24
+
+This release makes live previews resilient to runtime errors and closes the remaining hardening work across downloads, conversion, errors, and the benchmark harness.
+
+### Added
+- `LivePreviewCallback(..., on_error="disable" | "raise")` controls runtime preview failures. The default logs one warning and disables previews for the rest of the current generation, so a preview problem does not discard a long-running image. Strict integrations can use `on_error="raise"` to keep the previous fail-fast behavior.
+- Every built-in Hugging Face weight file now has an immutable revision and role-specific sha256 pin. The opt-in network test downloads, verifies, converts, and loads every decoder and encoder source through the runtime path.
+- `UnknownArchitectureError` gives architecture lookup failures the same clean, package-rooted error surface as unknown variants.
+
+### Fixed
+- TAEF2 auto-BN now respects the VAE's epsilon, rejects incomplete explicit BN pairs, and warns when `auto_bn` cannot resolve stats. FLUX.1, FLUX.2, and Qwen packed-latent unpacking now validates the sequence length before reshape.
+- A live-preview decode or file-write failure no longer terminates a generation under the default callback policy. Callback state resets on the next generation.
+- Four-dimensional convolution weights are always transposed during conversion. Ambiguous equal-sized channel dimensions can no longer skip the required layout change.
+- `UnknownKernelError` and `UnknownArchitectureError` render without `KeyError`'s extra quote layer. Direct `Taef()` construction, memory-cap lookup, and `mlx-taef info` failures now return clear, stable errors.
+- The documented direct invocation of `scripts/diff_showcase_report.py` works from any current directory.
+
+### Changed
+- Converted-weight cache keys include a converter-format version as well as the source revision and digest. The first load after this upgrade rebuilds each converted cache once. Converted cache directories are created with owner-only permissions.
+- CI installs from the lockfile with `uv sync --frozen` on every supported Python version.
+- Live showcase generations run in separate worker processes. Each worker has a 55-minute wall budget and a 28 GiB active-memory ceiling on the 32 GiB reference Mac, writes an abort record before exit, and leaves completed scenario results checkpointed. The report schema is now version 2 and records generation and tiny-decoder dtypes separately.
+- The benchmark report was re-measured on Apple M1 Max at implementation commit `7aead40`. All six scenarios completed, and the regression checker found no latency, memory, SSIM, or TeaCache regression against v0.6.2.
+
+### Internal
+- The kernel registry is the source of truth for mid-block GroupNorm and memory-cap metadata. The old `MIDBLOCK_GN` mapping remains as a derived compatibility view.
+- Small integration seams now have behavioral coverage for callback registration docs, numbered frames, missing bindings, error formatting, kernel metadata, CI lockfile use, and benchmark schema handling.
+
 ## [0.6.2] — 2026-07-09
 
 A hardening and accuracy release. It hardens the live-preview callback and the converted-weight cache, and corrects the published decode-benchmark numbers after fixing how they were measured.
