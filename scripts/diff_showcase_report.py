@@ -78,6 +78,26 @@ def diff_reports(
         new_data = new_scenarios[scenario]
         old_data = old_scenarios.get(scenario, {})
 
+        old_preview_count = old_data.get("preview_count")
+        new_preview_count = new_data.get("preview_count")
+        if (
+            isinstance(old_preview_count, int)
+            and not isinstance(old_preview_count, bool)
+            and (
+                not isinstance(new_preview_count, int)
+                or isinstance(new_preview_count, bool)
+                or new_preview_count < old_preview_count
+            )
+        ):
+            regressions.append(
+                {
+                    "kind": "preview-count-drop",
+                    "scenario": scenario,
+                    "old_count": old_preview_count,
+                    "new_count": new_preview_count,
+                }
+            )
+
         # taef*_vs_vae conditions → median_seconds + median_peak_memory_gb per condition
         for cond in _VS_VAE_CONDITION_KEYS:
             new_cond = new_data.get(cond)

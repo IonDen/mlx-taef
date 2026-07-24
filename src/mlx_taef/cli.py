@@ -2,6 +2,7 @@
 
 import argparse
 import logging
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -10,7 +11,6 @@ import mlx.core as mx
 
 from mlx_taef.api import TAEF1, TAEF2, TAESD, TAESDXL, QwenImage, ZImage
 from mlx_taef.kernels import KERNELS
-from mlx_taef.variants import VARIANTS
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    convert_names = sorted(VARIANTS)  # legacy shim (kernels with a distinct convert path)
+    convert_names = sorted(KERNELS)
     bench_names = sorted(KERNELS)  # all kernels, incl. zimage
 
     p_convert = sub.add_parser("convert", help="Download upstream weights and convert to MLX")
@@ -57,14 +57,11 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _cmd_convert(args: argparse.Namespace) -> int:
-    from mlx_taef.convert import convert_hf_decoder_to_mlx, convert_hf_encoder_to_mlx
-    from mlx_taef.variants import VARIANTS
+    from mlx_taef.download import get_or_convert
 
-    config = VARIANTS[args.variant]
-    if args.role == "encoder":
-        convert_hf_encoder_to_mlx(out_path=args.dst, config=config)
-    else:
-        convert_hf_decoder_to_mlx(out_path=args.dst, config=config)
+    cached_path = get_or_convert(KERNELS[args.variant], role=args.role)
+    args.dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(cached_path, args.dst)
     print(f"Wrote {args.dst}")
     return 0
 

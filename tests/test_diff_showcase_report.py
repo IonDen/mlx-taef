@@ -187,6 +187,48 @@ def test_main_rejects_unknown_schema_before_diff(tmp_path: Path) -> None:
         main([str(old_path), str(new_path)])
 
 
+def test_load_report_migrates_schema_v1_metadata_and_preview_counts(tmp_path: Path) -> None:
+    from scripts.run_showcase import _load_report
+
+    old = tmp_path / "old.json"
+    old.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "hardware": {"dtype": "bf16"},
+                "isolation": "subprocess-per-rep",
+                "scenarios": {
+                    "live_preview": {
+                        "status": "ok",
+                        "preview_paths": ["step00.webp", "step01.webp"],
+                    }
+                },
+            }
+        )
+    )
+
+    migrated = _load_report(old)
+
+    assert migrated["schema_version"] == 2
+    assert migrated["hardware"]["generation_dtype"] == "bf16"
+    assert migrated["hardware"]["taef_decode_dtype"] == "float32"
+    assert "dtype" not in migrated["hardware"]
+    assert migrated["scenarios"]["live_preview"]["preview_count"] == 2
+
+
+def test_diff_flags_preview_count_drop() -> None:
+    from scripts.diff_showcase_report import diff_reports
+
+    old = _make_live_report(elapsed_s=10.0)
+    new = _make_live_report(elapsed_s=10.0)
+    old["scenarios"]["live_preview"]["preview_count"] = 4
+    new["scenarios"]["live_preview"]["preview_count"] = 2
+
+    regressions = diff_reports(old, new)
+
+    assert [r["kind"] for r in regressions] == ["preview-count-drop"]
+
+
 def test_committed_showcase_report_against_itself_finds_no_regression() -> None:
     """Integration: the committed _artifacts/showcase_report.json diffed
     against itself MUST report no regressions. This is the test that
