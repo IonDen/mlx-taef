@@ -13,7 +13,7 @@ mflux 0.18.0, MLX 0.31.2; weights quantized to int4 (`quantize=4`), bf16 generat
 times measure the decode step in isolation, outside of model construction and after one untimed
 warmup call, as the median over several timed reps — the steady-state per-step cost a live preview
 pays after its first step. SSIM compares the tiny-decoder image against the full VAE on the same
-latent. Captured for mlx-taef v0.7.0 at commit `1e79c29` on 2026-07-24.
+latent. Captured for mlx-taef v0.7.0 at commit `1e79c29` on 2026-07-24, on CPython 3.14.5.
 
 Runnable scripts live in [`examples/`](examples/).
 
