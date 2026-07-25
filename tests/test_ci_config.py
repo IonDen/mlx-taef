@@ -61,3 +61,17 @@ def test_ci_test_matrix_covers_every_supported_version() -> None:
 def test_mypy_targets_the_lowest_supported_version() -> None:
     """Type-checking the floor is what catches typing that only works on newer Pythons."""
     assert _pyproject()["tool"]["mypy"]["python_version"] == SUPPORTED_PYTHONS[0]
+
+
+def test_readme_python_badge_states_the_floor_as_a_range() -> None:
+    """The badge is hand-written (shields' pyversions enumerates every version), so it
+    must be pinned to the declared floor or it will quietly advertise the wrong one."""
+    readme = (_REPO_ROOT / "README.md").read_text()
+    floor = SUPPORTED_PYTHONS[0]
+
+    assert f"badge/python-{floor}%2B-" in readme, (
+        f"README needs a python-{floor}%2B badge matching requires-python"
+    )
+    assert "pypi/pyversions" not in readme, (
+        "the enumerating pyversions badge was replaced by the floor badge"
+    )
