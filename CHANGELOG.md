@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-07-25
+
+### Changed
+
+- Python 3.10 is now supported (`requires-python` drops from `>=3.11` to `>=3.10`). The CI test
+  matrix runs 3.10 through 3.14, so every advertised version is exercised by the full offline
+  suite, including the bit-exact parity fixtures. On 3.10 the `Self` return types come from
+  `typing-extensions`, which installs automatically on that version only.
+- The `showcase` extra and the `test` group install `mlx-teacache` only on Python 3.11+, since it
+  requires 3.11. Everything else in both, and all of the runtime dependencies, work on 3.10; the
+  showcase's combined scenario already reports a clear error when `mlx-teacache` is absent.
+
 ## [0.7.0] - 2026-07-24
 
 This release makes live previews resilient to runtime errors and closes the remaining hardening work across downloads, conversion, errors, and the benchmark harness.

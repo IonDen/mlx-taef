@@ -853,7 +853,7 @@ def main(argv: list[str] | None = None) -> int:
 
     report: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
-        "generated_at": datetime.datetime.now(datetime.UTC).isoformat(),
+        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "hardware": _build_hardware_metadata(),
         "isolation": "subprocess-per-condition",
         "prior_artifacts_moved_to": trashed.name if trashed else None,

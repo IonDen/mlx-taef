@@ -55,7 +55,7 @@ uv add "mlx-taef[mflux]"
 Pin an exact version in a project that needs reproducibility:
 
 ```bash
-pip install "mlx-taef==0.7.0"
+pip install "mlx-taef==0.7.1"
 ```
 
 Verify the install:
@@ -64,7 +64,7 @@ Verify the install:
 mlx-taef --help
 ```
 
-Requires Python ≥ 3.11 and Apple Silicon (`mlx` itself is Apple-Silicon-only). The base `mlx-taef` install pulls in **no PyTorch**; in this repo `torch` is used only to generate test fixtures. The optional `mflux` extra is a separate case: mflux currently depends on PyTorch, so installing `mlx-taef[mflux]` brings it in.
+Requires Python ≥ 3.10 and Apple Silicon (`mlx` itself is Apple-Silicon-only). The base `mlx-taef` install pulls in **no PyTorch**; in this repo `torch` is used only to generate test fixtures. The optional `mflux` extra is a separate case: mflux currently depends on PyTorch, so installing `mlx-taef[mflux]` brings it in.
 
 ## Variants
 
@@ -141,6 +141,7 @@ See `docs/manual-verification.md` for the full verification recipe.
 - **v0.6.1 — released on PyPI** (2026-06-30). Maintenance: converted-weights cache writes are now atomic (temp file + rename), so an interrupted download/convert can no longer leave a truncated file that later runs trust as valid. Adds Python 3.14 support, sharper public-API types (factories return their concrete subclass; the decoder/encoder role and preview variant are typed literals), and a linked live-preview demo page.
 - **v0.6.2 — released on PyPI** (2026-07-09). Hardening and accuracy. `LivePreviewCallback` now rejects `every < 1` and a half-set BN pair, and resets its state between generations. The converted-weights cache invalidates when a source's pinned revision or sha256 changes (Qwen-Image re-converts once on upgrade), and every conversion path enforces those pins. The decode benchmark now measures the decode step at steady state, in isolation from one-time model construction: the tiny decoders run ~30 ms per step (earlier releases reported ~180–260 ms because they timed model construction inside the decode window), a ~8–10× speedup over the full VAE decode. COMPARISON / EXAMPLES are re-measured with two Z-Image scenarios added. Also fixes the mflux quickstart earlier in this README.
 - **v0.7.0 — released on PyPI** (2026-07-24). `LivePreviewCallback` gains configurable runtime failure handling: it warns once and disables previews for the current generation by default, while `on_error="raise"` preserves strict behavior. All built-in weight sources now have immutable revisions and role-specific sha256 pins, and `mlx-taef convert` uses the same verified source path as runtime loading. Conversion caches include a format version, and CI installs from the lockfile. The six-scenario benchmark requires every repetition and preview frame, exits nonzero after any scenario failure, and records source and installed-package versions separately. The measured report shows no regression against v0.6.2.
+- **v0.7.1 — released on PyPI** (2026-07-25). Python 3.10 is now supported: the floor drops from 3.11 to 3.10 and CI runs the full offline suite on 3.10 through 3.14, so no advertised version is untested. `mlx-teacache` (used by the showcase and test extras, and 3.11-only) installs on 3.11+ only; the runtime dependencies all work on 3.10.
 
 Track future releases via the [PyPI history](https://pypi.org/project/mlx-taef/#history) or `gh release list -R IonDen/mlx-taef`.
 

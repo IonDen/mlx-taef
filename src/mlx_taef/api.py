@@ -5,8 +5,16 @@ Value space: decode() outputs [0, 1] float; encode() expects [0, 1] float.
 """
 
 import logging
+import sys
 from pathlib import Path
-from typing import Self, cast
+from typing import cast
+
+# Version-gated import: no single CI leg runs both arms, so both are excluded
+# from coverage rather than reporting one as untested on every interpreter.
+if sys.version_info >= (3, 11):  # pragma: no cover
+    from typing import Self
+else:  # pragma: no cover
+    from typing_extensions import Self
 
 import mlx.core as mx
 import mlx.nn as nn
