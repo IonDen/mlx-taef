@@ -13,11 +13,12 @@ from mlx_taef.kernels._types import (
     WeightSource,
 )
 from mlx_taef.kernels.flux import TAEF1, TAEF2
+from mlx_taef.kernels.krea2 import KREA2
 from mlx_taef.kernels.qwen import QWEN_IMAGE
 from mlx_taef.kernels.sd import TAESD, TAESDXL
 from mlx_taef.kernels.zimage import ZIMAGE
 
-_ALL = (TAESD, TAESDXL, TAEF1, TAEF2, ZIMAGE, QWEN_IMAGE)
+_ALL = (TAESD, TAESDXL, TAEF1, TAEF2, ZIMAGE, QWEN_IMAGE, KREA2)
 KERNELS: MappingProxyType[str, ModelKernel] = MappingProxyType({k.name: k for k in _ALL})
 MIDBLOCK_GN: MappingProxyType[str, bool] = MappingProxyType(
     {name: kernel.midblock_gn for name, kernel in KERNELS.items()}
