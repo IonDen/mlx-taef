@@ -52,3 +52,16 @@ def test_every_reference_oracle_is_sha_pinned() -> None:
     assert not missing, (
         f"reference oracle files missing a fixtures.toml sha entry: {sorted(missing)}"
     )
+
+
+def test_every_showcase_latent_is_sha_pinned() -> None:
+    # Showcase latents back committed SSIM claims (test_zimage_ssim, test_krea2_ssim);
+    # a silent replacement must be a hard failure in the DEFAULT suite, not a warning.
+    config = tomllib.loads(FIXTURES_TOML.read_text())
+    listed = set(config.get("fixtures/showcase_latents", {}))
+    on_disk = {
+        p.name
+        for p in (Path(__file__).parent / "fixtures" / "showcase_latents").glob("*.safetensors")
+    }
+    missing = on_disk - listed
+    assert not missing, f"showcase latents missing a fixtures.toml sha entry: {sorted(missing)}"

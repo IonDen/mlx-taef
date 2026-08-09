@@ -8,21 +8,42 @@ showcase fixtures.
 Wall-clock ETAs (M1 Max, quantize=4):
 - flux1-dev: ~1-2 min
 - flux2-klein-base-4b: ~7-10 min
+- krea-2-turbo: ~25-45 min cold cache / ~5-10 min warm (first run downloads ~36 GB of
+  Krea-2-Turbo weights; observed ~25 MB/s puts the download alone at ~25 min)
+
+A watchdog thread aborts the run (writing `<out-dir>/<variant>.abort.json` and exiting
+nonzero) if active memory nears the device ceiling or the wall budget is exceeded —
+same discipline as `scripts/run_showcase.py`'s `_install_live_watchdog`, sized down for a
+single-shot capture instead of a multi-scenario orchestrator.
 
 Usage:
     uv run python scripts/_capture_latent.py --variant flux1-dev
     uv run python scripts/_capture_latent.py --variant flux2-klein-base-4b
+    uv run python scripts/_capture_latent.py --variant krea-2-turbo
 """
 
 import argparse
 import hashlib
+import json
+import os
 import sys
+import threading
+import time
 from pathlib import Path
 
 import mlx.core as mx
 
-_SUPPORTED_VARIANTS = ["flux1-dev", "flux2-klein-base-4b", "z-image-turbo"]
+_SUPPORTED_VARIANTS = ["flux1-dev", "flux2-klein-base-4b", "z-image-turbo", "krea-2-turbo"]
 _DEFAULT_OUT_DIR = Path(__file__).parent.parent / "tests" / "fixtures" / "showcase_latents"
+
+# Wall budget is a backstop, not an ETA estimate: a cold-cache krea-2-turbo run downloads
+# ~36 GB at an observed ~25 MB/s (~25 min) before generation even starts, plus model load +
+# an 8-step generation. 3600s (60 min) leaves real margin above that ~25-45 min cold-cache
+# range (a prior 1200s budget aborted a real run mid-download with memory nowhere near the
+# ceiling — see krea_2_turbo.abort.json, active_memory_bytes: 128). Memory headroom mirrors
+# run_showcase.py's _MEMORY_HEADROOM_BYTES (abort at memory_size - 4 GiB).
+_WALL_BUDGET_S = 3600.0
+_MEMORY_HEADROOM_BYTES = 4 * 1024**3
 
 
 def _build_argparser() -> argparse.ArgumentParser:
@@ -62,7 +83,7 @@ def _build_argparser() -> argparse.ArgumentParser:
     return parser
 
 
-_DEFAULT_STEPS = {"flux1-dev": 14, "flux2-klein-base-4b": 4, "z-image-turbo": 4}
+_DEFAULT_STEPS = {"flux1-dev": 14, "flux2-klein-base-4b": 4, "z-image-turbo": 4, "krea-2-turbo": 8}
 _DEFAULT_GUIDANCE = {
     "flux1-dev": 3.5,
     "flux2-klein-base-4b": 1.0,
@@ -70,7 +91,97 @@ _DEFAULT_GUIDANCE = {
     # 0.0 internally (z_image.py:60-62), so 0.0 is the effective value regardless of what is
     # passed.  Naming any other value would make the recipe lie about the run mflux performed.
     "z-image-turbo": 0.0,
+    # Krea-2-Turbo's own CLI (mflux/models/krea2/cli/krea2_generate.py) defaults to
+    # DEFAULT_STEPS=8 / DEFAULT_GUIDANCE=1.0 (er_sde scheduler) — mirrored here verbatim.
+    "krea-2-turbo": 1.0,
 }
+
+
+def _abort_artifact_path(variant: str, out_dir: Path) -> Path:
+    """Where a capture-watchdog abort artifact for `variant` lives, if one exists."""
+    return out_dir / f"{variant.replace('-', '_')}.abort.json"
+
+
+def _watchdog_breach_reason(
+    *, active_bytes: int, ceiling_bytes: int, elapsed_s: float, wall_budget_s: float
+) -> str | None:
+    """Return the first capture-run safety limit that has been breached."""
+    if active_bytes >= ceiling_bytes:
+        return "memory_ceiling"
+    if elapsed_s > wall_budget_s:
+        return "wall_budget"
+    return None
+
+
+class _CaptureWatchdog:
+    """Cooperatively stop a capture-run watchdog thread once generation finishes."""
+
+    def __init__(self, stop_event: threading.Event, thread: threading.Thread) -> None:
+        self._stop_event = stop_event
+        self._thread = thread
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        self._thread.join(timeout=5)
+
+
+def _install_capture_watchdog(
+    variant: str,
+    out_dir: Path,
+    *,
+    interval_s: float = 0.5,
+    wall_budget_s: float = _WALL_BUDGET_S,
+) -> _CaptureWatchdog:
+    """Abort a heavy capture run before it exhausts unified memory or its wall budget.
+
+    Modeled on scripts/run_showcase.py's `_install_live_watchdog`: a daemon thread polls
+    `mx.get_active_memory()` and elapsed wall time, and on breach writes an honest abort
+    artifact (`<out-dir>/<variant>.abort.json`) before killing the process with a nonzero
+    exit — no partial/misleading latent fixture is ever written.
+    """
+    memory_size = int(mx.device_info().get("memory_size", 0))
+    if memory_size <= _MEMORY_HEADROOM_BYTES:
+        raise RuntimeError(f"could not establish a safe memory ceiling from {memory_size} bytes")
+    ceiling_bytes = memory_size - _MEMORY_HEADROOM_BYTES
+    stop_event = threading.Event()
+    started = time.monotonic()
+    abort_path = _abort_artifact_path(variant, out_dir)
+
+    def _watch() -> None:
+        while not stop_event.wait(interval_s):
+            elapsed_s = time.monotonic() - started
+            active_bytes = int(mx.get_active_memory())
+            reason = _watchdog_breach_reason(
+                active_bytes=active_bytes,
+                ceiling_bytes=ceiling_bytes,
+                elapsed_s=elapsed_s,
+                wall_budget_s=wall_budget_s,
+            )
+            if reason is None:
+                continue
+            if stop_event.is_set():
+                # Generation finished in the same instant the breach was observed; don't
+                # overwrite a real result with an abort artifact.
+                return
+            abort_path.write_text(
+                json.dumps(
+                    {
+                        "status": "aborted",
+                        "variant": variant,
+                        "reason": reason,
+                        "active_memory_bytes": active_bytes,
+                        "ceiling_bytes": ceiling_bytes,
+                        "elapsed_s": elapsed_s,
+                        "wall_budget_s": wall_budget_s,
+                    },
+                    indent=2,
+                )
+            )
+            os._exit(70)
+
+    thread = threading.Thread(target=_watch, name=f"{variant}-capture-watchdog", daemon=True)
+    thread.start()
+    return _CaptureWatchdog(stop_event, thread)
 
 
 def _install_memory_caps() -> None:
@@ -203,6 +314,37 @@ def _capture_zimage_latent(
     return capture.latents
 
 
+def _capture_krea2_latent(
+    flux: object,
+    *,
+    prompt: str,
+    seed: int,
+    height: int,
+    width: int,
+    num_steps: int,
+    guidance: float,
+) -> mx.array:
+    """Krea 2 equivalent of _capture_flux1_latent.
+
+    mflux's Krea 2 in-loop latent is (1, 16, h//8, w//8) NCHW — Krea2LatentCreator's
+    create_noise/pack_latents/unpack_latents are all identity, so the AfterLoopCallback
+    receives the same raw shape the denoise loop produces (see kernels/krea2.py docstring).
+    """
+    capture = _LatentCaptureCallback()
+    flux.callbacks.register(capture)  # type: ignore[attr-defined]
+    flux.generate_image(  # type: ignore[attr-defined]
+        seed=seed,
+        prompt=prompt,
+        num_inference_steps=num_steps,
+        height=height,
+        width=width,
+        guidance=guidance,
+    )
+    if capture.latents is None:
+        raise RuntimeError("AfterLoopCallback did not fire — mflux contract changed?")
+    return capture.latents
+
+
 def _capture(
     variant: str,
     prompt: str,
@@ -283,6 +425,27 @@ def _capture(
             "width": mx.array([width], dtype=mx.int32),
         }
 
+    if variant == "krea-2-turbo":
+        from mflux.models.common.config.model_config import ModelConfig
+        from mflux.models.krea2.variants.txt2img.krea2 import Krea2
+
+        flux = Krea2(quantize=4, model_config=ModelConfig.krea2())
+        latent = _capture_krea2_latent(
+            flux,
+            prompt=prompt,
+            seed=seed,
+            height=height,
+            width=width,
+            num_steps=steps,
+            guidance=cfg,
+        )
+        assert latent.shape == (1, 16, height // 8, width // 8), latent.shape
+        return {
+            "latent": latent,
+            "height": mx.array([height], dtype=mx.int32),
+            "width": mx.array([width], dtype=mx.int32),
+        }
+
     raise ValueError(f"unsupported variant: {variant}")  # pragma: no cover
 
 
@@ -291,17 +454,24 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
+    # Drop any stale abort artifact from a prior aborted run before installing the watchdog,
+    # so a later successful capture never leaves a misleading abort record lingering next to it.
+    _abort_artifact_path(args.variant, args.out_dir).unlink(missing_ok=True)
     _install_memory_caps()
 
-    arrays = _capture(
-        variant=args.variant,
-        prompt=args.prompt,
-        seed=args.seed,
-        height=args.height,
-        width=args.width,
-        num_steps=args.num_steps,
-        guidance=args.guidance,
-    )
+    watchdog = _install_capture_watchdog(args.variant, args.out_dir)
+    try:
+        arrays = _capture(
+            variant=args.variant,
+            prompt=args.prompt,
+            seed=args.seed,
+            height=args.height,
+            width=args.width,
+            num_steps=args.num_steps,
+            guidance=args.guidance,
+        )
+    finally:
+        watchdog.stop()
 
     # Filename uses underscore separator (filesystem-safe) regardless of variant naming.
     safe_name = args.variant.replace("-", "_")
