@@ -336,6 +336,48 @@ def test_zimage_callback_writes_png_offline(
     assert save_path.stat().st_size > 100
 
 
+def test_zimage_callback_logs_when_explicit_latent_dims_are_ignored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
+    """zimage is an unpacked-binding variant (packed_latent_downscale=None): the unpack
+    reads dims from the latent's own shape, so explicit latent_height/latent_width are
+    silently ignored today even though the docstring advertises the override. Passing
+    both on an unpacked variant must log once so the no-op is observable."""
+    import logging
+
+    from mlx_taef import ZImage
+
+    converted = Path(__file__).parent / "converted" / "taef1_decoder.safetensors"
+    real_zimage = ZImage.from_pretrained_local(converted)
+    monkeypatch.setattr(ZImage, "from_pretrained", classmethod(lambda cls, **kw: real_zimage))
+
+    with caplog.at_level(logging.INFO, logger="mlx_taef"):
+        LivePreviewCallback(
+            variant="zimage", every=1, save_to=tmp_path / "p.png", latent_height=8, latent_width=8
+        )
+    assert any(
+        "latent_height" in m and "latent_width" in m and "zimage" in m for m in caplog.messages
+    )
+
+
+def test_zimage_callback_no_ignored_dims_log_when_dims_omitted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
+    """No latent_height/latent_width passed -> nothing is being silently ignored, so the
+    info log added for the explicit-dims case must not fire."""
+    import logging
+
+    from mlx_taef import ZImage
+
+    converted = Path(__file__).parent / "converted" / "taef1_decoder.safetensors"
+    real_zimage = ZImage.from_pretrained_local(converted)
+    monkeypatch.setattr(ZImage, "from_pretrained", classmethod(lambda cls, **kw: real_zimage))
+
+    with caplog.at_level(logging.INFO, logger="mlx_taef"):
+        LivePreviewCallback(variant="zimage", every=1, save_to=tmp_path / "p.png")
+    assert not any("latent_height" in m and "ignored" in m for m in caplog.messages)
+
+
 def test_zimage_callback_rejects_packed_flux_latent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

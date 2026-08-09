@@ -32,7 +32,7 @@ img_uint8 = taef.decode_image(latents)      # uint8 NHWC ready for PIL
 
 **You want FLUX generation itself to be faster on Apple Silicon?** You want [`mlx-teacache`](https://github.com/IonDen/mlx-teacache) — it skips redundant denoising steps when the schedule is cacheable (measured 1.46× on FLUX.1-dev at 25 steps).
 
-**You want both: faster generation AND live previews?** Use them together. mflux 4-step Klein + TeaCache + TAEF2 previews measured 1.31× faster with 43% less peak memory than the same generation without TeaCache.
+**You want both: faster generation AND live previews?** Use them together. mflux 4-step Klein + TeaCache + TAEF2 previews measured 1.41× faster with 44% less peak memory than the same generation without TeaCache.
 
 ## Install
 

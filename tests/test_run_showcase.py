@@ -32,6 +32,26 @@ def test_scenario_dispatch_table() -> None:
     assert "zimage_live_preview" in _SCENARIO_DISPATCH
 
 
+def test_all_scenario_order_runs_live_scenarios_before_vs_vae() -> None:
+    """`--scenario all` must run the live scenarios BEFORE the vs-VAE scenarios.
+
+    The vs-VAE scenarios build LPIPS's torch+AlexNet model (~730 MB resident, never
+    returned to the OS) in the orchestrator process. If vs-VAE ran first, the live
+    scenarios' subprocess watchdogs (each computing a memory ceiling from the device's
+    total memory_size) would run with ~730 MB less real headroom than their math assumes."""
+    from scripts.run_showcase import _LIVE_SCENARIOS, _SCENARIO_DISPATCH, _all_scenario_order
+
+    order = _all_scenario_order()
+
+    assert set(order) == set(_SCENARIO_DISPATCH)
+    assert len(order) == len(_SCENARIO_DISPATCH)
+    live_indices = [i for i, s in enumerate(order) if s in _LIVE_SCENARIOS]
+    vs_vae_indices = [i for i, s in enumerate(order) if s not in _LIVE_SCENARIOS]
+    assert live_indices, "expected at least one live scenario in the order"
+    assert vs_vae_indices, "expected at least one vs-VAE scenario in the order"
+    assert max(live_indices) < min(vs_vae_indices)
+
+
 def test_json_schema_version_round_trip(tmp_path: Path) -> None:
     from scripts.run_showcase import SCHEMA_VERSION, _load_report, _write_report
 
@@ -585,7 +605,7 @@ def test_vs_vae_worker_installs_active_memory_watchdog(
         def stop(self) -> None:
             watchdog_events.append("stopped")
 
-    def _fake_install(result_path: Path, scenario: str) -> _FakeWatchdog:
+    def _fake_install(result_path: Path, scenario: str, **kwargs: object) -> _FakeWatchdog:
         watchdog_events.append(f"installed:{scenario}")
         return _FakeWatchdog()
 

@@ -167,7 +167,10 @@ class LivePreviewCallback:
             showcase to build a per-step gallery.
         latent_height: latent spatial height. Default None auto-detects it from the mflux
             Config at generation time (image_height // 16 for FLUX). Pass both latent_height
-            and latent_width to override; passing exactly one raises ValueError.
+            and latent_width to override; passing exactly one raises ValueError. Ignored (with
+            a logged info line) for a variant whose in-loop latent is not packed — currently
+            'zimage' and 'krea2' — since their unpack reads spatial dims from the latent's own
+            shape instead.
         latent_width: latent spatial width; None auto-detects (see latent_height).
         bn_mean: optional BN running_mean for TAEF2 (see `unpack_flux2_latent`).
         bn_var: optional BN running_var for TAEF2.
@@ -239,6 +242,16 @@ class LivePreviewCallback:
         self.bn_var = bn_var
         self.saved_paths: list[Path] = []
         self.bn_eps = bn_eps
+        if (
+            self._packed_downscale is None
+            and latent_height is not None
+            and latent_width is not None
+        ):
+            logger.info(
+                "latent_height/latent_width are ignored for variant=%r: its in-loop latent "
+                "is not packed, so the unpack reads spatial dims from the latent's own shape.",
+                variant,
+            )
         # Resolve BN source. Precedence:
         #   explicit (user passed bn_mean + bn_var)
         #     > auto (auto_bn=True + variant=="taef2" + flux.vae.bn extractable)

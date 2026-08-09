@@ -437,6 +437,22 @@ _LIVE_WALL_BUDGET_S = 3300.0
 _MEMORY_HEADROOM_BYTES = 4 * 1024**3
 
 
+def _all_scenario_order() -> list[str]:
+    """Scenario run order for `--scenario all` (a single scenario name is unaffected).
+
+    Live scenarios run first. Each vs-VAE scenario builds LPIPS's torch+AlexNet model
+    (~730 MB resident, never returned to the OS) in THIS orchestrator process; a live
+    scenario's watchdog computes its memory ceiling from the device's total
+    `memory_size`, so running vs-VAE first would leave the live subprocess (largest:
+    zimage_live_preview) with ~730 MB less real headroom than that math assumes.
+    Derived from `_SCENARIO_DISPATCH`/`_LIVE_SCENARIOS` rather than a hardcoded list so a
+    newly-added scenario is placed correctly without touching this function.
+    """
+    live = [name for name in _SCENARIO_DISPATCH if name in _LIVE_SCENARIOS]
+    vs_vae = [name for name in _SCENARIO_DISPATCH if name not in _LIVE_SCENARIOS]
+    return live + vs_vae
+
+
 # ---------------------------------------------------------------------------
 # JSON I/O (testable in isolation)
 # ---------------------------------------------------------------------------
@@ -952,9 +968,7 @@ def main(argv: list[str] | None = None) -> int:
         "scenarios": {},
     }
 
-    scenarios_to_run = (
-        list(_SCENARIO_DISPATCH.keys()) if args.scenario == "all" else [args.scenario]
-    )
+    scenarios_to_run = _all_scenario_order() if args.scenario == "all" else [args.scenario]
 
     failures = _run_scenarios(scenarios_to_run, args, report)
     print(f"Wrote {args.report}")

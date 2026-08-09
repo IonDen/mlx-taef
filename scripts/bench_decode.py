@@ -138,6 +138,17 @@ def _watchdog_abort_path(save_to: Path) -> Path:
     return save_to.with_name(save_to.stem + ".watchdog_abort.json")
 
 
+def _worker_wall_budget_s(condition: str, *, margin_s: float = 30.0) -> float:
+    """Watchdog wall budget for `condition`'s worker.
+
+    Strictly under the orchestrator's subprocess.run(timeout=...) for that condition, so
+    a wall-budget breach is reachable (the watchdog's own thread can report
+    `reason="wall_budget"` with an honest artifact) instead of the subprocess timeout
+    always firing first with no artifact at all.
+    """
+    return _SUBPROCESS_TIMEOUT_S.get(condition, 600) - margin_s
+
+
 def _run_one_rep(
     *,
     latent_path: Path,
@@ -452,12 +463,18 @@ def _worker_main(args: argparse.Namespace) -> int:
     Deferred import: run_showcase.py imports this module at its own top level, so
     importing it back at bench_decode's module level would cycle.
     """
+    # Drop any stale abort artifact from a prior rep at this save-to path before doing any
+    # real work — otherwise a THIS-rep crash unrelated to the watchdog would be misreported
+    # by _run_one_rep as "watchdog aborted" just because the file happens to still exist.
+    _watchdog_abort_path(args.save_to).unlink(missing_ok=True)
     installed_cap_gb = _install_memory_caps(args.applied_cap_gb)
 
     from scripts.run_showcase import _install_live_watchdog
 
     watchdog = _install_live_watchdog(
-        _watchdog_abort_path(args.save_to), f"{args.condition}_rep{args.rep}"
+        _watchdog_abort_path(args.save_to),
+        f"{args.condition}_rep{args.rep}",
+        wall_budget_s=_worker_wall_budget_s(args.condition),
     )
     try:
         import mlx.core as mx

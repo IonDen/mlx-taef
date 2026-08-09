@@ -125,6 +125,26 @@ class _CaptureWatchdog:
         self._thread.join(timeout=5)
 
 
+def _commit_capture_watchdog_abort(
+    abort_path: Path, payload: dict[str, object], *, stop_event: threading.Event
+) -> None:
+    """Durably record a capture-watchdog abort, then kill the process with exit code 70.
+
+    Mirrors scripts/run_showcase.py's `_commit_watchdog_abort`: skips entirely when
+    generation already signalled completion (`stop_event` set), so a breach observed in
+    the same instant can't overwrite a real result. The exit still fires even if the
+    abort record can't be written — dying without an artifact beats surviving past the
+    safety ceiling (a daemon thread that dies mid-write with no `finally` would silently
+    drop the memory backstop).
+    """
+    if stop_event.is_set():
+        return
+    try:
+        abort_path.write_text(json.dumps(payload, indent=2))
+    finally:
+        os._exit(70)
+
+
 def _install_capture_watchdog(
     variant: str,
     out_dir: Path,
@@ -159,25 +179,19 @@ def _install_capture_watchdog(
             )
             if reason is None:
                 continue
-            if stop_event.is_set():
-                # Generation finished in the same instant the breach was observed; don't
-                # overwrite a real result with an abort artifact.
-                return
-            abort_path.write_text(
-                json.dumps(
-                    {
-                        "status": "aborted",
-                        "variant": variant,
-                        "reason": reason,
-                        "active_memory_bytes": active_bytes,
-                        "ceiling_bytes": ceiling_bytes,
-                        "elapsed_s": elapsed_s,
-                        "wall_budget_s": wall_budget_s,
-                    },
-                    indent=2,
-                )
+            _commit_capture_watchdog_abort(
+                abort_path,
+                {
+                    "status": "aborted",
+                    "variant": variant,
+                    "reason": reason,
+                    "active_memory_bytes": active_bytes,
+                    "ceiling_bytes": ceiling_bytes,
+                    "elapsed_s": elapsed_s,
+                    "wall_budget_s": wall_budget_s,
+                },
+                stop_event=stop_event,
             )
-            os._exit(70)
 
     thread = threading.Thread(target=_watch, name=f"{variant}-capture-watchdog", daemon=True)
     thread.start()
