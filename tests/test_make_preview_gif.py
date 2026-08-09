@@ -304,3 +304,33 @@ def test_documented_direct_script_invocation_produces_a_gif(tmp_path: Path) -> N
 
     assert completed.returncode == 0, completed.stderr
     assert out_path.exists()
+
+
+def test_main_warns_on_stderr_when_output_exceeds_target_size(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A real assembled GIF is nowhere near the 5 MB README target, so this drives it
+    over the line by lowering `_TARGET_MAX_BYTES` (monkeypatched module constant) below
+    the tiny synthetic GIF's actual size, rather than generating megabytes of frames."""
+    import scripts.make_preview_gif as make_preview_gif
+
+    frames_dir, final_path = _make_synthetic_run(tmp_path, n_frames=2)
+    out_path = tmp_path / "out.gif"
+    monkeypatch.setattr(make_preview_gif, "_TARGET_MAX_BYTES", 1)
+
+    exit_code = make_preview_gif.main(
+        [
+            "--frames-dir",
+            str(frames_dir),
+            "--final",
+            str(final_path),
+            "--out",
+            str(out_path),
+        ]
+    )
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "warning" in captured.err.lower()
+    assert str(out_path) in captured.err
+    assert "MB" in captured.err

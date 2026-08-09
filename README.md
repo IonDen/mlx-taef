@@ -100,8 +100,10 @@ The previous v0.1.x README claim — *"~100 ms decode at 1024×1024, 50–100× 
 </p>
 
 TAEF1 per-step previews (left) next to the final full-VAE decode (right), from a FLUX.1-dev
-generation at 768x768, 26 steps, seed 20, captured on an M1 Max with `LivePreviewCallback`
-registered every step. Reproduce it: adapt [`examples/mflux_live_preview.py`](examples/mflux_live_preview.py)
+generation at 768x768, 26 steps, seed 20, prompt "anime key visual, a lone warrior in a tattered
+cloak holding an oversized greatsword, standing in an overgrown ruined city, dramatic backlight,
+volumetric light, highly detailed, cinematic, studio anime style", captured on an M1 Max with
+`LivePreviewCallback` registered every step. Reproduce it: adapt [`examples/mflux_live_preview.py`](examples/mflux_live_preview.py)
 (the runnable starting point for wiring up `LivePreviewCallback`) to those parameters, which writes
 a numbered preview-frame gallery plus the final image, then assemble the GIF with:
 
