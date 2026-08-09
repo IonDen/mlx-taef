@@ -95,6 +95,35 @@ The previous v0.1.x README claim — *"~100 ms decode at 1024×1024, 50–100× 
 
 ## mflux live previews
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/IonDen/mlx-taef/main/docs/assets/live-preview.gif" alt="Side-by-side animated GIF: TAEF1 per-step live previews animating on the left against the finished full-VAE decode held static on the right, with a step-count caption." width="100%">
+</p>
+
+TAEF1 per-step previews (left) next to the final full-VAE decode (right), from a FLUX.1-dev
+generation at 768x768, 26 steps, seed 20, captured on an M1 Max with `LivePreviewCallback`
+registered every step. Reproduce it: adapt [`examples/mflux_live_preview.py`](examples/mflux_live_preview.py)
+(the runnable starting point for wiring up `LivePreviewCallback`) to those parameters, which writes
+a numbered preview-frame gallery plus the final image, then assemble the GIF with:
+
+```
+uv run python scripts/make_preview_gif.py \
+    --frames-dir <run-output> \
+    --frames-glob "*_step*.png" \
+    --final <final.png> \
+    --out docs/assets/live-preview.gif \
+    --panel-width 320
+```
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/IonDen/mlx-taef/main/docs/assets/taef1-live-preview.gif" alt="Looping animated GIF of the same TAEF1 live-preview frames playing through and holding on the final decode, single panel." width="40%">
+</p>
+
+The same capture as a compact, single-panel loop: the previews play through, then hold on the
+final frame.
+
+Wiring the callback into a generation looks like this (FLUX.2 Klein shown; the GIFs above use
+FLUX.1-dev / `variant="taef1"` with the parameters noted):
+
 ```python
 from mflux.models.common.config.model_config import ModelConfig
 from mflux.models.flux2 import Flux2Klein
