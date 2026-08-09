@@ -135,7 +135,7 @@ than the FLUX.2 pair. Same red-apple latent, two decoders:
 |---|---|
 | ![f1v](_artifacts/showcase/taef1/vae/vanilla_vae_rep0.webp) | ![f1t](_artifacts/showcase/taef1/taef/taef1_rep0.webp) |
 
-TAEF1 decodes the same latent in **30 ms** versus **0.30 s** for the full FLUX.1 VAE (~10.2× faster),
+TAEF1 decodes the same latent in **29 ms** versus **0.30 s** for the full FLUX.1 VAE (~10.2× faster),
 at **0.55 GB** versus 3.67 GB peak and **SSIM 0.94**. Reproduce:
 
 ```
