@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-08-09
+
+Krea 2 Turbo live preview.
+
+### Added
+- `Krea2` decodes Krea 2 Turbo latents. Krea 2 generates on the Qwen-Image stack and shares its
+  Wan 2.1 VAE, so this variant reuses the taew2.1 weights already converted for `QwenImage` — one
+  shared converted-cache entry, no new download. Construct it with `Krea2.from_pretrained()`, or
+  preview a live generation with `LivePreviewCallback(variant="krea2")`. Adds
+  `mlx-taef bench --variant krea2`. Decode quality against mflux's full Krea 2 VAE is gated by an
+  opt-in SSIM check on a committed fixture (measured 0.9678, floor 0.75).
+- The showcase report and COMPARISON.md now carry LPIPS alongside SSIM for every decode scenario.
+  LPIPS is a learned perceptual distance (lower is better) and catches artifacts SSIM's structural
+  comparison under-weights.
+
+### Changed
+- `mlx-teacache`, used by the `showcase` extra and the `test` dependency group, now installs on
+  Python 3.10 as well as 3.11+, since mlx-teacache 0.9.3 dropped its own 3.11 floor. The combined
+  showcase scenario and its tests now run on every Python version this project supports.
+- `ZImage.encode()` is now validated the same way decode already was: an opt-in cross-roundtrip
+  test (TAEF1 encode into the full Z-Image VAE's decoder) measures SSIM 0.9580 against the same
+  0.75 floor.
+- The live-preview integration is verified against mflux 0.18.1: the callback contract, the
+  packed-latent layouts, and the batch-norm stats the auto-bn path reads are unchanged, so
+  `mlx-taef[mflux]` needs no code changes. The `mflux` extra pin stays `>=0.17,<0.19`.
+- Every model-loading showcase and benchmark subprocess, not only the three live-generation
+  workers, now runs under the active-memory watchdog. A decode-only rep that starts paging aborts
+  with an honest artifact instead of risking the machine.
+- CI's dependency groups are now installed in isolation (`[tool.uv] default-groups = []`): each
+  job's `uv sync --frozen --group <name>` installs exactly that group instead of also pulling in
+  uv's implicit default group. This uncovered a missing Pillow dependency in the `typecheck`
+  group — `mypy --strict` needs PIL's types to check `integrations/mflux.py` — now declared there
+  directly.
+
+### Internal
+- The README links a live-preview GIF near the top: TAEF1 previews animating step by step next to
+  the finished full-VAE decode held static, generated with the new `scripts/make_preview_gif.py`.
+
 ## [0.7.1] - 2026-07-25
 
 ### Changed

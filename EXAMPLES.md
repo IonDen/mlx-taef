@@ -45,12 +45,12 @@ TAEF1 decoder is a few MB; the full VAE is hundreds. Reproduce:
 uv run python scripts/run_showcase.py --scenario zimage_vs_vae
 ```
 
-A note on scope: Z-Image support is validated for decode and live preview. The showcase command
-above measures the SSIM number, and an opt-in network test (`pytest --run-network`) guards the
-≥ 0.75 contract against the full Z-Image VAE; neither runs in default CI. `ZImage` inherits the
-full API including `encode()`, which reuses the TAEF1 encoder on the shared latent contract and
-is validated by its own opt-in cross-roundtrip gate (TAEF1-encode -> full Z-Image VAE decode,
-SSIM >= 0.75, measured 0.96).
+A note on scope: Z-Image support is validated for decode, live preview, and encode, each against
+its own opt-in network test (`pytest --run-network`), and none of those tests run in default CI.
+The showcase command above measures the decode SSIM number, guarded by the same ≥ 0.75 contract
+against the full Z-Image VAE. `ZImage` inherits the full API including `encode()`, which reuses
+the TAEF1 encoder on the shared latent contract and is validated by its own opt-in cross-roundtrip
+gate (TAEF1-encode -> full Z-Image VAE decode, SSIM >= 0.75, measured 0.9580).
 
 ## Qwen-Image live preview
 
