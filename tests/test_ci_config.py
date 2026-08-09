@@ -83,8 +83,7 @@ def test_mlx_teacache_has_no_python_version_marker() -> None:
     entries = [
         dep
         for dep in (
-            data["project"]["optional-dependencies"]["showcase"]
-            + data["dependency-groups"]["test"]
+            data["project"]["optional-dependencies"]["showcase"] + data["dependency-groups"]["test"]
         )
         if isinstance(dep, str) and dep.startswith("mlx-teacache")
     ]
