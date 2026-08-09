@@ -11,6 +11,14 @@ def test_variant_registry_includes_qwen_image():
     assert _VARIANT_CLASSES["qwen-image"] is QwenImage
 
 
+def test_variant_registry_includes_krea2():
+    pytest.importorskip("mflux")
+    from mlx_taef.api import Krea2
+    from mlx_taef.integrations.mflux import _VARIANT_CLASSES
+
+    assert _VARIANT_CLASSES["krea2"] is Krea2
+
+
 def test_livepreview_rejects_unknown_variant():
     pytest.importorskip("mflux")
     from mlx_taef.integrations.mflux import LivePreviewCallback

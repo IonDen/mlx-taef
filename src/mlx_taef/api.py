@@ -239,4 +239,14 @@ class QwenImage(Taef):
     _kernel = KERNELS["qwen-image"]
 
 
-__all__ = ["TAEF1", "TAEF2", "TAESD", "TAESDXL", "QwenImage", "Taef", "ZImage"]
+class Krea2(Taef):
+    """Krea 2 Turbo previews. Reuses the taew2.1 (Wan 2.1 VAE) weights via the qwen kernel.
+
+    Krea 2 generates on the Qwen-Image stack, so its latents decode through the same
+    tiny autoencoder as ``QwenImage`` — one shared converted-weights cache entry.
+    """
+
+    _kernel = KERNELS["krea2"]
+
+
+__all__ = ["TAEF1", "TAEF2", "TAESD", "TAESDXL", "Krea2", "QwenImage", "Taef", "ZImage"]

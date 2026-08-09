@@ -4,8 +4,9 @@ Provides:
 - `unpack_flux2_latent`: convert mflux's packed FLUX.2 latents to TAEF2-compatible NHWC.
 - `LivePreviewCallback`: drop-in mflux callback that writes preview PNGs every N steps.
   Supports FLUX.1 (``variant='taef1'``), FLUX.2 Klein (``variant='taef2'``), Z-Image /
-  Z-Image-Turbo (``variant='zimage'``, reuses TAEF1 weights), and Qwen-Image / Qwen-Image-Edit
-  (``variant='qwen-image'``, via taew2.1).
+  Z-Image-Turbo (``variant='zimage'``, reuses TAEF1 weights), Qwen-Image / Qwen-Image-Edit
+  (``variant='qwen-image'``, via taew2.1), and Krea 2 (``variant='krea2'``, shares the
+  qwen-image taew2.1 weights).
 
 Install with: `pip install "mlx-taef[mflux]"`.
 """
@@ -25,7 +26,7 @@ try:
 except ImportError as e:  # pragma: no cover
     raise MfluxNotInstalledError() from e
 
-from mlx_taef.api import TAEF1, TAEF2, QwenImage, Taef, ZImage
+from mlx_taef.api import TAEF1, TAEF2, Krea2, QwenImage, Taef, ZImage
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ _VARIANT_CLASSES: dict[str, type[Taef]] = {
     "taef2": TAEF2,
     "zimage": ZImage,
     "qwen-image": QwenImage,
+    "krea2": Krea2,
 }
 
 
@@ -149,8 +151,9 @@ class LivePreviewCallback:
             step) and logs an info line so the no-op is observable. Explicit `bn_mean`/
             `bn_var` always take precedence.
         variant: 'taef1' (FLUX.1), 'taef2' (FLUX.2 Klein), 'zimage' (Z-Image /
-            Z-Image-Turbo, which reuses TAEF1's weights), or 'qwen-image'
-            (Qwen-Image / Qwen-Image-Edit, via taew2.1).
+            Z-Image-Turbo, which reuses TAEF1's weights), 'qwen-image'
+            (Qwen-Image / Qwen-Image-Edit, via taew2.1), or 'krea2' (Krea 2,
+            which shares the qwen-image taew2.1 weights).
         every: emit a preview every Nth iteration. Default 5. When
             `numbered_frames=True` this is forced to 1 so the gallery
             captures every step.
@@ -180,7 +183,7 @@ class LivePreviewCallback:
         *,
         flux: object | None = None,
         auto_bn: bool = True,
-        variant: Literal["taef1", "taef2", "zimage", "qwen-image"] = "taef2",
+        variant: Literal["taef1", "taef2", "zimage", "qwen-image", "krea2"] = "taef2",
         every: int = 5,
         save_to: str | Path = "preview.png",
         numbered_frames: bool = False,

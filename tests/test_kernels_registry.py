@@ -4,8 +4,16 @@ from mlx_taef.errors import TaefError, UnknownKernelError
 from mlx_taef.kernels import KERNELS, get_kernel
 
 
-def test_registry_has_exactly_the_six_kernels():
-    assert set(KERNELS) == {"taesd", "taesdxl", "taef1", "taef2", "zimage", "qwen-image"}
+def test_registry_has_exactly_the_seven_kernels():
+    assert set(KERNELS) == {
+        "taesd",
+        "taesdxl",
+        "taef1",
+        "taef2",
+        "zimage",
+        "qwen-image",
+        "krea2",
+    }
 
 
 def test_qwen_image_kernel_registered():
