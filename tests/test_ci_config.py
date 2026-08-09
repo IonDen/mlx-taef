@@ -75,3 +75,19 @@ def test_readme_python_badge_states_the_floor_as_a_range() -> None:
     assert "pypi/pyversions" not in readme, (
         "the enumerating pyversions badge was replaced by the floor badge"
     )
+
+
+def test_mlx_teacache_has_no_python_version_marker() -> None:
+    """mlx-teacache supports 3.10 since its v0.9.3; the old gate must not silently return."""
+    data = _pyproject()
+    entries = [
+        dep
+        for dep in (
+            data["project"]["optional-dependencies"]["showcase"] + data["dependency-groups"]["test"]
+        )
+        if isinstance(dep, str) and dep.startswith("mlx-teacache")
+    ]
+    assert len(entries) == 2, entries
+    for dep in entries:
+        assert "python_version" not in dep, f"stale 3.11 gate: {dep}"
+        assert ">=0.9.3" in dep, f"floor must be the first 3.10-capable release: {dep}"

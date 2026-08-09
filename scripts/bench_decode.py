@@ -128,6 +128,27 @@ def _parse_worker_stdout(stdout: str) -> dict[str, Any]:
     return payload
 
 
+def _watchdog_abort_path(save_to: Path) -> Path:
+    """Where this rep's watchdog abort artifact would be written, if any.
+
+    Sits next to the rep's webp output rather than overloading the sentinel/JSON-report
+    plumbing, so a worker that dies via os._exit() (skipping the print of a sentinel
+    line) still leaves an honest, discoverable record.
+    """
+    return save_to.with_name(save_to.stem + ".watchdog_abort.json")
+
+
+def _worker_wall_budget_s(condition: str, *, margin_s: float = 30.0) -> float:
+    """Watchdog wall budget for `condition`'s worker.
+
+    Strictly under the orchestrator's subprocess.run(timeout=...) for that condition, so
+    a wall-budget breach is reachable (the watchdog's own thread can report
+    `reason="wall_budget"` with an honest artifact) instead of the subprocess timeout
+    always firing first with no artifact at all.
+    """
+    return _SUBPROCESS_TIMEOUT_S.get(condition, 600) - margin_s
+
+
 def _run_one_rep(
     *,
     latent_path: Path,
@@ -168,6 +189,24 @@ def _run_one_rep(
         }
 
     if proc.returncode != 0:
+        abort_path = _watchdog_abort_path(save_to)
+        if abort_path.exists():
+            try:
+                abort_payload = json.loads(abort_path.read_text())
+            except (OSError, json.JSONDecodeError):
+                abort_payload = None
+            if isinstance(abort_payload, dict) and abort_payload.get("status") == "aborted":
+                return {
+                    "condition": condition,
+                    "rep": rep,
+                    "status": "failed",
+                    "error": (
+                        f"watchdog aborted: {abort_payload.get('reason', 'unknown')} "
+                        f"(active={abort_payload.get('active_memory_bytes')} bytes, "
+                        f"ceiling={abort_payload.get('ceiling_bytes')} bytes, "
+                        f"elapsed={abort_payload.get('elapsed_s')}s)"
+                    ),
+                }
         # Cap rejected at startup, OOM, jetsam, etc. Parse stderr for hints.
         return {
             "condition": condition,
@@ -415,42 +454,64 @@ def _save_webp(image_uint8_nhwc: Any, target: Path) -> None:
 
 
 def _worker_main(args: argparse.Namespace) -> int:
-    """Run one (condition, rep) inside this subprocess. Emit sentinel."""
+    """Run one (condition, rep) inside this subprocess. Emit sentinel.
+
+    Installs the same active-memory watchdog the live-scenario worker path uses
+    (scripts.run_showcase._install_live_watchdog) around model construction + decode, so
+    a rep that would otherwise page-storm the machine aborts with an honest artifact
+    (see _watchdog_abort_path) and a nonzero exit instead of risking a kernel panic.
+    Deferred import: run_showcase.py imports this module at its own top level, so
+    importing it back at bench_decode's module level would cycle.
+    """
+    # Drop any stale abort artifact from a prior rep at this save-to path before doing any
+    # real work — otherwise a THIS-rep crash unrelated to the watchdog would be misreported
+    # by _run_one_rep as "watchdog aborted" just because the file happens to still exist.
+    _watchdog_abort_path(args.save_to).unlink(missing_ok=True)
     installed_cap_gb = _install_memory_caps(args.applied_cap_gb)
 
-    import mlx.core as mx
+    from scripts.run_showcase import _install_live_watchdog
 
-    arrays = mx.load(str(args.latent))
-    latent = arrays["latent"]
-    height = int(arrays["height"].item())
-    width = int(arrays["width"].item())
-    bn_mean = arrays.get("bn_mean")
-    bn_var = arrays.get("bn_var")
+    watchdog = _install_live_watchdog(
+        _watchdog_abort_path(args.save_to),
+        f"{args.condition}_rep{args.rep}",
+        wall_budget_s=_worker_wall_budget_s(args.condition),
+    )
+    try:
+        import mlx.core as mx
 
-    # Setup (UN-timed): construct the model + unpack the latent.
-    if args.condition == "taef1":
-        decode_fn = _prep_taef1(latent, height, width)
-    elif args.condition == "taef2":
-        if bn_mean is None or bn_var is None:
-            raise TaefError("taef2 condition requires bn_mean+bn_var in the latent safetensors")
-        decode_fn = _prep_taef2(latent, height, width, bn_mean, bn_var)
-    elif args.condition == "zimage":
-        decode_fn = _prep_zimage(latent, height, width)
-    elif args.condition == "vanilla_vae":
-        if args.flux_variant == "flux1-dev":
-            decode_fn = _prep_full_vae_flux1(latent, height, width)
-        elif args.flux_variant == "flux2-klein-base-4b":
-            decode_fn = _prep_full_vae_flux2(latent, height, width)
-        elif args.flux_variant == "z-image-turbo":
-            decode_fn = _prep_full_vae_zimage(latent, height, width)
+        arrays = mx.load(str(args.latent))
+        latent = arrays["latent"]
+        height = int(arrays["height"].item())
+        width = int(arrays["width"].item())
+        bn_mean = arrays.get("bn_mean")
+        bn_var = arrays.get("bn_var")
+
+        # Setup (UN-timed): construct the model + unpack the latent.
+        if args.condition == "taef1":
+            decode_fn = _prep_taef1(latent, height, width)
+        elif args.condition == "taef2":
+            if bn_mean is None or bn_var is None:
+                raise TaefError("taef2 condition requires bn_mean+bn_var in the latent safetensors")
+            decode_fn = _prep_taef2(latent, height, width, bn_mean, bn_var)
+        elif args.condition == "zimage":
+            decode_fn = _prep_zimage(latent, height, width)
+        elif args.condition == "vanilla_vae":
+            if args.flux_variant == "flux1-dev":
+                decode_fn = _prep_full_vae_flux1(latent, height, width)
+            elif args.flux_variant == "flux2-klein-base-4b":
+                decode_fn = _prep_full_vae_flux2(latent, height, width)
+            elif args.flux_variant == "z-image-turbo":
+                decode_fn = _prep_full_vae_zimage(latent, height, width)
+            else:  # pragma: no cover
+                raise TaefError(f"unknown flux_variant: {args.flux_variant!r}")
         else:  # pragma: no cover
-            raise TaefError(f"unknown flux_variant: {args.flux_variant!r}")
-    else:  # pragma: no cover
-        raise TaefError(f"unknown condition: {args.condition!r}")
+            raise TaefError(f"unknown condition: {args.condition!r}")
 
-    image, elapsed_s, peak_gb = _measure_steady_state(decode_fn)
+        image, elapsed_s, peak_gb = _measure_steady_state(decode_fn)
 
-    _save_webp(image, args.save_to)
+        _save_webp(image, args.save_to)
+    finally:
+        watchdog.stop()
 
     print(
         _emit_sentinel(

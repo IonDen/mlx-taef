@@ -32,6 +32,26 @@ def test_scenario_dispatch_table() -> None:
     assert "zimage_live_preview" in _SCENARIO_DISPATCH
 
 
+def test_all_scenario_order_runs_live_scenarios_before_vs_vae() -> None:
+    """`--scenario all` must run the live scenarios BEFORE the vs-VAE scenarios.
+
+    The vs-VAE scenarios build LPIPS's torch+AlexNet model (~730 MB resident, never
+    returned to the OS) in the orchestrator process. If vs-VAE ran first, the live
+    scenarios' subprocess watchdogs (each computing a memory ceiling from the device's
+    total memory_size) would run with ~730 MB less real headroom than their math assumes."""
+    from scripts.run_showcase import _LIVE_SCENARIOS, _SCENARIO_DISPATCH, _all_scenario_order
+
+    order = _all_scenario_order()
+
+    assert set(order) == set(_SCENARIO_DISPATCH)
+    assert len(order) == len(_SCENARIO_DISPATCH)
+    live_indices = [i for i, s in enumerate(order) if s in _LIVE_SCENARIOS]
+    vs_vae_indices = [i for i, s in enumerate(order) if s not in _LIVE_SCENARIOS]
+    assert live_indices, "expected at least one live scenario in the order"
+    assert vs_vae_indices, "expected at least one vs-VAE scenario in the order"
+    assert max(live_indices) < min(vs_vae_indices)
+
+
 def test_json_schema_version_round_trip(tmp_path: Path) -> None:
     from scripts.run_showcase import SCHEMA_VERSION, _load_report, _write_report
 
@@ -554,3 +574,235 @@ def test_run_scenarios_routes_live_scenarios_through_subprocess_runner(
     assert failures == 0
     assert routed == ["live_preview"]
     assert report["scenarios"]["live_preview"] == {"status": "ok"}
+
+
+def test_vs_vae_worker_installs_active_memory_watchdog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The vs-VAE per-rep worker (scripts.bench_decode._worker_main) must install the
+    same active-memory watchdog the live-scenario worker path uses, not just the
+    wired/soft memory caps + subprocess timeout it already had. Mirrors how
+    test_live_worker_mode_runs_one_raw_scenario proves the live worker's watchdog
+    routing above."""
+    import argparse
+
+    import mlx.core as mx
+    import scripts.bench_decode as bench
+
+    latent_file = tmp_path / "latent.safetensors"
+    mx.save_safetensors(
+        str(latent_file),
+        {
+            "latent": mx.zeros((1, 2, 2, 16)),
+            "height": mx.array(16),
+            "width": mx.array(16),
+        },
+    )
+
+    watchdog_events: list[str] = []
+
+    class _FakeWatchdog:
+        def stop(self) -> None:
+            watchdog_events.append("stopped")
+
+    def _fake_install(result_path: Path, scenario: str, **kwargs: object) -> _FakeWatchdog:
+        watchdog_events.append(f"installed:{scenario}")
+        return _FakeWatchdog()
+
+    monkeypatch.setattr("scripts.run_showcase._install_live_watchdog", _fake_install)
+    monkeypatch.setattr(bench, "_install_memory_caps", lambda cap: 1)
+    monkeypatch.setattr(bench, "_prep_taef1", lambda latent, h, w: lambda: "IMG")
+    monkeypatch.setattr(bench, "_measure_steady_state", lambda decode_fn: ("IMG", 0.25, 2.0))
+    monkeypatch.setattr(bench, "_save_webp", lambda image, target: None)
+
+    args = argparse.Namespace(
+        condition="taef1",
+        rep=0,
+        latent=latent_file,
+        save_to=tmp_path / "taef1_rep0.webp",
+        applied_cap_gb=1,
+        flux_variant="flux1-dev",
+    )
+
+    assert bench._worker_main(args) == 0
+    assert watchdog_events == ["installed:taef1_rep0", "stopped"]
+
+
+def test_vs_vae_rep_surfaces_watchdog_abort_reason(tmp_path: Path) -> None:
+    """When a rep subprocess exits nonzero AND left a watchdog abort artifact next to
+    its save-to path, _run_one_rep must report the abort reason (not just the bare
+    exit code) — mirrors how _run_live_scenario_subprocess reads the live worker's
+    aborted partial result."""
+    import subprocess
+    from unittest.mock import patch
+
+    from scripts.bench_decode import _run_one_rep, _watchdog_abort_path
+
+    save_to = tmp_path / "taef1_rep0.webp"
+    abort_path = _watchdog_abort_path(save_to)
+    abort_path.write_text(
+        json.dumps(
+            {
+                "status": "aborted",
+                "scenario": "taef1_rep0",
+                "reason": "memory_ceiling",
+                "active_memory_bytes": 30 * 1024**3,
+                "ceiling_bytes": 28 * 1024**3,
+                "elapsed_s": 12.5,
+            }
+        )
+    )
+    fake_proc = subprocess.CompletedProcess(args=[], returncode=70, stdout="", stderr="")
+
+    with patch("scripts.bench_decode.subprocess.run", return_value=fake_proc):
+        result = _run_one_rep(
+            latent_path=tmp_path / "latent.safetensors",
+            condition="taef1",
+            flux_variant="flux1-dev",
+            rep=0,
+            save_to=save_to,
+            cap_gb=1,
+        )
+
+    assert result["status"] == "failed"
+    assert "watchdog aborted: memory_ceiling" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# LPIPS (offline: injected score_fn only; the real net="alex" scorer is
+# network-marked below and needs `uv sync --group fixtures`)
+# ---------------------------------------------------------------------------
+
+
+def test_argparse_no_lpips_flag_defaults_false() -> None:
+    from scripts.run_showcase import _build_argparser
+
+    parser = _build_argparser()
+    assert parser.parse_args([]).no_lpips is False
+    assert parser.parse_args(["--no-lpips"]).no_lpips is True
+
+
+def test_compute_lpips_returns_per_pair_array_and_median(tmp_path: Path) -> None:
+    """A deterministic fake score_fn proves the aggregation shape without lpips/torch."""
+    from scripts.run_showcase import _compute_lpips
+
+    path_a = tmp_path / "a.webp"
+    path_b = tmp_path / "b.webp"
+    path_a.write_bytes(b"fake-a")
+    path_b.write_bytes(b"fake-b")
+
+    result = _compute_lpips([path_a], [path_b], score_fn=lambda a, b: 0.25)
+
+    assert result == {"lpips_per_pair": [0.25], "lpips_median": 0.25}
+
+
+def test_compute_lpips_mismatched_lengths_uses_cross_product(tmp_path: Path) -> None:
+    """Mirrors _compute_ssim: every ref against every cand, not a zip."""
+    from scripts.run_showcase import _compute_lpips
+
+    refs = [tmp_path / "r0.webp", tmp_path / "r1.webp"]
+    cands = [tmp_path / "c0.webp"]
+    for p in [*refs, *cands]:
+        p.write_bytes(b"x")
+
+    result = _compute_lpips(refs, cands, score_fn=lambda a, b: 0.5)
+
+    assert result["lpips_per_pair"] == [0.5, 0.5]
+    assert result["lpips_median"] == 0.5
+
+
+def test_require_lpips_raises_taef_error_naming_install_and_flag(monkeypatch) -> None:
+    """Mirrors test_import_apply_teacache_raises_package_error_when_missing's pattern:
+    a None sys.modules entry forces the import to raise ImportError."""
+    import sys
+
+    from mlx_taef.errors import TaefError
+
+    monkeypatch.setitem(sys.modules, "lpips", None)
+    from scripts.run_showcase import _require_lpips
+
+    with pytest.raises(TaefError) as exc_info:
+        _require_lpips()
+    message = str(exc_info.value)
+    assert "uv sync --group fixtures" in message
+    assert "--no-lpips" in message
+
+
+def test_vs_vae_scenario_no_lpips_flag_skips_lpips_explicitly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--no-lpips must produce explicit empty/None lpips keys, never a silent omission —
+    even when both webp lists are non-empty and LPIPS *could* have been computed."""
+    import argparse
+
+    import numpy as np
+    import scripts.run_showcase as rs
+    from PIL import Image
+
+    monkeypatch.setattr(rs, "_ARTIFACTS_DIR", tmp_path)
+    monkeypatch.setattr(rs, "_check_latent_sha", lambda latent: {"status": "ok"})
+
+    def _fake_run_orchestrator(
+        *,
+        latent_path: Path,
+        condition: str,
+        reps: int,
+        save_dir: Path,
+        flux_variant: str,
+        cap_gb_override: int | None,
+    ) -> dict[str, object]:
+        save_dir.mkdir(parents=True, exist_ok=True)
+        img = (np.random.default_rng(0).random((8, 8, 3)) * 255).astype(np.uint8)
+        Image.fromarray(img).save(save_dir / f"{condition}_rep0.webp")
+        return {"status": "ok", "median_seconds": 0.1}
+
+    monkeypatch.setattr("scripts.bench_decode._run_orchestrator", _fake_run_orchestrator)
+
+    args = argparse.Namespace(reps=None, cap_gb=None, no_lpips=True)
+    result = rs._vs_vae_scenario(
+        taef_condition="taef2",
+        flux_variant="flux2-klein-base-4b",
+        latent_name="flux2_klein_base_4b.safetensors",
+        args=args,
+    )
+
+    assert result["lpips_per_pair"] == []
+    assert result["lpips_median"] is None
+    # SSIM was still computed (proves the webps really were discovered — the
+    # lpips omission is a deliberate flag effect, not an accidental empty glob).
+    assert result["ssim_per_pair"] != []
+
+
+@pytest.mark.network
+def test_compute_lpips_real_scorer_identical_vs_different(tmp_path: Path) -> None:
+    """Real LPIPS(net="alex"): identical images -> median ~0.0; clearly different -> > 0.05.
+
+    Network: downloads torchvision AlexNet ImageNet weights on first use. Measured on a
+    64x64 synthetic RGB image (seed 0) vs its bitwise inverse: identical median = 0.0,
+    different median = 0.098. Weights cache at
+    ~/.cache/torch/hub/checkpoints/alexnet-owt-7be5be79.pth (sha256
+    7be5be791159472b1fbf3c69796f7cb30dca7ad8466c2df70058c37116cdee02, ~233 MiB); the
+    `lpips` package itself bundles its linear-calibration weights, so only the AlexNet
+    backbone is a network download.
+    """
+    import numpy as np
+    from PIL import Image
+    from scripts.run_showcase import _compute_lpips
+
+    rng = np.random.default_rng(0)
+    img_a = (rng.random((64, 64, 3)) * 255).astype(np.uint8)
+    img_b = img_a.copy()
+    img_c = 255 - img_a  # clearly different
+
+    path_a = tmp_path / "a.webp"
+    path_b = tmp_path / "b.webp"
+    path_c = tmp_path / "c.webp"
+    Image.fromarray(img_a).save(path_a)
+    Image.fromarray(img_b).save(path_b)
+    Image.fromarray(img_c).save(path_c)
+
+    identical = _compute_lpips([path_a], [path_b])
+    assert identical["lpips_median"] == pytest.approx(0.0, abs=1e-6)
+
+    different = _compute_lpips([path_a], [path_c])
+    assert different["lpips_median"] > 0.05

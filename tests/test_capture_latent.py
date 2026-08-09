@@ -164,3 +164,74 @@ def test_capture_flux1_latent_raises_when_callback_never_fires() -> None:
         _capture_flux1_latent(
             _SilentFlux(), prompt="p", seed=0, height=64, width=64, num_steps=1, guidance=1.0
         )
+
+
+def test_capture_watchdog_abort_skipped_when_generation_already_stopped(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """A breach observed after stop() must not overwrite the capture's real result."""
+    import threading
+
+    import scripts._capture_latent as cl
+
+    writes: list[object] = []
+    exits: list[int] = []
+    monkeypatch.setattr(
+        cl.Path, "write_text", lambda self, text: writes.append(text), raising=False
+    )
+    monkeypatch.setattr(cl.os, "_exit", lambda code: exits.append(code))
+
+    stop_event = threading.Event()
+    stop_event.set()
+    cl._commit_capture_watchdog_abort(
+        tmp_path / "r.abort.json", {"status": "aborted"}, stop_event=stop_event
+    )
+
+    assert writes == []
+    assert exits == []
+
+
+def test_capture_watchdog_abort_writes_then_exits_70(monkeypatch, tmp_path: Path) -> None:
+    import threading
+
+    import scripts._capture_latent as cl
+
+    events: list[object] = []
+    monkeypatch.setattr(
+        cl.Path,
+        "write_text",
+        lambda self, text: events.append(("write", text)),
+        raising=False,
+    )
+    monkeypatch.setattr(cl.os, "_exit", lambda code: events.append(("exit", code)))
+
+    payload = {"status": "aborted", "reason": "memory_ceiling"}
+    cl._commit_capture_watchdog_abort(
+        tmp_path / "r.abort.json", payload, stop_event=threading.Event()
+    )
+
+    assert events[0][0] == "write"
+    assert events[1] == ("exit", 70)
+
+
+def test_capture_watchdog_abort_exits_even_when_write_fails(monkeypatch, tmp_path: Path) -> None:
+    """The capture process must still die (honestly, via exit 70) if the abort record
+    can't be written — a dead daemon thread with the memory backstop silently gone would
+    be worse than a process that exits without an artifact."""
+    import threading
+
+    import scripts._capture_latent as cl
+
+    exits: list[int] = []
+
+    def _broken_write(self: object, text: str) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(cl.Path, "write_text", _broken_write, raising=False)
+    monkeypatch.setattr(cl.os, "_exit", lambda code: exits.append(code))
+
+    with pytest.raises(OSError, match="disk full"):
+        cl._commit_capture_watchdog_abort(
+            tmp_path / "r.abort.json", {"status": "aborted"}, stop_event=threading.Event()
+        )
+    assert exits == [70]

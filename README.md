@@ -32,7 +32,7 @@ img_uint8 = taef.decode_image(latents)      # uint8 NHWC ready for PIL
 
 **You want FLUX generation itself to be faster on Apple Silicon?** You want [`mlx-teacache`](https://github.com/IonDen/mlx-teacache) — it skips redundant denoising steps when the schedule is cacheable (measured 1.46× on FLUX.1-dev at 25 steps).
 
-**You want both: faster generation AND live previews?** Use them together. mflux 4-step Klein + TeaCache + TAEF2 previews measured 1.31× faster with 43% less peak memory than the same generation without TeaCache.
+**You want both: faster generation AND live previews?** Use them together. mflux 4-step Klein + TeaCache + TAEF2 previews measured 1.41× faster with 44% less peak memory than the same generation without TeaCache.
 
 ## Install
 
@@ -76,6 +76,7 @@ Requires Python ≥ 3.10 and Apple Silicon (`mlx` itself is Apple-Silicon-only).
 | `TAEF2` | 32 | FLUX.2 Klein | [madebyollin/taef2](https://huggingface.co/madebyollin/taef2) |
 | `ZImage` | 16 | Z-Image / Z-Image-Turbo (shares the FLUX.1 16-ch latent contract) | reuses [madebyollin/taef1](https://huggingface.co/madebyollin/taef1) |
 | `QwenImage` | 16 | Qwen-Image / Qwen-Image-Edit (Wan 2.1 VAE 16-ch latent) | [ionden/taew2.1](https://huggingface.co/ionden/taew2.1) |
+| `Krea2` | 16 | Krea 2 Turbo (generates on the Qwen-Image stack, shares its Wan 2.1 VAE) | reuses [ionden/taew2.1](https://huggingface.co/ionden/taew2.1) |
 
 They all share one API.
 
@@ -94,6 +95,37 @@ All numbers there come from `scripts/run_showcase.py` (subprocess-per-condition 
 The previous v0.1.x README claim — *"~100 ms decode at 1024×1024, 50–100× faster than the full Flux VAE; ~1 GB peak vs ~9.6 GB"* — was a same-process measurement under v0.1's `tests/test_perf.py`. v0.2.0 re-measures under subprocess-per-rep with per-condition memory caps; see COMPARISON.md for the honest replacement numbers.
 
 ## mflux live previews
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/IonDen/mlx-taef/main/docs/assets/live-preview.gif" alt="Side-by-side animated GIF: TAEF1 per-step live previews animating on the left against the finished full-VAE decode held static on the right, with a step-count caption." width="100%">
+</p>
+
+TAEF1 per-step previews (left) next to the final full-VAE decode (right), from a FLUX.1-dev
+generation at 768x768, 26 steps, seed 20, prompt "anime key visual, a lone warrior in a tattered
+cloak holding an oversized greatsword, standing in an overgrown ruined city, dramatic backlight,
+volumetric light, highly detailed, cinematic, studio anime style", captured on an M1 Max with
+`LivePreviewCallback` registered every step. Reproduce it: adapt [`examples/mflux_live_preview.py`](examples/mflux_live_preview.py)
+(the runnable starting point for wiring up `LivePreviewCallback`) to those parameters, which writes
+a numbered preview-frame gallery plus the final image, then assemble the GIF with:
+
+```
+uv run python scripts/make_preview_gif.py \
+    --frames-dir <run-output> \
+    --frames-glob "*_step*.png" \
+    --final <final.png> \
+    --out docs/assets/live-preview.gif \
+    --panel-width 320
+```
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/IonDen/mlx-taef/main/docs/assets/taef1-live-preview.gif" alt="Looping animated GIF of the same TAEF1 live-preview frames playing through and holding on the final decode, single panel." width="40%">
+</p>
+
+The same capture as a compact, single-panel loop: the previews play through, then hold on the
+final frame.
+
+Wiring the callback into a generation looks like this (FLUX.2 Klein shown; the GIFs above use
+FLUX.1-dev / `variant="taef1"` with the parameters noted):
 
 ```python
 from mflux.models.common.config.model_config import ModelConfig
@@ -142,6 +174,7 @@ See `docs/manual-verification.md` for the full verification recipe.
 - **v0.6.2 — released on PyPI** (2026-07-09). Hardening and accuracy. `LivePreviewCallback` now rejects `every < 1` and a half-set BN pair, and resets its state between generations. The converted-weights cache invalidates when a source's pinned revision or sha256 changes (Qwen-Image re-converts once on upgrade), and every conversion path enforces those pins. The decode benchmark now measures the decode step at steady state, in isolation from one-time model construction: the tiny decoders run ~30 ms per step (earlier releases reported ~180–260 ms because they timed model construction inside the decode window), a ~8–10× speedup over the full VAE decode. COMPARISON / EXAMPLES are re-measured with two Z-Image scenarios added. Also fixes the mflux quickstart earlier in this README.
 - **v0.7.0 — released on PyPI** (2026-07-24). `LivePreviewCallback` gains configurable runtime failure handling: it warns once and disables previews for the current generation by default, while `on_error="raise"` preserves strict behavior. All built-in weight sources now have immutable revisions and role-specific sha256 pins, and `mlx-taef convert` uses the same verified source path as runtime loading. Conversion caches include a format version, and CI installs from the lockfile. The six-scenario benchmark requires every repetition and preview frame, exits nonzero after any scenario failure, and records source and installed-package versions separately. The measured report shows no regression against v0.6.2.
 - **v0.7.1 — released on PyPI** (2026-07-25). Python 3.10 is now supported: the floor drops from 3.11 to 3.10 and CI runs the full offline suite on 3.10 through 3.14, so no advertised version is untested. `mlx-teacache` (used by the showcase and test extras, and 3.11-only) installs on 3.11+ only; the runtime dependencies all work on 3.10.
+- **v0.8.0 — released on PyPI** (2026-08-09). Krea 2 Turbo live preview: a new `Krea2` model reuses the taew2.1 weights already converted for `QwenImage`, with no new download. Decode quality against mflux's full Krea 2 VAE is gated by an SSIM check (measured 0.9678). `mlx-teacache` now installs on Python 3.10 as well, so the showcase's combined scenario runs on every supported Python version. The showcase report adds LPIPS alongside SSIM, `ZImage.encode()` gets its own SSIM-gated validation (measured 0.9580), and the live-preview integration is verified against mflux 0.18.1. Every model-loading showcase and benchmark subprocess now runs under the active-memory watchdog, not just the live-generation workers.
 
 Track future releases via the [PyPI history](https://pypi.org/project/mlx-taef/#history) or `gh release list -R IonDen/mlx-taef`.
 

@@ -8,10 +8,12 @@ Hierarchy:
     ├── UnknownKernelError                 (+ KeyError) name not in the kernel registry
     ├── UnknownArchitectureError           (+ KeyError) arch/role has no registered builder
     ├── SchemaVersionError                 raised by the bundled showcase tooling
-    └── FixtureLatentMissingError          (+ FileNotFoundError) bundled showcase tooling
+    ├── FixtureLatentMissingError          (+ FileNotFoundError) bundled showcase tooling
+    └── PreviewFramesMissingError          (+ FileNotFoundError) bundled preview-gif tooling
 
-SchemaVersionError and FixtureLatentMissingError are raised only by the bundled
-showcase tooling (`scripts/run_showcase.py`), not by importable package code.
+SchemaVersionError, FixtureLatentMissingError, and PreviewFramesMissingError are
+raised only by the bundled showcase/tooling scripts (`scripts/run_showcase.py`,
+`scripts/make_preview_gif.py`), not by importable package code.
 """
 
 
@@ -74,6 +76,10 @@ class MlxTeacacheNotInstalledError(TaefError, ImportError):
 
 class FixtureLatentMissingError(TaefError, FileNotFoundError):
     """Raised when a showcase scenario's fixture latent file is missing."""
+
+
+class PreviewFramesMissingError(TaefError, FileNotFoundError):
+    """Raised when `scripts/make_preview_gif.py` finds no frames to assemble."""
 
 
 class UnknownKernelError(TaefError, KeyError):

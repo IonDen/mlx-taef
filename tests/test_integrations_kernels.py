@@ -52,6 +52,13 @@ def test_binding_dispatch_routes_each_model_to_its_unpack():
     assert get_kernel("qwen-image").integration.unpack is unpack_qwen_latent
 
 
+def test_krea2_kernel_binding_uses_krea2_unpack():
+    from mlx_taef.kernels import get_kernel
+    from mlx_taef.kernels.krea2 import unpack_krea2_latent
+
+    assert get_kernel("krea2").integration.unpack is unpack_krea2_latent
+
+
 def test_flux1_callback_end_to_end_writes_preview(monkeypatch, tmp_path):
     pytest.importorskip("mflux")
     from pathlib import Path

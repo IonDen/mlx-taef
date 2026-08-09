@@ -75,3 +75,12 @@
 "taesdxl_latent_002.safetensors" = "fe69ac4683143b1d9144fac56583fab87e723a89cd0ce99ff347cdf4343e279c"
 "taesdxl_latent_003.safetensors" = "4b5e70b8649f7671babfb5b41645b98e7dc35150964c5d72a0c9805ac37537c9"
 "taesdxl_latent_004.safetensors" = "4d4bc9197a5479562260c89f1c8b1c186d49463ecf66b95964f81a748029750b"
+
+["fixtures/showcase_latents"]
+# Showcase latents back committed SSIM claims (test_zimage_ssim.py, test_krea2_ssim.py). Pinned
+# so a silent replacement is a hard failure in the default suite, not a warning (see
+# test_fixtures_integrity.py::test_every_showcase_latent_is_sha_pinned).
+"flux1_dev.safetensors" = "ee87a0ebb57eebeaa11ff82b5253b9315797d26cdf68e98b8a77be6a5c5d9339"
+"krea_2_turbo.safetensors" = "258ff39d1bdd4c14c39a734c7d5ac193bb0f7532d97796a2ae223c71f4cedd55"
+"flux2_klein_base_4b.safetensors" = "936ea693fdd0744afc929193b9748b1aebb609287da1a1fbdb47b7c737d2908a"
+"z_image_turbo.safetensors" = "b5d3a8e2d33b96307ccf18f76cd699cad84089a199fc23dc08ae2a878e0b3c77"

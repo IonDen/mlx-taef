@@ -5,11 +5,11 @@ Visual showcase of what mlx-taef does on real generations. Every number on this 
 ## Test machine
 
 - Apple M1 Max, 32 GB unified memory (`sysctl machdep.cpu.brand_string` + `hw.memsize`)
-- macOS Darwin 25.5.0, Python 3.14.5
-- mflux 0.18.0, mlx-teacache 0.9.1, MLX 0.31.2
-- mlx-taef source `v0.6.2-4-g1e79c29` at commit `1e79c29`; installed distribution `0.6.3.dev4+g1e79c2977.d20260724`
+- macOS Darwin 25.6.0, Python 3.13.12
+- mflux 0.18.1, mlx-teacache 0.9.3, MLX 0.31.2
+- mlx-taef source `v0.7.1-8-g28af6c5` at commit `28af6c5`; installed distribution `0.7.2.dev4+ga4e5df5eb.d20260809`
 - Quantization: int4 (mflux `quantize=4`), bf16 generation, fp32 tiny-autoencoder decode
-- Every condition ran in an isolated subprocess with `mx.set_wired_limit` set per the cap column. Each decode was timed after one untimed warmup call, so the figure reflects steady-state per-step decode rather than a cold first call. Live-generation workers also enforced a 28 GiB active-memory ceiling and a 55-minute wall budget. Hardware metadata is recorded inline in `_artifacts/showcase_report.json`.
+- Every condition ran in an isolated subprocess with `mx.set_wired_limit` set per the cap column. Each decode was timed after one untimed warmup call, so the figure reflects steady-state per-step decode rather than a cold first call. Every model-loading subprocess — the three live-generation workers and the vs-VAE decode reps alike — enforces a 28 GiB active-memory ceiling; the live-generation workers add a 55-minute wall budget on top. Hardware metadata is recorded inline in `_artifacts/showcase_report.json`.
 
 ## Where this fits
 
@@ -23,17 +23,17 @@ Visual showcase of what mlx-taef does on real generations. Every number on this 
 
 ### `taef2_vs_vae` — TAEF2 decoder vs Full FLUX.2 VAE (same latent)
 
-Same FLUX.2 Klein base 4B latent, two different decoders. Both produce a 512×512 RGB image; SSIM is the cross-product of TAEF2 reps (5) against vanilla VAE reps (3), and all 15 pairs land at the same value because each decoder is deterministic on the same latent.
+Same FLUX.2 Klein base 4B latent, two different decoders. Both produce a 512×512 RGB image; SSIM and LPIPS are each the cross-product of TAEF2 reps (5) against vanilla VAE reps (3), and all 15 pairs land at the same value because each decoder is deterministic on the same latent. One direction note for the rest of this page: SSIM is a similarity score, so higher is better. LPIPS is a learned perceptual distance, so lower is better.
 
 | | Vanilla FLUX.2 VAE | TAEF2 |
 |---|---|---|
-| Decode latency (median of 3/5 warmed subprocess reps) | 0.283 s | 0.0305 s |
-| Decode latency range | 0.2832 to 0.2834 s | 0.0304 to 0.0320 s |
+| Decode latency (median of 3/5 warmed subprocess reps) | 0.283 s | 0.0302 s |
+| Decode latency range | 0.2797 to 0.2895 s | 0.0301 to 0.0305 s |
 | Peak decode memory (post-model-load) | 2.80 GB | 0.59 GB |
 | Applied wired cap | 12 GB | 2 GB |
 | Reference image | ![vanilla](_artifacts/showcase/taef2/vae/vanilla_vae_rep0.webp) | ![taef2](_artifacts/showcase/taef2/taef/taef2_rep0.webp) |
 
-**TAEF2 is ~9.3× faster, with ~4.8× lower peak decode memory.** SSIM(TAEF2, Vanilla) = **0.616** (15/15 pairs).
+**TAEF2 is ~9.4× faster, with ~4.8× lower peak decode memory.** SSIM(TAEF2, Vanilla) = **0.616**, LPIPS(TAEF2, Vanilla) = **0.216** (15/15 pairs each).
 
 That 0.616 is below the 0.75 starting threshold, and it's worth being explicit about why: TAEF2 is a 4 MB preview decoder. The full FLUX.2 VAE is ~340 MB. TAEF2 keeps the structure (apple, table, color) and loses fine detail (specular highlight, micro-texture, exact hue). That's the deliberate trade. If you need 0.95+ fidelity, use the full VAE — the decode step alone costs about 0.28 s and 2.8 GB, on top of the multi-GB model construction the tiny autoencoder skips entirely.
 
@@ -45,13 +45,13 @@ Same setup, FLUX.1-dev side. TAEF1 has been around longer and its architecture i
 
 | | Vanilla FLUX.1 VAE | TAEF1 |
 |---|---|---|
-| Decode latency (median of 3/5 warmed subprocess reps) | 0.302 s | 0.0301 s |
-| Decode latency range | 0.3016 to 0.3027 s | 0.0296 to 0.0309 s |
-| Peak decode memory (post-model-load) | 3.70 GB | 0.55 GB |
+| Decode latency (median of 3/5 warmed subprocess reps) | 0.300 s | 0.0295 s |
+| Decode latency range | 0.2960 to 0.3091 s | 0.0294 to 0.0309 s |
+| Peak decode memory (post-model-load) | 3.67 GB | 0.55 GB |
 | Applied wired cap | 6 GB | 1 GB |
 | Reference image | ![vanilla](_artifacts/showcase/taef1/vae/vanilla_vae_rep0.webp) | ![taef1](_artifacts/showcase/taef1/taef/taef1_rep0.webp) |
 
-**TAEF1 is ~10.0× faster, with ~6.8× lower peak decode memory.** SSIM(TAEF1, Vanilla) = **0.939** (15/15 pairs).
+**TAEF1 is ~10.2× faster, with ~6.7× lower peak decode memory.** SSIM(TAEF1, Vanilla) = **0.939**, LPIPS(TAEF1, Vanilla) = **0.026** (15/15 pairs each).
 
 The taef1 image is nearly indistinguishable from the vanilla FLUX.1 VAE output by eye — the SSIM bears that out. If you're previewing FLUX.1-dev or schnell, TAEF1 is essentially a free win.
 
@@ -61,20 +61,20 @@ Z-Image-Turbo shares FLUX.1's 16-channel latent contract, so the existing TAEF1 
 
 | | Vanilla Z-Image VAE | TAEF1 |
 |---|---|---|
-| Decode latency (median of 3/5 warmed subprocess reps) | 0.236 s | 0.0297 s |
-| Decode latency range | 0.233 to 0.237 s | 0.0294 to 0.0309 s |
+| Decode latency (median of 3/5 warmed subprocess reps) | 0.237 s | 0.0295 s |
+| Decode latency range | 0.2337 to 0.2384 s | 0.0295 to 0.0307 s |
 | Peak decode memory (post-model-load) | 2.61 GB | 0.55 GB |
 | Applied wired cap | 4 GB | 1 GB |
 | Reference image | ![vanilla](_artifacts/showcase/zimage/vae/vanilla_vae_rep0.webp) | ![zimage](_artifacts/showcase/zimage/taef/zimage_rep0.webp) |
 
-**TAEF1 is ~8.0× faster on the Z-Image latent, with ~4.8× lower peak decode memory.** SSIM(TAEF1, Vanilla) = **0.940** (15/15 pairs). The same decoder produces the comparable FLUX.1 fidelity above.
+**TAEF1 is ~8.0× faster on the Z-Image latent, with ~4.8× lower peak decode memory.** SSIM(TAEF1, Vanilla) = **0.940**, LPIPS(TAEF1, Vanilla) = **0.027** (15/15 pairs each). The same decoder produces the comparable FLUX.1 fidelity above.
 
 ### `live_preview` — full FLUX.2 generation with per-step TAEF2 previews
 
 One full FLUX.2 Klein base 4B generation, 4 inference steps, seed=42, prompt "a red apple on a wooden table". `LivePreviewCallback(flux=model, numbered_frames=True, every=1)` decodes a TAEF2 preview at every step and saves it as `live_preview_step{NN}.webp`. The final image is decoded by the full FLUX.2 VAE (mflux's native return path) and saved as `live_preview_final.webp`.
 
-- Wall-clock: **11.18 s** total (model load + 4 generation steps + 4 TAEF2 previews + final VAE decode)
-- Peak memory: **10.73 GB** (whole-process, includes Flux2Klein + TAEF2 + transformer activations)
+- Wall-clock: **12.71 s** total (model load + 4 generation steps + 4 TAEF2 previews + final VAE decode)
+- Peak memory: **10.49 GB** (whole-process, includes Flux2Klein + TAEF2 + transformer activations)
 - Gallery: `_artifacts/showcase/live_preview/live_preview_step00..03.webp`
 - Final: `_artifacts/showcase/live_preview/live_preview_final.webp`
 
@@ -88,7 +88,7 @@ That's the live-preview loop in practice: noise resolves into a recognizable ima
 
 Same recipe on the Z-Image-Turbo side: one full generation, 4 steps, seed=42, "a red apple on a wooden table", with a TAEF1 preview decoded at every step and the final image handed back by mflux's own Z-Image VAE.
 
-- Wall-clock: **25.11 s** total (thermally sensitive; see the note below)
+- Wall-clock: **25.78 s** total (thermally sensitive; see the note below)
 - Peak memory: **25.92 GB** (whole-process; Z-Image-Turbo's transformer is the dominant cost here, not the preview decoder)
 - Gallery: `_artifacts/showcase/zimage_live_preview/zimage_live_preview_step00..03.webp`
 - Final: `_artifacts/showcase/zimage_live_preview/zimage_live_preview_final.webp`
@@ -103,8 +103,8 @@ The higher wall-clock and peak memory next to `live_preview` come from Z-Image-T
 
 Same generation as `live_preview`, but with `apply_teacache(flux)` wrapping the transformer before the loop runs. TeaCache skips noise-prediction work when the residual is small enough; with the default `skip_first_n_steps=1` and `skip_last_n_steps=1`, only 2 of 4 steps are candidates for skipping in a 4-step run.
 
-- Wall-clock: **8.54 s** total (vs `live_preview`'s 11.18 s, a **1.31× speedup**)
-- Peak memory: **6.15 GB** (vs 10.73 GB, **43% less**)
+- Wall-clock: **9.01 s** total (vs `live_preview`'s 12.71 s, a **1.41× speedup**)
+- Peak memory: **5.85 GB** (vs 10.49 GB, **44% less**)
 - TeaCache stats: 1 step skipped, 1 step computed, variant=`flux2-klein-base-4b`
 
 | step 00 | step 01 | step 02 | step 03 | final (full VAE) |
@@ -114,7 +114,7 @@ Same generation as `live_preview`, but with `apply_teacache(flux)` wrapping the 
 A few honest notes on this number:
 
 - 1 skip out of 4 is a small sample. The full speedup curve scales with step count — at 28 steps and the same rel-l1 threshold, the skip count is far higher.
-- The 43% peak-memory drop is partly the skipped transformer call (whose activations never materialise) and partly the mflux compiled-path interaction noted in mlx-teacache's own release notes. Be careful attributing it all to one cause.
+- The 44% peak-memory drop is partly the skipped transformer call (whose activations never materialise) and partly the mflux compiled-path interaction noted in mlx-teacache's own release notes. Be careful attributing it all to one cause.
 - The two libraries compose cleanly: mlx-teacache wraps the transformer, mlx-taef hooks the callback registry. Neither knows about the other.
 
 ## Reproducing these numbers

@@ -317,6 +317,63 @@ def test_repo_relative_maps_artifact_paths_and_foreign_paths(tmp_path: Path) -> 
     assert _repo_relative(outside) == "out.webp"
 
 
+def test_worker_main_clears_stale_watchdog_abort_artifact_before_running(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: a rep that crashes for a REAL reason must not be misreported by
+    _run_one_rep as a watchdog abort just because a PRIOR rep's stale abort artifact
+    still exists at the same save-to path (save-to paths are reused across bench runs).
+    _worker_main must clear any pre-existing artifact before doing any real work, so
+    presence of the file after a nonzero exit always means THIS rep's watchdog fired."""
+    import argparse
+
+    import mlx.core as mx
+    import scripts.bench_decode as bench
+    import scripts.run_showcase as run_showcase
+
+    latent_file = tmp_path / "latent.safetensors"
+    mx.save_safetensors(
+        str(latent_file),
+        {
+            "latent": mx.zeros((1, 2, 2, 16)),
+            "height": mx.array(16),
+            "width": mx.array(16),
+        },
+    )
+    save_to = tmp_path / "out.webp"
+    abort_path = bench._watchdog_abort_path(save_to)
+    abort_path.parent.mkdir(parents=True, exist_ok=True)
+    abort_path.write_text(
+        json.dumps({"status": "aborted", "reason": "memory_ceiling", "rep": "stale-prior-rep"})
+    )
+
+    class _FakeWatchdog:
+        def stop(self) -> None:
+            pass
+
+    monkeypatch.setattr(bench, "_install_memory_caps", lambda cap: 1)
+    monkeypatch.setattr(run_showcase, "_install_live_watchdog", lambda *a, **kw: _FakeWatchdog())
+
+    def _boom(latent: object, h: object, w: object) -> None:
+        raise ValueError("boom: real crash, not a watchdog abort")
+
+    monkeypatch.setattr(bench, "_prep_taef1", _boom)
+
+    args = argparse.Namespace(
+        condition="taef1",
+        rep=0,
+        latent=latent_file,
+        save_to=save_to,
+        applied_cap_gb=1,
+        flux_variant="flux1-dev",
+    )
+
+    with pytest.raises(ValueError, match="boom: real crash"):
+        bench._worker_main(args)
+
+    assert not abort_path.exists()
+
+
 def test_worker_main_routes_through_steady_state_measurement(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -339,8 +396,18 @@ def test_worker_main_routes_through_steady_state_measurement(
     def _fake_decode() -> str:
         return "IMG"
 
+    class _FakeWatchdog:
+        def stop(self) -> None:
+            pass
+
     measured: list[object] = []
     monkeypatch.setattr(bench, "_install_memory_caps", lambda cap: 1)
+    # Offline test: must not spin up a real _install_live_watchdog thread (which reads real
+    # mx.device_info() and starts a live daemon thread) — mirrors
+    # test_vs_vae_worker_installs_active_memory_watchdog in tests/test_run_showcase.py.
+    monkeypatch.setattr(
+        "scripts.run_showcase._install_live_watchdog", lambda *a, **kw: _FakeWatchdog()
+    )
     monkeypatch.setattr(bench, "_prep_taef1", lambda latent, h, w: _fake_decode)
     monkeypatch.setattr(
         bench,
@@ -361,3 +428,64 @@ def test_worker_main_routes_through_steady_state_measurement(
     assert bench._worker_main(args) == 0
     assert measured == [_fake_decode]
     assert '"elapsed_s": 0.25' in capsys.readouterr().out
+
+
+def test_worker_wall_budget_stays_strictly_under_subprocess_timeout() -> None:
+    """The watchdog's wall arm is a backstop under the subprocess timeout — if the two
+    budgets are equal or the watchdog's is longer, the subprocess.run(timeout=...) always
+    fires first and `reason="wall_budget"` is unreachable in practice."""
+    from scripts.bench_decode import _SUBPROCESS_TIMEOUT_S, _worker_wall_budget_s
+
+    for condition, timeout_s in _SUBPROCESS_TIMEOUT_S.items():
+        budget_s = _worker_wall_budget_s(condition)
+        assert budget_s < timeout_s
+
+
+def test_worker_main_installs_watchdog_with_condition_scoped_wall_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """_worker_main must pass an explicit wall_budget_s under this condition's subprocess
+    timeout, not the run_showcase default (3300s) which sits far above every
+    _SUBPROCESS_TIMEOUT_S entry and makes the wall arm dead."""
+    import argparse
+
+    import mlx.core as mx
+    import scripts.bench_decode as bench
+
+    latent_file = tmp_path / "latent.safetensors"
+    mx.save_safetensors(
+        str(latent_file),
+        {
+            "latent": mx.zeros((1, 2, 2, 16)),
+            "height": mx.array(16),
+            "width": mx.array(16),
+        },
+    )
+
+    class _FakeWatchdog:
+        def stop(self) -> None:
+            pass
+
+    install_calls: list[dict[str, object]] = []
+
+    def _fake_install(result_path: Path, scenario: str, **kwargs: object) -> _FakeWatchdog:
+        install_calls.append(kwargs)
+        return _FakeWatchdog()
+
+    monkeypatch.setattr("scripts.run_showcase._install_live_watchdog", _fake_install)
+    monkeypatch.setattr(bench, "_install_memory_caps", lambda cap: 1)
+    monkeypatch.setattr(bench, "_prep_taef1", lambda latent, h, w: lambda: "IMG")
+    monkeypatch.setattr(bench, "_measure_steady_state", lambda decode_fn: ("IMG", 0.25, 2.0))
+    monkeypatch.setattr(bench, "_save_webp", lambda image, target: None)
+
+    args = argparse.Namespace(
+        condition="taef1",
+        rep=0,
+        latent=latent_file,
+        save_to=tmp_path / "out.webp",
+        applied_cap_gb=1,
+        flux_variant="flux1-dev",
+    )
+
+    assert bench._worker_main(args) == 0
+    assert install_calls == [{"wall_budget_s": bench._worker_wall_budget_s("taef1")}]

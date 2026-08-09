@@ -221,9 +221,8 @@ class ZImage(Taef):
     """Z-Image / Z-Image-Turbo previews. Reuses TAEF1's FLUX.1 autoencoder weights.
 
     Validated for decode / live preview: the decode path is SSIM-gated against mflux's full
-    Z-Image VAE. ``encode()`` is inherited and reuses the same TAEF1 encoder on Z-Image's
-    shared 16-channel latent contract; it is not separately gated against Z-Image's distinct
-    VAE encoder, so treat encode / img2img as best-effort.
+    Z-Image VAE. ``encode()`` is inherited from TAEF1 and is validated by a cross-roundtrip
+    gate against the same full VAE (encode then decode, SSIM >= 0.75, measured 0.96).
     """
 
     _kernel = KERNELS["zimage"]
@@ -239,4 +238,14 @@ class QwenImage(Taef):
     _kernel = KERNELS["qwen-image"]
 
 
-__all__ = ["TAEF1", "TAEF2", "TAESD", "TAESDXL", "QwenImage", "Taef", "ZImage"]
+class Krea2(Taef):
+    """Krea 2 Turbo previews. Reuses the taew2.1 (Wan 2.1 VAE) weights via the qwen kernel.
+
+    Krea 2 generates on the Qwen-Image stack, so its latents decode through the same
+    tiny autoencoder as ``QwenImage`` — one shared converted-weights cache entry.
+    """
+
+    _kernel = KERNELS["krea2"]
+
+
+__all__ = ["TAEF1", "TAEF2", "TAESD", "TAESDXL", "Krea2", "QwenImage", "Taef", "ZImage"]

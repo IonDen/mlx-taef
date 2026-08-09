@@ -34,6 +34,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
@@ -95,6 +96,15 @@ def _build_argparser() -> argparse.ArgumentParser:
             "Don't move existing _artifacts/showcase/ to ~/.Trash before "
             "starting. By default, prior bench output is preserved in "
             "Trash with a dated suffix (generated artifacts are moved to the Trash, never deleted)."
+        ),
+    )
+    parser.add_argument(
+        "--no-lpips",
+        action="store_true",
+        help=(
+            "Skip LPIPS scoring in vs-VAE scenarios (SSIM only). Use when the "
+            "'lpips' package (fixtures group) isn't installed, or to avoid the "
+            "torchvision AlexNet weight download."
         ),
     )
     parser.add_argument("--live-worker", choices=sorted(_LIVE_SCENARIOS), help=argparse.SUPPRESS)
@@ -182,6 +192,11 @@ def _vs_vae_scenario(
             "ssim_median": 0.0,
         }
     )
+    lpips_result = (
+        {"lpips_per_pair": [], "lpips_median": None}
+        if args.no_lpips or not (taef_webps and vae_webps)
+        else _compute_lpips(refs=vae_webps, cands=taef_webps)
+    )
 
     return {
         "status": "ok",
@@ -189,6 +204,7 @@ def _vs_vae_scenario(
         "taef": taef_result,
         "vanilla_vae": vae_result,
         **ssim,
+        **lpips_result,
     }
 
 
@@ -419,6 +435,22 @@ _SCENARIO_DISPATCH = {
 _LIVE_SCENARIOS = frozenset({"live_preview", "zimage_live_preview", "combined"})
 _LIVE_WALL_BUDGET_S = 3300.0
 _MEMORY_HEADROOM_BYTES = 4 * 1024**3
+
+
+def _all_scenario_order() -> list[str]:
+    """Scenario run order for `--scenario all` (a single scenario name is unaffected).
+
+    Live scenarios run first. Each vs-VAE scenario builds LPIPS's torch+AlexNet model
+    (~730 MB resident, never returned to the OS) in THIS orchestrator process; a live
+    scenario's watchdog computes its memory ceiling from the device's total
+    `memory_size`, so running vs-VAE first would leave the live subprocess (largest:
+    zimage_live_preview) with ~730 MB less real headroom than that math assumes.
+    Derived from `_SCENARIO_DISPATCH`/`_LIVE_SCENARIOS` rather than a hardcoded list so a
+    newly-added scenario is placed correctly without touching this function.
+    """
+    live = [name for name in _SCENARIO_DISPATCH if name in _LIVE_SCENARIOS]
+    vs_vae = [name for name in _SCENARIO_DISPATCH if name not in _LIVE_SCENARIOS]
+    return live + vs_vae
 
 
 # ---------------------------------------------------------------------------
@@ -751,6 +783,82 @@ def _compute_ssim(refs: list[Path], cands: list[Path]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# LPIPS (orchestrator-side, after webps are saved)
+# ---------------------------------------------------------------------------
+
+
+def _require_lpips() -> Any:
+    """Lazily import the `lpips` package, raising a clear error if unavailable.
+
+    `lpips` is intentionally NOT a runtime or `test`-group dependency — it drags
+    torch — so it lives in the `fixtures` group only (see pyproject.toml). This
+    keeps CI's `--group test` install torch-free while still letting the
+    showcase report LPIPS when the operator has opted in.
+    """
+    try:
+        import lpips
+        import torch  # noqa: F401  (imported to surface an absent-torch failure here too)
+    except ImportError as e:
+        raise TaefError(
+            "LPIPS requested but the 'lpips' package is not installed; run "
+            "`uv sync --group fixtures` or pass --no-lpips"
+        ) from e
+    return lpips
+
+
+def _build_lpips_score_fn() -> Callable[[Path, Path], float]:
+    """Build the canonical LPIPS(net="alex") scorer.
+
+    Downloads ImageNet-pretrained torchvision AlexNet weights on first use
+    (network I/O) — never use `pnet_rand=True`, which skips the download but is
+    no longer canonical LPIPS.
+    """
+    lpips = _require_lpips()
+    import numpy as np
+    import torch
+    from PIL import Image
+
+    loss_fn = lpips.LPIPS(net="alex")
+
+    def _to_tensor(path: Path) -> torch.Tensor:
+        img = np.asarray(Image.open(path).convert("RGB"), dtype=np.float32) / 255.0
+        img = img * 2.0 - 1.0  # LPIPS expects CHW in [-1, 1]
+        return torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0)
+
+    def _score(ref: Path, cand: Path) -> float:
+        with torch.no_grad():
+            return float(loss_fn(_to_tensor(ref), _to_tensor(cand)))
+
+    return _score
+
+
+def _compute_lpips(
+    refs: list[Path],
+    cands: list[Path],
+    *,
+    score_fn: Callable[[Path, Path], float] | None = None,
+) -> dict[str, Any]:
+    """Compute LPIPS for each (ref, cand) pair in the cross-product.
+
+    Mirrors `_compute_ssim`'s pairing (every ref against every cand, not a
+    zip). `score_fn` is the injectable model boundary: offline tests pass a
+    deterministic fake; `score_fn=None` builds the canonical, network-dependent
+    scorer via `_build_lpips_score_fn`.
+    """
+    if score_fn is None:
+        score_fn = _build_lpips_score_fn()
+
+    per_pair: list[float] = [score_fn(ref, cand) for ref in refs for cand in cands]
+
+    import statistics
+
+    return {
+        "lpips_per_pair": per_pair,
+        "lpips_median": statistics.median(per_pair) if per_pair else None,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -860,9 +968,7 @@ def main(argv: list[str] | None = None) -> int:
         "scenarios": {},
     }
 
-    scenarios_to_run = (
-        list(_SCENARIO_DISPATCH.keys()) if args.scenario == "all" else [args.scenario]
-    )
+    scenarios_to_run = _all_scenario_order() if args.scenario == "all" else [args.scenario]
 
     failures = _run_scenarios(scenarios_to_run, args, report)
     print(f"Wrote {args.report}")

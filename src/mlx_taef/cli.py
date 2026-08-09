@@ -9,7 +9,7 @@ from pathlib import Path
 
 import mlx.core as mx
 
-from mlx_taef.api import TAEF1, TAEF2, TAESD, TAESDXL, QwenImage, ZImage
+from mlx_taef.api import TAEF1, TAEF2, TAESD, TAESDXL, Krea2, QwenImage, ZImage
 from mlx_taef.kernels import KERNELS
 
 logger = logging.getLogger(__name__)
@@ -21,6 +21,7 @@ _BENCH_CLS_BY_NAME = {
     "taef2": TAEF2,
     "zimage": ZImage,
     "qwen-image": QwenImage,
+    "krea2": Krea2,
 }
 
 

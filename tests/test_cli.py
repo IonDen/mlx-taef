@@ -95,7 +95,7 @@ def test_cli_convert_choices_cover_the_kernel_registry(capsys: pytest.CaptureFix
     with pytest.raises(SystemExit):
         main(["convert", "--variant", "not-a-variant", "--dst", "/tmp/x.safetensors"])
     err = capsys.readouterr().err
-    for name in ("taesd", "taesdxl", "taef1", "taef2", "zimage", "qwen-image"):
+    for name in ("taesd", "taesdxl", "taef1", "taef2", "zimage", "qwen-image", "krea2"):
         assert name in err
 
 
@@ -103,6 +103,12 @@ def test_cli_bench_includes_zimage_choice(capsys: pytest.CaptureFixture[str]) ->
     with pytest.raises(SystemExit):
         main(["bench", "--variant", "not-a-variant"])
     assert "zimage" in capsys.readouterr().err
+
+
+def test_cli_bench_includes_krea2_choice(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        main(["bench", "--variant", "definitely-not-a-variant"])
+    assert "krea2" in capsys.readouterr().err
 
 
 def test_bench_cls_by_name_covers_every_kernel() -> None:
