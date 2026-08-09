@@ -47,7 +47,7 @@ mflux = ["mflux>=0.17,<0.19"]
 image = ["Pillow>=10.0"]
 showcase = [
   "mflux>=0.17,<0.19",
-  'mlx-teacache>=0.9.1,<0.10; python_version >= "3.11"',
+  "mlx-teacache>=0.9.3,<0.10",
   "Pillow>=10.0",
   "scikit-image>=0.22",
 ]
@@ -70,7 +70,7 @@ test = [
   "hypothesis>=6.130",
   "pytest-benchmark>=4.0",
   "mflux>=0.17,<0.19",
-  'mlx-teacache>=0.9.1,<0.10; python_version >= "3.11"',
+  "mlx-teacache>=0.9.3,<0.10",
   "scikit-image>=0.22",
   "Pillow>=10.0",
   'tomli>=2.0; python_version < "3.11"',
