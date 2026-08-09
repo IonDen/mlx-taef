@@ -1,19 +1,19 @@
 # Examples
 
 Worked examples of mlx-taef in use. Most include real captured frames and the measured cost of
-each decode; the Qwen-Image example is decode-verified against committed parity fixtures, with its
-frames and live-preview timing still pending (that section explains why). The point of a tiny
-autoencoder is to watch a diffusion run progress without paying for the full VAE on every step, so
-most of these are live-preview walkthroughs.
+each decode; the Qwen-Image and Krea 2 examples are decode-verified against committed fixtures and
+SSIM gates instead, with their frames and live-preview timing still pending (those sections explain
+why). The point of a tiny autoencoder is to watch a diffusion run progress without paying for the
+full VAE on every step, so most of these are live-preview walkthroughs.
 
 Every measured number below was produced by the committed bench harness and is reproducible with
 the command shown in its section, except where a section marks its figures as pending or
 community-measured. Captures and timings: Apple M1 Max, 32 GB unified memory, macOS;
-mflux 0.18.0, MLX 0.31.2; weights quantized to int4 (`quantize=4`), bf16 generation and fp32 decode. Decode
+mflux 0.18.1, MLX 0.31.2; weights quantized to int4 (`quantize=4`), bf16 generation and fp32 decode. Decode
 times measure the decode step in isolation, outside of model construction and after one untimed
 warmup call, as the median over several timed reps — the steady-state per-step cost a live preview
 pays after its first step. SSIM compares the tiny-decoder image against the full VAE on the same
-latent. Captured for mlx-taef v0.7.0 at commit `1e79c29` on 2026-07-24, on CPython 3.14.5.
+latent. Captured for mlx-taef v0.7.1-8-g28af6c5 at commit `28af6c5` on 2026-08-09, on CPython 3.13.12.
 
 Runnable scripts live in [`examples/`](examples/).
 
@@ -73,6 +73,37 @@ Frames and decode timing here are pending. Qwen-Image is a ~20B model that doesn
 resolution on 32 GB, so the in-context live preview and the `mlx-taef bench --variant qwen-image`
 number are community-measured rather than captured on this reference machine.
 
+## Krea 2 live preview
+
+Krea 2 Turbo generates on the Qwen-Image stack and shares its Wan 2.1 VAE, so `Krea2` decodes
+through the same taew2.1 tiny autoencoder as `QwenImage` — one shared converted-weights cache
+entry, no separate download:
+
+```python
+from mlx_taef import Krea2
+
+taef = Krea2.from_pretrained(include_encoder=False)
+preview = taef.decode_image(unpacked_latent)  # uint8 NHWC
+```
+
+```python
+from mlx_taef.integrations.mflux import LivePreviewCallback
+
+callback = LivePreviewCallback(variant="krea2", save_to="preview.png", every=5)
+# pass `callback` to your mflux Krea 2 generation
+```
+
+Correctness is gated the same way as Qwen-Image: decoding the committed (red apple, seed 42) Krea 2
+latent through `Krea2` and comparing it against mflux's full Krea 2 VAE scores **SSIM 0.9678**
+(`tests/test_krea2_ssim.py`, opt-in network test, ≥ 0.75 threshold).
+
+A note on scope: this page doesn't carry a separate Krea 2 decode benchmark. `Krea2` and
+`QwenImage` share byte-identical taew2.1 weights — one converted-cache entry, keyed by role rather
+than model name — so a Krea 2 decode timing would just be Qwen-Image's decode timing measured a
+second time. Frames and in-context live-preview timing are pending for the same reason
+Qwen-Image's are: community-measured via `mlx-taef bench --variant krea2` rather than captured on
+this reference machine.
+
 ## FLUX.2 Klein live preview
 
 A live preview of FLUX.2 Klein with `auto_bn` color correction. Pass `flux=model` and the
@@ -85,8 +116,8 @@ Recipe: FLUX.2 Klein base 4B, same prompt/seed, 512×512, 4 steps, guidance 1.0,
 |---|---|---|
 | ![f21](_artifacts/showcase/live_preview/live_preview_step01.webp) | ![f23](_artifacts/showcase/live_preview/live_preview_step03.webp) | ![f2f](_artifacts/showcase/live_preview/live_preview_final.webp) |
 
-The gain: TAEF2 decodes a Klein latent in **31 ms** versus **0.28 s** for the full FLUX.2 VAE
-(~9.3× faster), at **0.59 GB** versus 2.80 GB peak. SSIM here is **0.616**, lower than the FLUX.1
+The gain: TAEF2 decodes a Klein latent in **30 ms** versus **0.28 s** for the full FLUX.2 VAE
+(~9.4× faster), at **0.59 GB** versus 2.80 GB peak. SSIM here is **0.616**, lower than the FLUX.1
 family because TAEF2 is a 4 MB preview decoder standing in for a ~340 MB VAE: it keeps the
 structure and color and fudges fine detail. That is the deliberate trade for a real-time preview;
 reach for the full VAE when you need final-quality fidelity. Reproduce:
@@ -104,8 +135,8 @@ than the FLUX.2 pair. Same red-apple latent, two decoders:
 |---|---|
 | ![f1v](_artifacts/showcase/taef1/vae/vanilla_vae_rep0.webp) | ![f1t](_artifacts/showcase/taef1/taef/taef1_rep0.webp) |
 
-TAEF1 decodes the same latent in **30 ms** versus **0.30 s** for the full FLUX.1 VAE (~10.0× faster),
-at **0.55 GB** versus 3.70 GB peak and **SSIM 0.94**. Reproduce:
+TAEF1 decodes the same latent in **30 ms** versus **0.30 s** for the full FLUX.1 VAE (~10.2× faster),
+at **0.55 GB** versus 3.67 GB peak and **SSIM 0.94**. Reproduce:
 
 ```
 uv run python scripts/run_showcase.py --scenario taef1_vs_vae
