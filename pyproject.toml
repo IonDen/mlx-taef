@@ -78,6 +78,11 @@ test = [
 typecheck = [
   "mypy>=1.13",
   "typing-extensions>=4.5",
+  # mypy --strict on src/mlx_taef needs PIL's types resolvable — integrations/mflux.py
+  # imports it. (Previously this was masked by uv's implicit "dev" default group
+  # pulling in Pillow from the test/fixtures groups; now that default-groups = []
+  # scopes each CI sync to exactly its own group, typecheck must declare it directly.)
+  "Pillow>=10.0",
 ]
 lint = [
   "ruff>=0.7",
@@ -90,6 +95,7 @@ docs = [
 fixtures = [
   "torch>=2.4,<3",
   "pillow>=10.0",
+  "lpips>=0.1.4",
 ]
 dev = [
   { include-group = "test" },
@@ -99,6 +105,15 @@ dev = [
   { include-group = "fixtures" },
   "pre-commit>=3.8",
 ]
+
+[tool.uv]
+# uv installs the "dev" default group on every `uv sync` unless this is set —
+# including a bare `uv sync --group test`/`--group lint`/`--group typecheck`,
+# which would otherwise silently pull in every other group (fixtures' torch +
+# lpips included) regardless of which single group was requested. Each CI job
+# asks for exactly one group and should get exactly one group; local full-dev
+# setup already opts in explicitly via `uv sync --all-groups`.
+default-groups = []
 
 [tool.hatch.version]
 source = "vcs"

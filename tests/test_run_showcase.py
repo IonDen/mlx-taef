@@ -554,3 +554,143 @@ def test_run_scenarios_routes_live_scenarios_through_subprocess_runner(
     assert failures == 0
     assert routed == ["live_preview"]
     assert report["scenarios"]["live_preview"] == {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# LPIPS (offline: injected score_fn only; the real net="alex" scorer is
+# network-marked below and needs `uv sync --group fixtures`)
+# ---------------------------------------------------------------------------
+
+
+def test_argparse_no_lpips_flag_defaults_false() -> None:
+    from scripts.run_showcase import _build_argparser
+
+    parser = _build_argparser()
+    assert parser.parse_args([]).no_lpips is False
+    assert parser.parse_args(["--no-lpips"]).no_lpips is True
+
+
+def test_compute_lpips_returns_per_pair_array_and_median(tmp_path: Path) -> None:
+    """A deterministic fake score_fn proves the aggregation shape without lpips/torch."""
+    from scripts.run_showcase import _compute_lpips
+
+    path_a = tmp_path / "a.webp"
+    path_b = tmp_path / "b.webp"
+    path_a.write_bytes(b"fake-a")
+    path_b.write_bytes(b"fake-b")
+
+    result = _compute_lpips([path_a], [path_b], score_fn=lambda a, b: 0.25)
+
+    assert result == {"lpips_per_pair": [0.25], "lpips_median": 0.25}
+
+
+def test_compute_lpips_mismatched_lengths_uses_cross_product(tmp_path: Path) -> None:
+    """Mirrors _compute_ssim: every ref against every cand, not a zip."""
+    from scripts.run_showcase import _compute_lpips
+
+    refs = [tmp_path / "r0.webp", tmp_path / "r1.webp"]
+    cands = [tmp_path / "c0.webp"]
+    for p in [*refs, *cands]:
+        p.write_bytes(b"x")
+
+    result = _compute_lpips(refs, cands, score_fn=lambda a, b: 0.5)
+
+    assert result["lpips_per_pair"] == [0.5, 0.5]
+    assert result["lpips_median"] == 0.5
+
+
+def test_require_lpips_raises_taef_error_naming_install_and_flag(monkeypatch) -> None:
+    """Mirrors test_import_apply_teacache_raises_package_error_when_missing's pattern:
+    a None sys.modules entry forces the import to raise ImportError."""
+    import sys
+
+    from mlx_taef.errors import TaefError
+
+    monkeypatch.setitem(sys.modules, "lpips", None)
+    from scripts.run_showcase import _require_lpips
+
+    with pytest.raises(TaefError) as exc_info:
+        _require_lpips()
+    message = str(exc_info.value)
+    assert "uv sync --group fixtures" in message
+    assert "--no-lpips" in message
+
+
+def test_vs_vae_scenario_no_lpips_flag_skips_lpips_explicitly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--no-lpips must produce explicit empty/None lpips keys, never a silent omission —
+    even when both webp lists are non-empty and LPIPS *could* have been computed."""
+    import argparse
+
+    import numpy as np
+    import scripts.run_showcase as rs
+    from PIL import Image
+
+    monkeypatch.setattr(rs, "_ARTIFACTS_DIR", tmp_path)
+    monkeypatch.setattr(rs, "_check_latent_sha", lambda latent: {"status": "ok"})
+
+    def _fake_run_orchestrator(
+        *,
+        latent_path: Path,
+        condition: str,
+        reps: int,
+        save_dir: Path,
+        flux_variant: str,
+        cap_gb_override: int | None,
+    ) -> dict[str, object]:
+        save_dir.mkdir(parents=True, exist_ok=True)
+        img = (np.random.default_rng(0).random((8, 8, 3)) * 255).astype(np.uint8)
+        Image.fromarray(img).save(save_dir / f"{condition}_rep0.webp")
+        return {"status": "ok", "median_seconds": 0.1}
+
+    monkeypatch.setattr("scripts.bench_decode._run_orchestrator", _fake_run_orchestrator)
+
+    args = argparse.Namespace(reps=None, cap_gb=None, no_lpips=True)
+    result = rs._vs_vae_scenario(
+        taef_condition="taef2",
+        flux_variant="flux2-klein-base-4b",
+        latent_name="flux2_klein_base_4b.safetensors",
+        args=args,
+    )
+
+    assert result["lpips_per_pair"] == []
+    assert result["lpips_median"] is None
+    # SSIM was still computed (proves the webps really were discovered — the
+    # lpips omission is a deliberate flag effect, not an accidental empty glob).
+    assert result["ssim_per_pair"] != []
+
+
+@pytest.mark.network
+def test_compute_lpips_real_scorer_identical_vs_different(tmp_path: Path) -> None:
+    """Real LPIPS(net="alex"): identical images -> median ~0.0; clearly different -> > 0.05.
+
+    Network: downloads torchvision AlexNet ImageNet weights on first use. Measured on a
+    64x64 synthetic RGB image (seed 0) vs its bitwise inverse: identical median = 0.0,
+    different median = 0.098. Weights cache at
+    ~/.cache/torch/hub/checkpoints/alexnet-owt-7be5be79.pth (sha256
+    7be5be791159472b1fbf3c69796f7cb30dca7ad8466c2df70058c37116cdee02, ~233 MiB); the
+    `lpips` package itself bundles its linear-calibration weights, so only the AlexNet
+    backbone is a network download.
+    """
+    import numpy as np
+    from PIL import Image
+    from scripts.run_showcase import _compute_lpips
+
+    rng = np.random.default_rng(0)
+    img_a = (rng.random((64, 64, 3)) * 255).astype(np.uint8)
+    img_b = img_a.copy()
+    img_c = 255 - img_a  # clearly different
+
+    path_a = tmp_path / "a.webp"
+    path_b = tmp_path / "b.webp"
+    path_c = tmp_path / "c.webp"
+    Image.fromarray(img_a).save(path_a)
+    Image.fromarray(img_b).save(path_b)
+    Image.fromarray(img_c).save(path_c)
+
+    identical = _compute_lpips([path_a], [path_b])
+    assert identical["lpips_median"] == pytest.approx(0.0, abs=1e-6)
+
+    different = _compute_lpips([path_a], [path_c])
+    assert different["lpips_median"] > 0.05
