@@ -73,20 +73,25 @@ Correctness is gated by committed parity fixtures: the decode and encode paths m
 taew2.1 reference to within ~3e-6 (fp32).
 
 Recipe: Qwen-Image, prompt `"a red apple on a wooden table"`, seed 42, 512×512, 20 steps (mflux's
-own CLI default for this model), guidance 3.5, int4, M1 Max. Reproduce:
+own CLI default for this model), guidance 3.5, M1 Max. The build uses the published
+mixed-precision recipe (bf16 for a few embedding/output modules, 8-bit for the transformer's
+first and last six blocks, 4-bit for the rest) instead of plain `quantize=4`, which removes a
+reticulated skin-texture artifact the uniform-int4 build shows on this model:
+https://ineshin.space/papers/qwen-image-mixed-precision-on-a-32-gb-mac/. Reproduce:
 
 ```
 uv run python scripts/capture_examples.py --variant qwen-image
 ```
 
-| step 14 | step 17 | final |
+| step 14 | step 18 | final |
 |---|---|---|
-| ![qi14](_artifacts/examples/qwen-image/qwen-image_step14.webp) | ![qi17](_artifacts/examples/qwen-image/qwen-image_step17.webp) | ![qif](_artifacts/examples/qwen-image/qwen-image_final.webp) |
+| ![qi14](_artifacts/examples/qwen-image/qwen-image_step14.webp) | ![qi18](_artifacts/examples/qwen-image/qwen-image_step18.webp) | ![qif](_artifacts/examples/qwen-image/qwen-image_final.webp) |
 
-The taew2.1 preview stays undifferentiated noise through roughly the first two-thirds of this
-20-step run: steps 2 and 10 both show nothing, and the apple only starts resolving around step 14.
-That's later than every other variant in this document, so a live preview registered on Qwen-Image
-earns its keep mainly in the back half of a run.
+The taew2.1 preview stays undifferentiated noise through roughly the first half of this 20-step
+run: steps 2 and 10 both show nothing. The apple starts resolving around step 12, step 14
+(pictured) is already a rough but recognizable shape, and step 18 is close to the final image.
+Structure emerges later here than in every other variant in this document, so a live preview
+registered on Qwen-Image earns its keep mainly in the back half of a run.
 
 Qwen-Image is a ~20B model: running it back to back with the other captures in one chained pass
 hit a Metal command-buffer out-of-memory error, and the frames above came from rerunning that one
