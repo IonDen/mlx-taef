@@ -258,6 +258,191 @@ def test_discard_temp_variant_dir_is_a_noop_when_already_gone(tmp_path: Path) ->
     assert not tmp_dir.exists()
 
 
+def _spawn_and_reap_dead_pid() -> int:
+    """Spawn a short-lived subprocess, wait for it to exit, and return its now-dead pid.
+
+    More robust than guessing an arbitrary unused pid number. Uses `Popen` + `wait()` rather
+    than `subprocess.run(...).pid` — `run()` returns a `CompletedProcess`, which has no `.pid`.
+    """
+    import subprocess
+    import sys
+
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait(timeout=5)
+    return proc.pid
+
+
+# --- _extract_pid_suffix / _is_pid_alive: pure pid parsing + liveness ------------------
+
+
+@pytest.mark.parametrize(
+    ("dirname", "expected"),
+    [
+        (".flux1-dev.tmp-12345", 12345),
+        (".flux1-dev.stale-1", 1),
+        (".krea-2-turbo.tmp-999", 999),  # variant name itself contains hyphens
+    ],
+)
+def test_extract_pid_suffix_parses_trailing_int(dirname: str, expected: int) -> None:
+    from scripts.capture_examples import _extract_pid_suffix
+
+    assert _extract_pid_suffix(dirname) == expected
+
+
+def test_extract_pid_suffix_returns_none_for_non_numeric_suffix() -> None:
+    from scripts.capture_examples import _extract_pid_suffix
+
+    assert _extract_pid_suffix(".flux1-dev.tmp-notapid") is None
+
+
+def test_is_pid_alive_true_for_self() -> None:
+    import os
+
+    from scripts.capture_examples import _is_pid_alive
+
+    assert _is_pid_alive(os.getpid()) is True
+
+
+def test_is_pid_alive_false_for_a_dead_pid() -> None:
+    from scripts.capture_examples import _is_pid_alive
+
+    assert _is_pid_alive(_spawn_and_reap_dead_pid()) is False
+
+
+# --- _recover_variant_dir: repairs a crash inside _publish_variant_dir's rename window --
+
+
+def test_recover_variant_dir_restores_newest_stale_dir_when_published_dir_missing(
+    tmp_path: Path,
+) -> None:
+    """RED case: simulates the exact on-disk state a kill between `_publish_variant_dir`'s two
+    renames leaves — no `<variant>/`, a populated `.{variant}.stale-<dead-pid>/` — and asserts
+    the next invocation's recovery restores it byte-intact."""
+    from scripts.capture_examples import _recover_variant_dir
+
+    # A guaranteed-dead pid, to stand in for "the process that died mid-publish".
+    dead_pid = _spawn_and_reap_dead_pid()
+
+    stale_dir = tmp_path / f".flux1-dev.stale-{dead_pid}"
+    stale_dir.mkdir()
+    good_bytes = b"a previously-good capture, orphaned mid-swap"
+    (stale_dir / "flux1-dev_final.webp").write_bytes(good_bytes)
+
+    _recover_variant_dir(tmp_path, "flux1-dev")
+
+    variant_dir = tmp_path / "flux1-dev"
+    assert variant_dir.is_dir()
+    assert (variant_dir / "flux1-dev_final.webp").read_bytes() == good_bytes
+    assert not stale_dir.exists()
+
+
+def test_recover_variant_dir_picks_the_newest_stale_dir_when_several_exist(
+    tmp_path: Path,
+) -> None:
+    import time
+
+    from scripts.capture_examples import _recover_variant_dir
+
+    older = tmp_path / f".flux1-dev.stale-{_spawn_and_reap_dead_pid()}"
+    older.mkdir()
+    (older / "flux1-dev_final.webp").write_bytes(b"older")
+
+    time.sleep(0.05)  # ensure a distinguishable mtime ordering
+
+    newer = tmp_path / f".flux1-dev.stale-{_spawn_and_reap_dead_pid()}"
+    newer.mkdir()
+    (newer / "flux1-dev_final.webp").write_bytes(b"newer")
+
+    _recover_variant_dir(tmp_path, "flux1-dev")
+
+    variant_dir = tmp_path / "flux1-dev"
+    assert (variant_dir / "flux1-dev_final.webp").read_bytes() == b"newer"
+    assert not older.exists()
+    assert not newer.exists()
+
+
+def test_recover_variant_dir_sweeps_stale_dirs_alongside_existing_published_dir(
+    tmp_path: Path,
+) -> None:
+    """When `<variant>/` already exists (the common case — no crash happened), any leftover
+    `.{variant}.stale-*` dirs must still be swept, not accumulate forever."""
+    from scripts.capture_examples import _recover_variant_dir
+
+    variant_dir = tmp_path / "flux1-dev"
+    variant_dir.mkdir()
+    (variant_dir / "flux1-dev_final.webp").write_bytes(b"currently published")
+
+    stale_dir = tmp_path / f".flux1-dev.stale-{_spawn_and_reap_dead_pid()}"
+    stale_dir.mkdir()
+    (stale_dir / "flux1-dev_final.webp").write_bytes(b"old, superseded")
+
+    _recover_variant_dir(tmp_path, "flux1-dev")
+
+    assert (variant_dir / "flux1-dev_final.webp").read_bytes() == b"currently published"
+    assert not stale_dir.exists()
+
+
+def test_recover_variant_dir_leaves_a_live_pids_stale_dir_untouched(tmp_path: Path) -> None:
+    """The LOW-severity single-writer guard: a stale dir whose embedded pid is still alive
+    (an in-flight concurrent `_publish_variant_dir` on the same variant) must not be stolen or
+    swept — even though the published dir is missing."""
+    import os
+
+    from scripts.capture_examples import _recover_variant_dir
+
+    live_stale = tmp_path / f".flux1-dev.stale-{os.getpid()}"
+    live_stale.mkdir()
+    (live_stale / "flux1-dev_final.webp").write_bytes(b"still being published by a live pid")
+
+    _recover_variant_dir(tmp_path, "flux1-dev")
+
+    assert not (tmp_path / "flux1-dev").exists()
+    assert live_stale.exists()
+
+
+def test_temp_variant_dir_triggers_recovery(tmp_path: Path) -> None:
+    """Integration check: `_temp_variant_dir` (called at the start of every real run) performs
+    the recovery pass, not just `_recover_variant_dir` in isolation."""
+    from scripts.capture_examples import _temp_variant_dir
+
+    stale_dir = tmp_path / f".flux1-dev.stale-{_spawn_and_reap_dead_pid()}"
+    stale_dir.mkdir()
+    good_bytes = b"orphaned by a mid-publish crash"
+    (stale_dir / "flux1-dev_final.webp").write_bytes(good_bytes)
+
+    _temp_variant_dir(tmp_path, "flux1-dev")
+
+    variant_dir = tmp_path / "flux1-dev"
+    assert (variant_dir / "flux1-dev_final.webp").read_bytes() == good_bytes
+    assert not stale_dir.exists()
+
+
+def test_temp_variant_dir_does_not_sweep_a_tmp_dir_whose_pid_is_alive(tmp_path: Path) -> None:
+    """The LOW-severity single-writer guard applied to the `.tmp-*` sweep: a concurrent
+    same-variant run's live temp dir must not be deleted out from under it. Uses a real,
+    separately-running subprocess for the "live" pid — reusing our own pid would collide with
+    the path `_temp_variant_dir` creates for itself."""
+    import subprocess
+    import sys
+
+    from scripts.capture_examples import _temp_variant_dir
+
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(5)"])
+    try:
+        live_tmp = tmp_path / f".flux1-dev.tmp-{proc.pid}"
+        live_tmp.mkdir()
+        frame = live_tmp / "flux1-dev_step00.webp"
+        frame.write_bytes(b"a live concurrent run's in-progress frame")
+
+        result = _temp_variant_dir(tmp_path, "flux1-dev")
+
+        assert result != live_tmp
+        assert frame.exists()
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
+
+
 # --- _qwen_mixed_precision_predicate: pure, no mflux/network needed --------------------
 
 

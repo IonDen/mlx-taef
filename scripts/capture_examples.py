@@ -89,7 +89,14 @@ path. On any failure the temp dir is discarded (`_discard_temp_variant_dir`) and
 `<out-dir>/<variant>/` — including a previously-good capture from an earlier run — is left
 completely untouched; a rerun at a different resolution/step count still fully replaces the old
 contents once it succeeds, just without a window where the published directory is missing or
-half-written.
+half-written. A process killed inside `_publish_variant_dir`'s own rename window (e.g. the
+watchdog's `os._exit(70)`) is recovered on the NEXT run: `_recover_variant_dir` restores the
+newest leftover `.{variant}.stale-*` dir back to `<variant>/` when the published dir is missing,
+then sweeps the rest, the same way `_temp_variant_dir` sweeps `.{variant}.tmp-*` orphans.
+Concurrent runs of the SAME variant are unsupported — the sweeps assume any other-pid temp/stale
+dir belongs to a dead process, and skip a dir only when `os.kill(pid, 0)` reports its embedded
+pid still alive; that check narrows but does not eliminate the risk of two simultaneous
+same-variant invocations interfering with each other.
 
 Wall-clock ETAs (M1 Max, quantize=4, 512x512 — documented estimates, not independently
 measured at this resolution): flux1-dev ~1-2 min; flux2-klein-4b (4 native steps) under a
@@ -223,6 +230,36 @@ def _resolve_generation_params(
     )
 
 
+def _extract_pid_suffix(dirname: str) -> int | None:
+    """Parse the trailing `-<pid>` integer off a temp/stale directory name.
+
+    Handles both `.{variant}.tmp-<pid>` and `.{variant}.stale-<pid>`. Returns `None` if the
+    suffix isn't a plain integer — an unparseable name is treated as not-alive (safe to sweep)
+    by callers.
+    """
+    suffix = dirname.rsplit("-", 1)[-1]
+    try:
+        return int(suffix)
+    except ValueError:
+        return None
+
+
+def _is_pid_alive(pid: int) -> bool:
+    """Best-effort liveness check for `pid` via `os.kill(pid, 0)` (sends no signal).
+
+    Narrows, but does not eliminate, the risk described in the module docstring's
+    single-writer note: a `PermissionError` (pid exists, just owned by another user) counts
+    as alive; a `ProcessLookupError` (no such pid) counts as dead.
+    """
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def _temp_variant_dir(out_dir: Path, variant: str) -> Path:
     """Create and return a fresh temp sibling dir for `variant`'s in-progress capture.
 
@@ -230,14 +267,22 @@ def _temp_variant_dir(out_dir: Path, variant: str) -> Path:
     it (`_publish_variant_dir`) is a same-filesystem rename — atomic on POSIX, never a
     half-written directory tree visible at the published path.
 
-    Also clears any `.{variant}.tmp-*` dirs already in `out_dir` (this process's own leftover
-    from an earlier failed attempt, or another pid's orphan left behind by a watchdog
-    `os._exit` — see the module docstring's heavy-run guardrails section) so temp dirs never
-    silently accumulate.
+    First runs `_recover_variant_dir` (restores/sweeps `.{variant}.stale-*` dirs left behind by
+    a process that died mid-`_publish_variant_dir`), then clears any `.{variant}.tmp-*` dirs
+    already in `out_dir` whose embedded pid is not currently alive (this process's own leftover
+    from an earlier failed attempt, or another dead pid's orphan left behind by a watchdog
+    `os._exit` — see the module docstring's heavy-run guardrails section), so temp dirs never
+    silently accumulate. A `.tmp-*` dir whose pid IS alive is left alone — see the module
+    docstring's single-writer note.
     """
+    _recover_variant_dir(out_dir, variant)
     for stale in out_dir.glob(f".{variant}.tmp-*"):
-        if stale.is_dir():
-            shutil.rmtree(stale)
+        if not stale.is_dir():
+            continue
+        pid = _extract_pid_suffix(stale.name)
+        if pid is not None and _is_pid_alive(pid):
+            continue
+        shutil.rmtree(stale)
     tmp_dir = out_dir / f".{variant}.tmp-{os.getpid()}"
     tmp_dir.mkdir(parents=True)
     return tmp_dir
@@ -252,6 +297,11 @@ def _publish_variant_dir(out_dir: Path, variant: str, tmp_dir: Path) -> Path:
     one — so a rerun fully replaces prior contents (no stale frame from a longer previous
     schedule survives) without ever deleting the published path before the replacement is
     ready to take its place.
+
+    A process killed between the two renames (notably the watchdog's own `os._exit(70)`) can
+    still leave the aside-renamed `.{variant}.stale-<pid>` dir behind with no
+    `<out_dir>/<variant>/` published at all; `_recover_variant_dir` (run at the start of the
+    NEXT `_temp_variant_dir` call) detects and repairs exactly that state.
     """
     variant_dir = out_dir / variant
     stale_dir = out_dir / f".{variant}.stale-{os.getpid()}"
@@ -263,6 +313,39 @@ def _publish_variant_dir(out_dir: Path, variant: str, tmp_dir: Path) -> Path:
     if stale_dir.exists():
         shutil.rmtree(stale_dir)
     return variant_dir
+
+
+def _recover_variant_dir(out_dir: Path, variant: str) -> None:
+    """Repair a crash inside `_publish_variant_dir`'s rename window, then sweep leftovers.
+
+    If `<out_dir>/<variant>/` is missing but a `.{variant}.stale-*` dir exists (whose pid is
+    not currently alive — see the module docstring's single-writer note), the newest such dir
+    by mtime is restored by renaming it back to `<variant>/`: a process that died between
+    `_publish_variant_dir`'s two renames leaves exactly this state (the old capture hidden
+    under the aside name, nothing at the published path), so this converts "published dir
+    missing" into "previous capture restored". Any other dead `.{variant}.stale-*` dirs are
+    then removed, mirroring `_temp_variant_dir`'s `.tmp-*` sweep. A live pid's stale dir (an
+    in-flight concurrent `_publish_variant_dir` on the same variant — unsupported, but not
+    worth corrupting) is left untouched either way.
+    """
+    variant_dir = out_dir / variant
+    dead_stale_dirs = []
+    for stale in out_dir.glob(f".{variant}.stale-*"):
+        if not stale.is_dir():
+            continue
+        pid = _extract_pid_suffix(stale.name)
+        if pid is not None and _is_pid_alive(pid):
+            continue
+        dead_stale_dirs.append(stale)
+
+    if not variant_dir.exists() and dead_stale_dirs:
+        newest = max(dead_stale_dirs, key=lambda p: p.stat().st_mtime)
+        newest.rename(variant_dir)
+        print(f"{variant}: recovered a prior capture from an interrupted publish ({newest.name})")
+        dead_stale_dirs.remove(newest)
+
+    for stale in dead_stale_dirs:
+        shutil.rmtree(stale)
 
 
 def _discard_temp_variant_dir(tmp_dir: Path) -> None:
