@@ -1,10 +1,13 @@
 # Examples
 
-Worked examples of mlx-taef in use. Most include real captured frames and the measured cost of
-each decode; the Qwen-Image and Krea 2 examples are decode-verified against committed fixtures and
-SSIM gates instead, with their frames and live-preview timing still pending (those sections explain
-why). The point of a tiny autoencoder is to watch a diffusion run progress without paying for the
-full VAE on every step, so most of these are live-preview walkthroughs.
+Worked examples of mlx-taef in use, each with captured live-preview frames and a reproduce command.
+Most also carry the measured cost of each decode against the full VAE; Qwen-Image and Krea 2 are
+decode-verified against committed parity fixtures and SSIM gates instead, with their in-context
+decode-timing benchmark still pending (those sections explain why). The point of a tiny autoencoder
+is to watch a diffusion run progress without paying for the full VAE on every step, so most of these
+are live-preview walkthroughs. A separate section covers the SD1.x/SDXL side of the family. TAESD
+and TAESDXL don't have an mflux generation model to preview, so their example is an encode/decode
+roundtrip on a still photo instead.
 
 Every measured number below was produced by the committed bench harness and is reproducible with
 the command shown in its section, except where a section marks its figures as pending or
@@ -69,9 +72,26 @@ callback = LivePreviewCallback(variant="qwen-image", save_to="preview.png", ever
 Correctness is gated by committed parity fixtures: the decode and encode paths match the upstream
 taew2.1 reference to within ~3e-6 (fp32).
 
-Frames and decode timing here are pending. Qwen-Image is a ~20B model that doesn't fit a usable
-resolution on 32 GB, so the in-context live preview and the `mlx-taef bench --variant qwen-image`
-number are community-measured rather than captured on this reference machine.
+Recipe: Qwen-Image, prompt `"a red apple on a wooden table"`, seed 42, 512×512, 20 steps (mflux's
+own CLI default for this model), guidance 3.5, int4, M1 Max. Reproduce:
+
+```
+uv run python scripts/capture_examples.py --variant qwen-image
+```
+
+| step 14 | step 17 | final |
+|---|---|---|
+| ![qi14](_artifacts/examples/qwen-image/qwen-image_step14.webp) | ![qi17](_artifacts/examples/qwen-image/qwen-image_step17.webp) | ![qif](_artifacts/examples/qwen-image/qwen-image_final.webp) |
+
+The taew2.1 preview stays undifferentiated noise through roughly the first two-thirds of this
+20-step run: steps 2 and 10 both show nothing, and the apple only starts resolving around step 14.
+That's later than every other variant in this document, so a live preview registered on Qwen-Image
+earns its keep mainly in the back half of a run.
+
+Qwen-Image is a ~20B model: running it back to back with the other captures in one chained pass
+hit a Metal command-buffer out-of-memory error, and the frames above came from rerunning that one
+capture on its own instead. The `mlx-taef bench --variant qwen-image` decode-timing number is
+still community-measured rather than captured on this reference machine.
 
 ## Krea 2 live preview
 
@@ -97,30 +117,54 @@ Correctness is gated the same way as Qwen-Image: decoding the committed (red app
 latent through `Krea2` and comparing it against mflux's full Krea 2 VAE scores **SSIM 0.9678**
 (`tests/test_krea2_ssim.py`, opt-in network test, ≥ 0.75 threshold).
 
-A note on scope: this page doesn't carry a separate Krea 2 decode benchmark. `Krea2` and
+Recipe: Krea 2 Turbo, prompt `"a red apple on a wooden table"`, seed 42, 512×512, 8 steps
+(`krea2_generate.py`'s own default), guidance 1.0, int4, M1 Max. Reproduce:
+
+```
+uv run python scripts/capture_examples.py --variant krea-2-turbo
+```
+
+| step 4 | step 6 | final |
+|---|---|---|
+| ![k4](_artifacts/examples/krea-2-turbo/krea-2-turbo_step04.webp) | ![k6](_artifacts/examples/krea-2-turbo/krea-2-turbo_step06.webp) | ![kf](_artifacts/examples/krea-2-turbo/krea-2-turbo_final.webp) |
+
+Krea 2's 8-step schedule stays noise through step 3 with this decoder, then resolves fast: step 4
+is the first frame with a recognizable apple, and step 6 is already close to the final image.
+
+A note on scope: this page doesn't carry a separate Krea 2 decode-timing benchmark. `Krea2` and
 `QwenImage` share byte-identical taew2.1 weights — one converted-cache entry, keyed by role rather
 than model name — so a Krea 2 decode timing would just be Qwen-Image's decode timing measured a
-second time. Frames and in-context live-preview timing are pending for the same reason
-Qwen-Image's are: community-measured via `mlx-taef bench --variant krea2` rather than captured on
-this reference machine.
+second time. The `mlx-taef bench --variant krea2` number is community-measured rather than
+captured on this reference machine, for the same reason Qwen-Image's is.
 
 ## FLUX.2 Klein live preview
 
 A live preview of FLUX.2 Klein with `auto_bn` color correction. Pass `flux=model` and the
 callback reads the VAE's batch-norm stats so the previews are color-correct from the first step.
+The `auto_bn` API itself is demonstrated against FLUX.2 Klein base 4B in
+[`examples/mflux_live_preview.py`](examples/mflux_live_preview.py); the frames pictured below are
+from the distilled 4B Klein instead (its own native 4-step schedule, no separate `--steps` flag to
+set).
 
-Recipe: FLUX.2 Klein base 4B, same prompt/seed, 512×512, 4 steps, guidance 1.0, int4. Script:
-[`examples/mflux_live_preview.py`](examples/mflux_live_preview.py).
+Recipe: FLUX.2 Klein 4B (distilled), prompt `"a red apple on a wooden table"`, seed 42, 512×512, 4
+steps (native), guidance 1.0 (fixed for this distilled config), int4, M1 Max. Reproduce:
 
-| step 1 | step 3 | final |
+```
+uv run python scripts/capture_examples.py --variant flux2-klein-4b
+```
+
+| step 2 | step 3 | final |
 |---|---|---|
-| ![f21](_artifacts/showcase/live_preview/live_preview_step01.webp) | ![f23](_artifacts/showcase/live_preview/live_preview_step03.webp) | ![f2f](_artifacts/showcase/live_preview/live_preview_final.webp) |
+| ![f21](_artifacts/examples/flux2-klein-4b/flux2-klein-4b_step02.webp) | ![f23](_artifacts/examples/flux2-klein-4b/flux2-klein-4b_step03.webp) | ![f2f](_artifacts/examples/flux2-klein-4b/flux2-klein-4b_final.webp) |
 
 The gain: TAEF2 decodes a Klein latent in **30 ms** versus **0.28 s** for the full FLUX.2 VAE
 (~9.4× faster), at **0.59 GB** versus 2.80 GB peak. SSIM here is **0.616**, lower than the FLUX.1
 family because TAEF2 is a 4 MB preview decoder standing in for a ~340 MB VAE: it keeps the
 structure and color and fudges fine detail. That is the deliberate trade for a real-time preview;
-reach for the full VAE when you need final-quality fidelity. Reproduce:
+reach for the full VAE when you need final-quality fidelity. This benchmark itself runs on FLUX.2
+Klein base 4B at a fixed 4-step timing recipe, not the distilled 4B pictured above. The decoder
+being measured is the same TAEF2 either way, so the number holds regardless of which Klein config
+produced the latent. Reproduce:
 
 ```
 uv run python scripts/run_showcase.py --scenario taef2_vs_vae
@@ -129,7 +173,25 @@ uv run python scripts/run_showcase.py --scenario taef2_vs_vae
 ## FLUX.1 fast decode
 
 TAEF1's architecture is closer to the FLUX.1 VAE it shadows, so its previews are higher fidelity
-than the FLUX.2 pair. Same red-apple latent, two decoders:
+than the FLUX.2 pair.
+
+Recipe: FLUX.1-dev, prompt `"a red apple on a wooden table"`, seed 42, 512×512, 14 steps, guidance
+3.5, int4, M1 Max. Reproduce:
+
+```
+uv run python scripts/capture_examples.py --variant flux1-dev
+```
+
+| step 6 | step 7 | final |
+|---|---|---|
+| ![f16](_artifacts/examples/flux1-dev/flux1-dev_step06.webp) | ![f17](_artifacts/examples/flux1-dev/flux1-dev_step07.webp) | ![f1f](_artifacts/examples/flux1-dev/flux1-dev_final.webp) |
+
+FLUX.1-dev's 14-step schedule stays undifferentiated TAEF1 noise through step 5; step 6, pictured
+here, is the earliest frame with a visible (if faint) red patch. Structure emerges later in this
+run than in the Z-Image or Klein galleries above, which fits: 14 steps is a slower, non-distilled
+schedule.
+
+Same red-apple latent, two decoders:
 
 | Full FLUX.1 VAE | TAEF1 |
 |---|---|
@@ -141,6 +203,30 @@ at **0.55 GB** versus 3.67 GB peak and **SSIM 0.94**. Reproduce:
 ```
 uv run python scripts/run_showcase.py --scenario taef1_vs_vae
 ```
+
+## TAESD / TAESDXL roundtrip
+
+TAESD and TAESDXL preview SD1.x and SDXL latents, and neither model has an mflux generation path in
+this repo to run a live preview against. Their example is an encode/decode roundtrip instead: load
+a still photo, encode it with the tiny autoencoder's own encoder, decode the result back, and
+compare against the source.
+
+Recipe: same 512×512 input photo for both, `include_encoder=True`, fp32 encode/decode (no mflux
+generation or quantization involved here), M1 Max. Reproduce:
+
+```
+uv run python scripts/capture_examples.py --variant taesd-roundtrip --input <path>
+uv run python scripts/capture_examples.py --variant taesdxl-roundtrip --input <path>
+```
+
+| input | TAESD roundtrip | TAESDXL roundtrip |
+|---|---|---|
+| ![rti](_artifacts/examples/taesd-roundtrip/taesd-roundtrip_input.webp) | ![rtsd](_artifacts/examples/taesd-roundtrip/taesd-roundtrip_roundtrip.webp) | ![rtsdxl](_artifacts/examples/taesdxl-roundtrip/taesdxl-roundtrip_roundtrip.webp) |
+
+TAESD keeps the apple's shape and color but visibly softens the fine skin texture and blurs the
+specular highlight compared to the input. TAESDXL keeps the highlight sharper but introduces a
+fine mottled, stippled texture across the apple's skin that isn't in the source — a different
+failure mode (added noise) rather than a strictly closer reproduction.
 
 ## Low-memory decode
 

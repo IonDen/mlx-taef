@@ -9,11 +9,13 @@ Hierarchy:
     ├── UnknownArchitectureError           (+ KeyError) arch/role has no registered builder
     ├── SchemaVersionError                 raised by the bundled showcase tooling
     ├── FixtureLatentMissingError          (+ FileNotFoundError) bundled showcase tooling
-    └── PreviewFramesMissingError          (+ FileNotFoundError) bundled preview-gif tooling
+    ├── PreviewFramesMissingError          (+ FileNotFoundError) bundled preview-gif tooling
+    └── CaptureInputImageMissingError      (+ FileNotFoundError) bundled example-capture tooling
 
-SchemaVersionError, FixtureLatentMissingError, and PreviewFramesMissingError are
-raised only by the bundled showcase/tooling scripts (`scripts/run_showcase.py`,
-`scripts/make_preview_gif.py`), not by importable package code.
+SchemaVersionError, FixtureLatentMissingError, PreviewFramesMissingError, and
+CaptureInputImageMissingError are raised only by the bundled showcase/tooling scripts
+(`scripts/run_showcase.py`, `scripts/make_preview_gif.py`, `scripts/capture_examples.py`),
+not by importable package code.
 """
 
 
@@ -80,6 +82,14 @@ class FixtureLatentMissingError(TaefError, FileNotFoundError):
 
 class PreviewFramesMissingError(TaefError, FileNotFoundError):
     """Raised when `scripts/make_preview_gif.py` finds no frames to assemble."""
+
+
+class CaptureInputImageMissingError(TaefError, FileNotFoundError):
+    """Raised when `scripts/capture_examples.py`'s `--input` path doesn't exist.
+
+    Only roundtrip variants (taesd-roundtrip, taesdxl-roundtrip) require --input; a
+    missing arg itself raises ValueError (a CLI usage error, not a filesystem one).
+    """
 
 
 class UnknownKernelError(TaefError, KeyError):
