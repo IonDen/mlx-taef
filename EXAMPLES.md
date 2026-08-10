@@ -246,13 +246,29 @@ ship a final image, decoding it with the matching TAEF variant avoids loading th
 The preview callback and [mlx-teacache](https://github.com/IonDen/mlx-teacache) coexist on the
 same mflux callback registry, so you can cache transformer steps and watch the preview at once.
 
-| step 1 | step 3 | final |
+Recipe: FLUX.1-dev, prompt `"a white lighthouse on a rocky coast at golden hour, waves crashing
+below"`, seed 42, 512×512, 25 steps, guidance 3.5, int4, M1 Max, mlx-teacache 0.9.3 at its
+default threshold (0.20). In this capture TeaCache skipped **6 of 25 steps** (17 computed, plus
+the always-computed first and last steps); the measured counts are committed next to the
+frames in
+[`combined_teacache.json`](_artifacts/examples/combined/combined_teacache.json). Reproduce:
+
+```
+uv run python scripts/capture_examples.py --variant combined \
+    --prompt "a white lighthouse on a rocky coast at golden hour, waves crashing below"
+```
+
+| step 14 | step 21 | final |
 |---|---|---|
-| ![c1](_artifacts/showcase/combined/combined_step01.webp) | ![c3](_artifacts/showcase/combined/combined_step03.webp) | ![cf](_artifacts/showcase/combined/combined_final.webp) |
+| ![c14](_artifacts/examples/combined/combined_step14.webp) | ![c21](_artifacts/examples/combined/combined_step21.webp) | ![cf](_artifacts/examples/combined/combined_final.webp) |
 
-Recipe: FLUX.2 Klein base 4B with TeaCache applied, TAEF2 live preview, same prompt/seed/steps.
-Reproduce:
+The lighthouse silhouette first separates from the TAEF1 noise around step 14, and by step 21
+the scene is nearly resolved. The preview keeps updating through skipped steps because the
+callback decodes whatever latent each step produced, cached or computed.
 
-```
-uv run python scripts/run_showcase.py --scenario combined
-```
+The example uses FLUX.1-dev at 25 steps rather than the Klein schedule the benchmark runs on.
+TeaCache's gate [does not engage on short distilled
+schedules](https://github.com/IonDen/mlx-teacache/blob/main/docs/papers/why-teacache-does-not-engage-on-short-distilled-schedules.md):
+zero steps skipped, so a Klein "combined" capture would show a cache that never fired.
+COMPARISON.md's combined-scenario numbers still come from the benchmark protocol and are
+unchanged here.

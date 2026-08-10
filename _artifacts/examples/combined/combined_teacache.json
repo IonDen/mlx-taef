@@ -1,0 +1,10 @@
+{
+  "variant_id": "flux1-dev",
+  "rel_l1_thresh": 0.2,
+  "skipped_count": 6,
+  "computed_count": 17,
+  "forced_count": 2,
+  "num_steps": 25,
+  "seed": 42,
+  "prompt": "a white lighthouse on a rocky coast at golden hour, waves crashing below"
+}

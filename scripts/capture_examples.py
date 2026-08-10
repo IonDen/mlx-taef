@@ -27,6 +27,19 @@ Two kinds of variant:
   directly rather than reimplemented — a short/empty gallery raises `TaefError` instead of
   shipping silently incomplete output.
 
+- The combined variant: the flux1-dev build wrapped with `mlx_teacache.apply_teacache`
+  BEFORE the `LivePreviewCallback` registers, demonstrating step-skipping and the live
+  preview composing on one generation (the wiring `examples/mflux_combined_with_teacache.py`
+  documents). 25 steps / guidance 3.5 — NOT flux1-dev's 14-step capture default: 25 steps at
+  the variant's default threshold (0.20 for flux1-dev, resolved by `apply_teacache`) is the
+  only recipe with MEASURED gate engagement (6/25 skips; see mlx-teacache's documented
+  negative result, docs/papers/why-teacache-does-not-engage-on-short-distilled-schedules.md
+  in the mlx-teacache repo — engagement is threshold-banded, and short/distilled schedules
+  record 0 skips). After generation the measured skip count gates publication: zero skips
+  raises `TeaCacheDidNotEngageError` instead of shipping a "combined" example where nothing
+  was cached, and the counts are published as `combined_teacache.json` beside the frames so
+  the EXAMPLES caption's skip-count claim stays re-derivable from a committed artifact.
+
 - Roundtrip variants (taesd-roundtrip, taesdxl-roundtrip): no mflux, no network at the model
   level beyond `from_pretrained`. Loads `--input`, encodes with `TAESD`/`TAESDXL`
   (`include_encoder=True`), decodes the result, and saves both the (RGB-normalized) input and
@@ -100,7 +113,8 @@ same-variant invocations interfering with each other.
 
 Wall-clock ETAs (M1 Max, quantize=4, 512x512 — documented estimates, not independently
 measured at this resolution): flux1-dev ~1-2 min; flux2-klein-4b (4 native steps) under a
-minute; qwen-image (20 steps) ~3-6 min; krea-2-turbo (8 steps) ~1-3 min warm cache (see
+minute; qwen-image (20 steps) ~3-6 min; combined (25-step flux1-dev + teacache, ~6 of 25
+transformer steps skipped when the gate engages) ~2-4 min warm; krea-2-turbo (8 steps) ~1-3 min warm cache (see
 scripts/_capture_latent.py's docstring for krea-2-turbo's cold-cache download time — ~25-45
 min the first time its ~36 GB of weights aren't cached). Roundtrip variants are offline and
 fast (<5 s).
@@ -130,6 +144,7 @@ Usage:
     uv run python scripts/capture_examples.py --variant qwen-image
     uv run python scripts/capture_examples.py --variant qwen-image --qwen-uniform-q4
     uv run python scripts/capture_examples.py --variant krea-2-turbo
+    uv run python scripts/capture_examples.py --variant combined
     uv run python scripts/capture_examples.py --variant taesd-roundtrip \\
         --input path/to/photo.png
     uv run python scripts/capture_examples.py --variant taesdxl-roundtrip \\
@@ -137,6 +152,7 @@ Usage:
 """
 
 import argparse
+import json
 import os
 import shutil
 import sys
@@ -154,7 +170,11 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from mlx_taef.api import TAESD, TAESDXL, Taef  # noqa: E402
-from mlx_taef.errors import CaptureInputImageMissingError  # noqa: E402
+from mlx_taef.errors import (  # noqa: E402
+    CaptureInputImageMissingError,
+    MlxTeacacheNotInstalledError,
+    TeaCacheDidNotEngageError,
+)
 from scripts._capture_latent import (  # noqa: E402
     _abort_artifact_path,
     _install_capture_watchdog,
@@ -162,7 +182,7 @@ from scripts._capture_latent import (  # noqa: E402
 )
 from scripts.run_showcase import _validate_live_artifacts  # noqa: E402
 
-_GENERATION_VARIANTS = ("flux1-dev", "flux2-klein-4b", "qwen-image", "krea-2-turbo")
+_GENERATION_VARIANTS = ("flux1-dev", "flux2-klein-4b", "qwen-image", "krea-2-turbo", "combined")
 _ROUNDTRIP_VARIANTS = ("taesd-roundtrip", "taesdxl-roundtrip")
 _SUPPORTED_VARIANTS = [*_GENERATION_VARIANTS, *_ROUNDTRIP_VARIANTS]
 
@@ -184,6 +204,7 @@ class _GenerationSettings:
     num_steps: int
     guidance: float
     auto_bn: bool
+    teacache: bool = False
 
 
 _GENERATION_SETTINGS: dict[str, _GenerationSettings] = {
@@ -198,6 +219,12 @@ _GENERATION_SETTINGS: dict[str, _GenerationSettings] = {
     ),
     "krea-2-turbo": _GenerationSettings(
         callback_variant="krea2", num_steps=8, guidance=1.0, auto_bn=False
+    ),
+    # 25 steps is load-bearing, not a style choice: the ONLY recipe with measured TeaCache
+    # engagement is FLUX.1-dev at 25 steps and the default threshold (6/25 skips) — see the
+    # module docstring's combined-variant section for the negative-result citation.
+    "combined": _GenerationSettings(
+        callback_variant="taef1", num_steps=25, guidance=3.5, auto_bn=False, teacache=True
     ),
 }
 
@@ -215,6 +242,7 @@ class _ResolvedGenerationParams:
     num_steps: int
     guidance: float
     auto_bn: bool
+    teacache: bool = False
 
 
 def _resolve_generation_params(
@@ -227,6 +255,7 @@ def _resolve_generation_params(
         num_steps=num_steps_override if num_steps_override is not None else settings.num_steps,
         guidance=guidance_override if guidance_override is not None else settings.guidance,
         auto_bn=settings.auto_bn,
+        teacache=settings.teacache,
     )
 
 
@@ -516,7 +545,9 @@ def _build_flux_model(variant: str, *, qwen_uniform_q4: bool = False) -> object:
     `qwen_uniform_q4` is read only for `variant == "qwen-image"`; see
     `_build_qwen_image_model`.
     """
-    if variant == "flux1-dev":
+    if variant in ("flux1-dev", "combined"):
+        # combined reuses the flux1-dev build verbatim — same model, same quantization;
+        # only the teacache wrapping (applied by _run_generation) differs.
         from mflux.models.flux.variants.txt2img.flux import Flux1
 
         return Flux1.from_name("dev", quantize=4)
@@ -533,6 +564,64 @@ def _build_flux_model(variant: str, *, qwen_uniform_q4: bool = False) -> object:
 
         return Krea2(quantize=4, model_config=ModelConfig.krea2())
     raise ValueError(f"unsupported generation variant: {variant}")  # pragma: no cover
+
+
+def _apply_teacache(flux: object) -> object:
+    """Wrap `flux` with mlx-teacache step-skipping; return the `TeaCacheHandle`.
+
+    Uses `apply_teacache`'s own per-variant default threshold (0.20 for flux1-dev — the
+    resolved value is read back from `handle.rel_l1_thresh` for the telemetry record).
+    Lazy import with the package-rooted install-hint error, mirroring how
+    `scripts/run_showcase.py`'s combined scenario reports the same missing dep.
+    """
+    try:
+        from mlx_teacache import apply_teacache
+    except ImportError as exc:
+        raise MlxTeacacheNotInstalledError() from exc
+    return apply_teacache(flux)
+
+
+def _record_teacache_telemetry(
+    handle: object,
+    *,
+    variant: str,
+    tmp_dir: Path,
+    num_steps: int,
+    seed: int,
+    prompt: str,
+) -> None:
+    """Gate publication on measured engagement, then write the telemetry JSON.
+
+    Zero skips means the gate never fired — the 'combined' example would demo a mechanism
+    that did nothing — so this raises `TeaCacheDidNotEngageError` (the caller's failure
+    path discards the temp dir, leaving any previously-published capture intact). On
+    engagement, `<variant>_teacache.json` lands beside the frames so the EXAMPLES
+    caption's skip-count claim stays re-derivable from a committed artifact.
+    """
+    stats = handle.stats  # type: ignore[attr-defined]
+    rel_l1_thresh = handle.rel_l1_thresh  # type: ignore[attr-defined]
+    print(
+        f"{variant}: teacache skipped={stats.skipped_count} computed={stats.computed_count} "
+        f"forced={stats.forced_count} rel_l1_thresh={rel_l1_thresh}"
+    )
+    if stats.skipped_count == 0:
+        raise TeaCacheDidNotEngageError(
+            f"TeaCache skipped 0 of {num_steps} steps — the gate never engaged, so this "
+            "capture would ship a 'combined' example where nothing was cached. Not "
+            "publishing. Change the recipe (more steps, or a schedule with measured "
+            "engagement) instead of shipping a dishonest gallery."
+        )
+    telemetry = {
+        "variant_id": getattr(handle, "variant_id", "unknown"),
+        "rel_l1_thresh": rel_l1_thresh,
+        "skipped_count": stats.skipped_count,
+        "computed_count": stats.computed_count,
+        "forced_count": stats.forced_count,
+        "num_steps": num_steps,
+        "seed": seed,
+        "prompt": prompt,
+    }
+    (tmp_dir / f"{variant}_teacache.json").write_text(json.dumps(telemetry, indent=2) + "\n")
 
 
 def _run_generation(variant: str, args: argparse.Namespace) -> Path:
@@ -554,6 +643,10 @@ def _run_generation(variant: str, args: argparse.Namespace) -> Path:
     tmp_dir = _temp_variant_dir(args.out_dir, variant)
     try:
         flux = _build_flux_model(variant, qwen_uniform_q4=args.qwen_uniform_q4)
+        # Teacache wraps FIRST, so the LivePreviewCallback previews the same cached
+        # trajectory the final image comes from (the two compose on the callback registry;
+        # neither knows about the other).
+        handle = _apply_teacache(flux) if params.teacache else None
         callback = LivePreviewCallback(
             flux=flux if params.auto_bn else None,
             variant=params.callback_variant,  # type: ignore[arg-type]
@@ -580,6 +673,15 @@ def _run_generation(variant: str, args: argparse.Namespace) -> Path:
             tmp_final_path,
             expected_count=params.num_steps,  # type: ignore[attr-defined]
         )
+        if handle is not None:
+            _record_teacache_telemetry(
+                handle,
+                variant=variant,
+                tmp_dir=tmp_dir,
+                num_steps=params.num_steps,
+                seed=args.seed,
+                prompt=args.prompt,
+            )
     except BaseException:
         _discard_temp_variant_dir(tmp_dir)
         raise

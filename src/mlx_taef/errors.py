@@ -10,12 +10,13 @@ Hierarchy:
     ├── SchemaVersionError                 raised by the bundled showcase tooling
     ├── FixtureLatentMissingError          (+ FileNotFoundError) bundled showcase tooling
     ├── PreviewFramesMissingError          (+ FileNotFoundError) bundled preview-gif tooling
-    └── CaptureInputImageMissingError      (+ FileNotFoundError) bundled example-capture tooling
+    ├── CaptureInputImageMissingError      (+ FileNotFoundError) bundled example-capture tooling
+    └── TeaCacheDidNotEngageError          bundled example-capture tooling
 
-SchemaVersionError, FixtureLatentMissingError, PreviewFramesMissingError, and
-CaptureInputImageMissingError are raised only by the bundled showcase/tooling scripts
-(`scripts/run_showcase.py`, `scripts/make_preview_gif.py`, `scripts/capture_examples.py`),
-not by importable package code.
+SchemaVersionError, FixtureLatentMissingError, PreviewFramesMissingError,
+CaptureInputImageMissingError, and TeaCacheDidNotEngageError are raised only by the bundled
+showcase/tooling scripts (`scripts/run_showcase.py`, `scripts/make_preview_gif.py`,
+`scripts/capture_examples.py`), not by importable package code.
 """
 
 
@@ -89,6 +90,16 @@ class CaptureInputImageMissingError(TaefError, FileNotFoundError):
 
     Only roundtrip variants (taesd-roundtrip, taesdxl-roundtrip) require --input; a
     missing arg itself raises ValueError (a CLI usage error, not a filesystem one).
+    """
+
+
+class TeaCacheDidNotEngageError(TaefError):
+    """Raised when `scripts/capture_examples.py`'s combined capture measured zero skips.
+
+    The combined example exists to show TeaCache step-skipping and the live preview
+    working together; a capture where the gate never fired would demo a mechanism that
+    did nothing, so the script refuses to publish it instead of shipping a dishonest
+    gallery. See mlx-teacache's documented negative result on short distilled schedules.
     """
 
 

@@ -52,6 +52,15 @@ def test_fixture_latent_missing_subclasses_taef_error_and_file_not_found() -> No
     assert issubclass(FixtureLatentMissingError, FileNotFoundError)
 
 
+def test_teacache_did_not_engage_subclasses_taef_error() -> None:
+    """Raised only by `scripts/capture_examples.py`'s combined capture when the measured
+    skip count is zero — a zero-skip 'combined' example would demo a mechanism that never
+    fired. Plain TaefError subclass: nothing filesystem- or import-shaped about it."""
+    from mlx_taef.errors import TaefError, TeaCacheDidNotEngageError
+
+    assert issubclass(TeaCacheDidNotEngageError, TaefError)
+
+
 def test_errors_reexported_from_package_root_by_identity() -> None:
     """Re-export must be the SAME object. The old `is not None` check would
     pass a wrong-object or `True` alias; identity catches a broken re-export.
@@ -197,6 +206,7 @@ def test_showcase_only_exceptions_not_in_package_root_all() -> None:
         "SchemaVersionError",
         "FixtureLatentMissingError",
         "MlxTeacacheNotInstalledError",
+        "TeaCacheDidNotEngageError",
     )
     for name in showcase_only:
         assert name not in mlx_taef.__all__, f"{name} should not be in the package-root __all__"

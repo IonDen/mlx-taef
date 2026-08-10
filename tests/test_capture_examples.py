@@ -34,6 +34,7 @@ CONVERTED = Path(__file__).parent / "converted"
         "flux2-klein-4b",
         "qwen-image",
         "krea-2-turbo",
+        "combined",
         "taesd-roundtrip",
         "taesdxl-roundtrip",
     ],
@@ -1162,6 +1163,213 @@ def test_main_clears_stale_abort_artifact_before_generation(tmp_path: Path, monk
 
     assert exit_code == 0
     assert not stale.exists()
+
+
+# --- combined variant: teacache + live preview in one generation ----------------------
+
+
+def _make_fake_teacache_handle(*, skipped: int, computed: int, forced: int = 0) -> object:
+    """Duck-typed stand-in for `mlx_teacache.TeaCacheHandle` — exactly the attributes
+    `_run_generation`'s combined path reads (verified against the installed mlx-teacache
+    0.9.3: `handle.stats.skipped_count/computed_count/forced_count`, `handle.rel_l1_thresh`,
+    `handle.variant_id` set by `apply_teacache`)."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        stats=SimpleNamespace(skipped_count=skipped, computed_count=computed, forced_count=forced),
+        rel_l1_thresh=0.2,
+        variant_id="flux1-dev",
+    )
+
+
+def test_generation_settings_combined_uses_engaged_gate_recipe() -> None:
+    """The combined variant must use the ONLY recipe with measured TeaCache engagement:
+    FLUX.1-dev at 25 steps, default threshold — 6/25 skips (mlx-teacache's documented
+    negative result shows short distilled schedules skip 0 steps, and even flux1-dev's
+    engagement is threshold-banded, so 25 steps is load-bearing, not a style choice)."""
+    from scripts.capture_examples import _GENERATION_SETTINGS, _resolve_generation_params
+
+    settings = _GENERATION_SETTINGS["combined"]
+    assert settings.callback_variant == "taef1"
+    assert settings.num_steps == 25
+    assert settings.guidance == 3.5
+    assert settings.auto_bn is False
+    assert settings.teacache is True
+
+    # And it threads through parameter resolution untouched.
+    params = _resolve_generation_params("combined", None, None)
+    assert params.teacache is True
+    assert params.num_steps == 25
+
+
+def test_only_combined_enables_teacache() -> None:
+    """Every non-combined generation variant must keep teacache off — wrapping the plain
+    galleries would silently change what their captions claim was run."""
+    from scripts.capture_examples import _GENERATION_SETTINGS
+
+    for variant, settings in _GENERATION_SETTINGS.items():
+        if variant == "combined":
+            continue
+        assert settings.teacache is False, f"{variant} must not enable teacache"
+
+
+def test_run_generation_combined_applies_teacache_and_writes_telemetry(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The combined path must wrap the model with teacache BEFORE generating, and publish
+    a telemetry JSON recording the measured skip counts next to the frames — the caption's
+    skip-count claim must be re-derivable from the committed artifact, not from a chat log."""
+    import json
+
+    from scripts import capture_examples as ce
+
+    import mlx_taef.integrations.mflux as mflux_integration
+
+    tmp_dirs = _spy(monkeypatch, ce, "_temp_variant_dir")
+    final_image = Image.new("RGB", (2, 2), color=(0, 0, 255))
+    fake_callback_instance = MagicMock()
+    # One shared event log makes the wrap-BEFORE-generate ordering observable — two
+    # independent "was it called" lists would pass even if the wrap moved after generation
+    # (verified by mutation during review: reordering _run_generation went undetected).
+    events: list[str] = []
+    apply_calls: list[object] = []
+
+    def _on_generate() -> None:
+        events.append("generate")
+        fake_callback_instance.saved_paths = _write_fake_gallery(tmp_dirs[-1], "combined", 3)
+
+    fake_flux, generate_calls = _make_fake_flux(final_image, on_generate=_on_generate)
+    fake_handle = _make_fake_teacache_handle(skipped=1, computed=2)
+
+    def _fake_apply(flux: object) -> object:
+        events.append("apply")
+        apply_calls.append(flux)
+        return fake_handle
+
+    monkeypatch.setattr(ce, "_build_flux_model", lambda variant, **kwargs: fake_flux)
+    monkeypatch.setattr(ce, "_apply_teacache", _fake_apply)
+    monkeypatch.setattr(
+        mflux_integration, "LivePreviewCallback", MagicMock(return_value=fake_callback_instance)
+    )
+
+    parser = ce._build_argparser()
+    args = parser.parse_args(
+        ["--variant", "combined", "--out-dir", str(tmp_path), "--num-steps", "3"]
+    )
+
+    final_path = ce._run_generation("combined", args)
+
+    assert apply_calls == [fake_flux]  # wrapped exactly once, with the built model
+    assert events == ["apply", "generate"]  # teacache wraps BEFORE generate_image runs
+    assert len(generate_calls) == 1
+
+    variant_dir = tmp_path / "combined"
+    assert final_path == variant_dir / "combined_final.webp"
+    assert final_path.exists()
+
+    telemetry_path = variant_dir / "combined_teacache.json"
+    assert telemetry_path.exists()
+    telemetry = json.loads(telemetry_path.read_text())
+    assert telemetry["skipped_count"] == 1
+    assert telemetry["computed_count"] == 2
+    assert telemetry["forced_count"] == 0
+    assert telemetry["rel_l1_thresh"] == 0.2
+    assert telemetry["variant_id"] == "flux1-dev"
+    assert telemetry["num_steps"] == 3
+    assert telemetry["seed"] == args.seed
+    assert telemetry["prompt"] == args.prompt
+
+
+def test_run_generation_combined_zero_skips_raises_and_preserves_published_dir(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Zero skips = TeaCache cached nothing = the 'combined' demo would be dishonest.
+    The capture must refuse to publish (raise `TeaCacheDidNotEngageError`), discard its
+    temp dir, and leave any previously-published capture byte-intact."""
+    from scripts import capture_examples as ce
+
+    import mlx_taef.integrations.mflux as mflux_integration
+    from mlx_taef.errors import TeaCacheDidNotEngageError
+
+    prior_dir = tmp_path / "combined"
+    prior_dir.mkdir(parents=True)
+    sentinel = prior_dir / "combined_final.webp"
+    sentinel.write_bytes(b"previous good capture")
+
+    tmp_dirs = _spy(monkeypatch, ce, "_temp_variant_dir")
+    fake_callback_instance = MagicMock()
+
+    def _on_generate() -> None:
+        fake_callback_instance.saved_paths = _write_fake_gallery(tmp_dirs[-1], "combined", 3)
+
+    fake_flux, _ = _make_fake_flux(Image.new("RGB", (2, 2)), on_generate=_on_generate)
+
+    monkeypatch.setattr(ce, "_build_flux_model", lambda variant, **kwargs: fake_flux)
+    monkeypatch.setattr(
+        ce, "_apply_teacache", lambda flux: _make_fake_teacache_handle(skipped=0, computed=3)
+    )
+    monkeypatch.setattr(
+        mflux_integration, "LivePreviewCallback", MagicMock(return_value=fake_callback_instance)
+    )
+
+    parser = ce._build_argparser()
+    args = parser.parse_args(
+        ["--variant", "combined", "--out-dir", str(tmp_path), "--num-steps", "3"]
+    )
+
+    with pytest.raises(TeaCacheDidNotEngageError, match="0"):
+        ce._run_generation("combined", args)
+
+    assert sentinel.read_bytes() == b"previous good capture"
+    assert not (prior_dir / "combined_teacache.json").exists()
+    assert list(tmp_path.glob(".combined.tmp-*")) == []  # temp dir discarded
+
+
+def test_run_generation_non_combined_variant_does_not_apply_teacache(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from scripts import capture_examples as ce
+
+    import mlx_taef.integrations.mflux as mflux_integration
+
+    tmp_dirs = _spy(monkeypatch, ce, "_temp_variant_dir")
+    fake_callback_instance = MagicMock()
+
+    def _on_generate() -> None:
+        fake_callback_instance.saved_paths = _write_fake_gallery(tmp_dirs[-1], "flux1-dev", 1)
+
+    fake_flux, _ = _make_fake_flux(Image.new("RGB", (2, 2)), on_generate=_on_generate)
+    apply_calls: list[object] = []
+
+    monkeypatch.setattr(ce, "_build_flux_model", lambda variant, **kwargs: fake_flux)
+    monkeypatch.setattr(ce, "_apply_teacache", lambda flux: apply_calls.append(flux))
+    monkeypatch.setattr(
+        mflux_integration, "LivePreviewCallback", MagicMock(return_value=fake_callback_instance)
+    )
+
+    parser = ce._build_argparser()
+    args = parser.parse_args(
+        ["--variant", "flux1-dev", "--out-dir", str(tmp_path), "--num-steps", "1"]
+    )
+
+    ce._run_generation("flux1-dev", args)
+
+    assert apply_calls == []
+    assert not (tmp_path / "flux1-dev" / "flux1-dev_teacache.json").exists()
+
+
+def test_apply_teacache_missing_dep_raises_package_error(monkeypatch) -> None:
+    """A missing mlx-teacache must surface as the package-rooted install-hint error,
+    mirroring how `run_showcase`'s combined scenario reports the same missing dep."""
+    import sys
+
+    from scripts.capture_examples import _apply_teacache
+
+    from mlx_taef.errors import MlxTeacacheNotInstalledError
+
+    monkeypatch.setitem(sys.modules, "mlx_teacache", None)
+    with pytest.raises(MlxTeacacheNotInstalledError):
+        _apply_teacache(object())
 
 
 # --- subprocess smoke: the exact invocation the controller uses -----------------------
