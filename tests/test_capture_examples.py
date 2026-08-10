@@ -163,32 +163,99 @@ def test_resolve_generation_params_applies_overrides() -> None:
     assert params.auto_bn is False
 
 
-# --- _reset_variant_dir: clears a stale variant dir before any new capture -------------
+# --- _temp_variant_dir / _publish_variant_dir / _discard_temp_variant_dir: atomic publish ---
 
 
-def test_reset_variant_dir_clears_prior_contents(tmp_path: Path) -> None:
-    from scripts.capture_examples import _reset_variant_dir
+def test_temp_variant_dir_creates_a_fresh_dir(tmp_path: Path) -> None:
+    from scripts.capture_examples import _temp_variant_dir
 
-    variant_dir = tmp_path / "flux1-dev"
-    variant_dir.mkdir(parents=True)
-    stale = variant_dir / "flux1-dev_final.webp"
-    stale.write_bytes(b"stale 1024x1024 leftover")
+    result = _temp_variant_dir(tmp_path, "flux1-dev")
 
-    result = _reset_variant_dir(tmp_path, "flux1-dev")
-
-    assert result == variant_dir
     assert result.is_dir()
-    assert not stale.exists()
+    assert result.parent == tmp_path
+    assert result.name.startswith(".flux1-dev.tmp-")
     assert list(result.iterdir()) == []
 
 
-def test_reset_variant_dir_creates_missing_dir(tmp_path: Path) -> None:
-    from scripts.capture_examples import _reset_variant_dir
+def test_temp_variant_dir_clears_leftover_temp_dirs_from_other_pids(tmp_path: Path) -> None:
+    """An orphaned temp dir from a killed prior process (e.g. a watchdog `os._exit`) must not
+    accumulate forever — a fresh call clears any `.{variant}.tmp-*` match, not just its own pid."""
+    from scripts.capture_examples import _temp_variant_dir
 
-    result = _reset_variant_dir(tmp_path, "krea-2-turbo")
+    orphan = tmp_path / ".flux1-dev.tmp-99999999"
+    orphan.mkdir()
+    (orphan / "leftover.webp").write_bytes(b"orphaned frame")
 
-    assert result == tmp_path / "krea-2-turbo"
+    result = _temp_variant_dir(tmp_path, "flux1-dev")
+
+    assert not orphan.exists()
     assert result.is_dir()
+
+
+def test_temp_variant_dir_does_not_touch_other_variants(tmp_path: Path) -> None:
+    from scripts.capture_examples import _temp_variant_dir
+
+    other = tmp_path / ".krea-2-turbo.tmp-1"
+    other.mkdir()
+    (other / "frame.webp").write_bytes(b"x")
+
+    _temp_variant_dir(tmp_path, "flux1-dev")
+
+    assert other.exists()
+
+
+def test_publish_variant_dir_swaps_temp_into_place_and_removes_old(tmp_path: Path) -> None:
+    from scripts.capture_examples import _publish_variant_dir, _temp_variant_dir
+
+    variant_dir = tmp_path / "flux1-dev"
+    variant_dir.mkdir()
+    (variant_dir / "old.webp").write_bytes(b"old capture")
+
+    tmp_dir = _temp_variant_dir(tmp_path, "flux1-dev")
+    (tmp_dir / "new.webp").write_bytes(b"new capture")
+
+    result = _publish_variant_dir(tmp_path, "flux1-dev", tmp_dir)
+
+    assert result == variant_dir
+    assert (variant_dir / "new.webp").read_bytes() == b"new capture"
+    assert not (variant_dir / "old.webp").exists()
+    assert not tmp_dir.exists()
+
+
+def test_publish_variant_dir_with_no_prior_published_dir(tmp_path: Path) -> None:
+    """Publishing must also work the first time, when `<out_dir>/<variant>/` doesn't exist yet."""
+    from scripts.capture_examples import _publish_variant_dir, _temp_variant_dir
+
+    tmp_dir = _temp_variant_dir(tmp_path, "flux1-dev")
+    (tmp_dir / "new.webp").write_bytes(b"new capture")
+
+    result = _publish_variant_dir(tmp_path, "flux1-dev", tmp_dir)
+
+    assert result == tmp_path / "flux1-dev"
+    assert (result / "new.webp").read_bytes() == b"new capture"
+    assert not tmp_dir.exists()
+
+
+def test_discard_temp_variant_dir_removes_the_dir(tmp_path: Path) -> None:
+    from scripts.capture_examples import _discard_temp_variant_dir
+
+    tmp_dir = tmp_path / ".flux1-dev.tmp-1"
+    tmp_dir.mkdir()
+    (tmp_dir / "partial.webp").write_bytes(b"x")
+
+    _discard_temp_variant_dir(tmp_dir)
+
+    assert not tmp_dir.exists()
+
+
+def test_discard_temp_variant_dir_is_a_noop_when_already_gone(tmp_path: Path) -> None:
+    from scripts.capture_examples import _discard_temp_variant_dir
+
+    tmp_dir = tmp_path / ".flux1-dev.tmp-999"
+
+    _discard_temp_variant_dir(tmp_dir)  # must not raise
+
+    assert not tmp_dir.exists()
 
 
 # --- _qwen_mixed_precision_predicate: pure, no mflux/network needed --------------------
@@ -332,20 +399,41 @@ def test_build_qwen_image_model_uniform_q4_does_not_touch_predicate(monkeypatch)
 # --- _run_generation: real wiring, mflux + LivePreviewCallback mocked ------------------
 
 
-def _write_fake_gallery(variant_dir: Path, variant: str, num_steps: int) -> list[Path]:
+def _spy(monkeypatch: pytest.MonkeyPatch, module: object, name: str) -> list[object]:
+    """Wrap `module.name` with a spy that still calls the original, recording each call's
+    return value.
+
+    Used to learn the (unpredictable, pid-based) temp dir a real `_temp_variant_dir` call
+    produced — that path isn't known until `_run_generation`/`_run_roundtrip` actually calls
+    it, so tests can't precompute it the way they could when captures wrote straight into a
+    predictable `<out_dir>/<variant>/`.
+    """
+    original = getattr(module, name)
+    results: list[object] = []
+
+    def _wrapped(*args: object, **kwargs: object) -> object:
+        result = original(*args, **kwargs)
+        results.append(result)
+        return result
+
+    monkeypatch.setattr(module, name, _wrapped)
+    return results
+
+
+def _write_fake_gallery(dest_dir: Path, variant: str, num_steps: int) -> list[Path]:
     """Create `num_steps` fake numbered-frame files matching
     `LivePreviewCallback._resolve_target`'s numbered-frame naming convention
     (`<stem>_step{NN}<suffix>`, `src/mlx_taef/integrations/mflux.py:377-385`) for a
-    `save_to=<variant_dir>/<variant>.webp` callback — i.e. `<variant>_step00.webp`, etc.
+    `save_to=<dest_dir>/<variant>.webp` callback — i.e. `<variant>_step00.webp`, etc.
 
-    Callers must invoke this from inside the fake `generate_image()`, i.e. AFTER
-    `_run_generation`'s `_reset_variant_dir` call — writing the frames up front would have
-    them deleted by that reset before `_validate_live_artifacts` ever sees them.
+    Callers must invoke this from inside the fake `generate_image()`, using the temp dir
+    `_run_generation`'s `_temp_variant_dir` call produced (see `_spy`) — writing frames
+    anywhere else means `_validate_live_artifacts` never sees them.
     """
-    variant_dir.mkdir(parents=True, exist_ok=True)
+    dest_dir.mkdir(parents=True, exist_ok=True)
     paths = []
     for idx in range(num_steps):
-        p = variant_dir / f"{variant}_step{idx:02d}.webp"
+        p = dest_dir / f"{variant}_step{idx:02d}.webp"
         p.write_bytes(b"frame")
         paths.append(p)
     return paths
@@ -358,7 +446,7 @@ def _make_fake_flux(
 
     `on_generate`, if given, runs inside `generate_image()` — the right point to simulate the
     real `LivePreviewCallback` writing its numbered-frame gallery to disk, since it must run
-    AFTER `_run_generation`'s `_reset_variant_dir` call, not before.
+    AFTER `_run_generation`'s `_temp_variant_dir` call, not before.
     """
 
     class _FakeGenerated:
@@ -391,14 +479,15 @@ def test_run_generation_wires_callback_and_saves_final(tmp_path: Path, monkeypat
 
     import mlx_taef.integrations.mflux as mflux_integration
 
+    tmp_dirs = _spy(monkeypatch, ce, "_temp_variant_dir")
     variant_dir = tmp_path / "flux1-dev"
     final_image = Image.new("RGB", (2, 2), color=(255, 0, 0))
-    fake_flux, generate_calls = _make_fake_flux(
-        final_image, on_generate=lambda: _write_fake_gallery(variant_dir, "flux1-dev", 2)
-    )
-    frame_paths = [variant_dir / f"flux1-dev_step{idx:02d}.webp" for idx in range(2)]
     fake_callback_instance = MagicMock()
-    fake_callback_instance.saved_paths = frame_paths
+
+    def _on_generate() -> None:
+        fake_callback_instance.saved_paths = _write_fake_gallery(tmp_dirs[-1], "flux1-dev", 2)
+
+    fake_flux, generate_calls = _make_fake_flux(final_image, on_generate=_on_generate)
     fake_callback_cls = MagicMock(return_value=fake_callback_instance)
 
     monkeypatch.setattr(ce, "_build_flux_model", lambda variant, **kwargs: fake_flux)
@@ -422,9 +511,12 @@ def test_run_generation_wires_callback_and_saves_final(tmp_path: Path, monkeypat
 
     final_path = ce._run_generation("flux1-dev", args)
 
+    tmp_dir = tmp_dirs[0]
+    assert not tmp_dir.exists()  # published: renamed into place, not left behind
     assert final_path == variant_dir / "flux1-dev_final.webp"
     assert final_path.exists()
-    assert all(p.exists() for p in frame_paths)
+    assert (variant_dir / "flux1-dev_step00.webp").exists()
+    assert (variant_dir / "flux1-dev_step01.webp").exists()
 
     fake_callback_cls.assert_called_once()
     _, kwargs = fake_callback_cls.call_args
@@ -432,7 +524,7 @@ def test_run_generation_wires_callback_and_saves_final(tmp_path: Path, monkeypat
     assert kwargs["variant"] == "taef1"
     assert kwargs["every"] == 1
     assert kwargs["numbered_frames"] is True
-    assert kwargs["save_to"] == variant_dir / "flux1-dev.webp"
+    assert kwargs["save_to"] == tmp_dir / "flux1-dev.webp"  # temp dir during capture
     assert kwargs["on_error"] == "raise"
 
     assert fake_flux.callbacks.registered == [fake_callback_instance]
@@ -454,13 +546,14 @@ def test_run_generation_passes_flux_instance_for_auto_bn_variant(
 
     import mlx_taef.integrations.mflux as mflux_integration
 
-    variant_dir = tmp_path / "flux2-klein-4b"
+    tmp_dirs = _spy(monkeypatch, ce, "_temp_variant_dir")
     final_image = Image.new("RGB", (2, 2))
-    fake_flux, _ = _make_fake_flux(
-        final_image, on_generate=lambda: _write_fake_gallery(variant_dir, "flux2-klein-4b", 1)
-    )
     fake_callback_instance = MagicMock()
-    fake_callback_instance.saved_paths = [variant_dir / "flux2-klein-4b_step00.webp"]
+
+    def _on_generate() -> None:
+        fake_callback_instance.saved_paths = _write_fake_gallery(tmp_dirs[-1], "flux2-klein-4b", 1)
+
+    fake_flux, _ = _make_fake_flux(final_image, on_generate=_on_generate)
     fake_callback_cls = MagicMock(return_value=fake_callback_instance)
 
     monkeypatch.setattr(ce, "_build_flux_model", lambda variant, **kwargs: fake_flux)
@@ -482,20 +575,21 @@ def test_run_generation_passes_flux_instance_for_auto_bn_variant(
 def test_run_generation_raises_when_preview_gallery_incomplete(tmp_path: Path, monkeypatch) -> None:
     """A short gallery (fewer frames than num_steps) must raise, not ship silently — this is
     the regression guard for Finding 1 (single-frame mode silently dropped every step but the
-    last)."""
+    last). (c): the temp dir must also be cleaned up, not left behind."""
     from scripts import capture_examples as ce
 
     import mlx_taef.integrations.mflux as mflux_integration
     from mlx_taef.errors import TaefError
 
-    variant_dir = tmp_path / "flux1-dev"
+    tmp_dirs = _spy(monkeypatch, ce, "_temp_variant_dir")
     final_image = Image.new("RGB", (2, 2))
-    # Only 1 frame written, but num_steps below asks for 2 — an incomplete gallery.
-    fake_flux, _ = _make_fake_flux(
-        final_image, on_generate=lambda: _write_fake_gallery(variant_dir, "flux1-dev", 1)
-    )
     fake_callback_instance = MagicMock()
-    fake_callback_instance.saved_paths = [variant_dir / "flux1-dev_step00.webp"]
+
+    def _on_generate() -> None:
+        # Only 1 frame written, but num_steps below asks for 2 — an incomplete gallery.
+        fake_callback_instance.saved_paths = _write_fake_gallery(tmp_dirs[-1], "flux1-dev", 1)
+
+    fake_flux, _ = _make_fake_flux(final_image, on_generate=_on_generate)
     fake_callback_cls = MagicMock(return_value=fake_callback_instance)
 
     monkeypatch.setattr(ce, "_build_flux_model", lambda variant, **kwargs: fake_flux)
@@ -509,29 +603,76 @@ def test_run_generation_raises_when_preview_gallery_incomplete(tmp_path: Path, m
     with pytest.raises(TaefError, match="preview frames"):
         ce._run_generation("flux1-dev", args)
 
+    assert not tmp_dirs[-1].exists()
+    assert not (tmp_path / "flux1-dev").exists()  # never published
 
-def test_run_generation_clears_stale_files_from_prior_run(tmp_path: Path, monkeypatch) -> None:
-    """A rerun at a different resolution/step count must not leave old frames/final images
-    mixed in with the new ones (Finding 3: a prior 1024x1024, 14-step run's leftover frames
-    must not survive a 512x512, 1-step rerun). Uses a leftover frame index (`_step05`) the new
-    1-step run would never itself recreate, so its continued presence can only mean the reset
-    didn't happen — recreating the SAME filename (e.g. `_final.webp`) would prove nothing,
-    since a working reset also legitimately produces that exact name."""
+
+def test_run_generation_failure_leaves_existing_variant_dir_byte_intact(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """(a) A failed generation must leave a pre-existing, previously-good variant dir
+    completely untouched — the regression this atomic-publish scheme fixes: capturing
+    straight into the published dir meant a mid-run crash destroyed a good prior capture with
+    no recovery."""
     from scripts import capture_examples as ce
 
     import mlx_taef.integrations.mflux as mflux_integration
 
     variant_dir = tmp_path / "flux1-dev"
     variant_dir.mkdir(parents=True)
-    stale = variant_dir / "flux1-dev_step05.webp"  # a prior, longer run's 6th frame
-    stale.write_bytes(b"stale 1024x1024 leftover")
+    good_final = variant_dir / "flux1-dev_final.webp"
+    good_bytes = b"a previously-good capture that must survive a failed rerun"
+    good_final.write_bytes(good_bytes)
 
-    final_image = Image.new("RGB", (2, 2))
-    fake_flux, _ = _make_fake_flux(
-        final_image, on_generate=lambda: _write_fake_gallery(variant_dir, "flux1-dev", 1)
+    class _FailingCallbacks:
+        def register(self, cb: object) -> None:
+            pass
+
+    class _FailingFlux:
+        def __init__(self) -> None:
+            self.callbacks = _FailingCallbacks()
+
+        def generate_image(self, **kwargs: object) -> object:
+            raise RuntimeError("simulated mid-run failure")
+
+    monkeypatch.setattr(ce, "_build_flux_model", lambda variant, **kwargs: _FailingFlux())
+    monkeypatch.setattr(
+        mflux_integration, "LivePreviewCallback", MagicMock(return_value=MagicMock())
     )
+
+    parser = ce._build_argparser()
+    args = parser.parse_args(
+        ["--variant", "flux1-dev", "--out-dir", str(tmp_path), "--num-steps", "1"]
+    )
+
+    with pytest.raises(RuntimeError, match="simulated mid-run failure"):
+        ce._run_generation("flux1-dev", args)
+
+    assert good_final.read_bytes() == good_bytes
+    assert {p.name for p in variant_dir.iterdir()} == {"flux1-dev_final.webp"}
+    assert list(tmp_path.glob(".flux1-dev.tmp-*")) == []  # no leftover temp dir
+
+
+def test_run_generation_success_replaces_old_contents_fully(tmp_path: Path, monkeypatch) -> None:
+    """(b) A successful run must fully replace old published contents — no stale frame from a
+    longer previous schedule survives alongside a shorter new one."""
+    from scripts import capture_examples as ce
+
+    import mlx_taef.integrations.mflux as mflux_integration
+
+    variant_dir = tmp_path / "flux1-dev"
+    variant_dir.mkdir(parents=True)
+    stale = variant_dir / "flux1-dev_step09.webp"  # a longer previous run's 10th frame
+    stale.write_bytes(b"stale, from a 14-step run")
+
+    tmp_dirs = _spy(monkeypatch, ce, "_temp_variant_dir")
+    final_image = Image.new("RGB", (2, 2))
     fake_callback_instance = MagicMock()
-    fake_callback_instance.saved_paths = [variant_dir / "flux1-dev_step00.webp"]
+
+    def _on_generate() -> None:
+        fake_callback_instance.saved_paths = _write_fake_gallery(tmp_dirs[-1], "flux1-dev", 1)
+
+    fake_flux, _ = _make_fake_flux(final_image, on_generate=_on_generate)
     fake_callback_cls = MagicMock(return_value=fake_callback_instance)
 
     monkeypatch.setattr(ce, "_build_flux_model", lambda variant, **kwargs: fake_flux)
@@ -545,6 +686,10 @@ def test_run_generation_clears_stale_files_from_prior_run(tmp_path: Path, monkey
     ce._run_generation("flux1-dev", args)
 
     assert not stale.exists()
+    assert {p.name for p in variant_dir.iterdir()} == {
+        "flux1-dev_final.webp",
+        "flux1-dev_step00.webp",
+    }
 
 
 def test_run_generation_threads_qwen_uniform_q4_flag_to_build_flux_model(
@@ -556,13 +701,14 @@ def test_run_generation_threads_qwen_uniform_q4_flag_to_build_flux_model(
 
     import mlx_taef.integrations.mflux as mflux_integration
 
-    variant_dir = tmp_path / "qwen-image"
+    tmp_dirs = _spy(monkeypatch, ce, "_temp_variant_dir")
     final_image = Image.new("RGB", (2, 2))
-    fake_flux, _ = _make_fake_flux(
-        final_image, on_generate=lambda: _write_fake_gallery(variant_dir, "qwen-image", 1)
-    )
     fake_callback_instance = MagicMock()
-    fake_callback_instance.saved_paths = [variant_dir / "qwen-image_step00.webp"]
+
+    def _on_generate() -> None:
+        fake_callback_instance.saved_paths = _write_fake_gallery(tmp_dirs[-1], "qwen-image", 1)
+
+    fake_flux, _ = _make_fake_flux(final_image, on_generate=_on_generate)
     fake_callback_cls = MagicMock(return_value=fake_callback_instance)
 
     build_calls: list[tuple[str, dict[str, object]]] = []
@@ -631,6 +777,7 @@ def test_run_roundtrip_end_to_end_with_tiny_weights(tmp_path: Path, monkeypatch)
     assert roundtrip_out == variant_dir / "taesd-roundtrip_roundtrip.webp"
     assert input_out.exists()
     assert roundtrip_out.exists()
+    assert list(out_dir.glob(".taesd-roundtrip.tmp-*")) == []  # published, no leftover temp
 
     with Image.open(roundtrip_out) as img:
         assert img.size == (32, 32)
@@ -664,9 +811,50 @@ def test_run_roundtrip_raises_when_input_path_does_not_exist(tmp_path: Path) -> 
         ce._run_roundtrip("taesd-roundtrip", args)
 
 
-def test_run_roundtrip_clears_stale_files_from_prior_run(tmp_path: Path, monkeypatch) -> None:
-    """Same Finding-3 guard as generation variants: a prior run's leftover output must not
-    survive into a fresh roundtrip run's variant dir."""
+def test_run_roundtrip_failure_leaves_existing_variant_dir_byte_intact(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """(a) A failed roundtrip must leave a pre-existing, previously-good variant dir
+    completely untouched."""
+    from scripts import capture_examples as ce
+
+    out_dir = tmp_path / "out"
+    variant_dir = out_dir / "taesd-roundtrip"
+    variant_dir.mkdir(parents=True)
+    good_file = variant_dir / "taesd-roundtrip_roundtrip.webp"
+    good_bytes = b"a previously-good roundtrip capture that must survive a failed rerun"
+    good_file.write_bytes(good_bytes)
+
+    def _boom(variant: str) -> object:
+        raise RuntimeError("simulated model-load failure")
+
+    monkeypatch.setattr(ce, "_load_roundtrip_model", _boom)
+
+    input_path = tmp_path / "input.png"
+    Image.new("RGB", (16, 16), color=(1, 2, 3)).save(input_path)
+
+    parser = ce._build_argparser()
+    args = parser.parse_args(
+        [
+            "--variant",
+            "taesd-roundtrip",
+            "--out-dir",
+            str(out_dir),
+            "--input",
+            str(input_path),
+        ]
+    )
+
+    with pytest.raises(RuntimeError, match="simulated model-load failure"):
+        ce._run_roundtrip("taesd-roundtrip", args)
+
+    assert good_file.read_bytes() == good_bytes
+    assert {p.name for p in variant_dir.iterdir()} == {"taesd-roundtrip_roundtrip.webp"}
+    assert list(out_dir.glob(".taesd-roundtrip.tmp-*")) == []  # no leftover temp dir
+
+
+def test_run_roundtrip_success_replaces_old_contents_fully(tmp_path: Path, monkeypatch) -> None:
+    """(b) A successful roundtrip must fully replace old published contents."""
     from scripts import capture_examples as ce
 
     from mlx_taef.api import Taef
@@ -703,6 +891,10 @@ def test_run_roundtrip_clears_stale_files_from_prior_run(tmp_path: Path, monkeyp
     ce._run_roundtrip("taesd-roundtrip", args)
 
     assert not stale.exists()
+    assert {p.name for p in variant_dir.iterdir()} == {
+        "taesd-roundtrip_input.webp",
+        "taesd-roundtrip_roundtrip.webp",
+    }
 
 
 # --- main(): dispatch + guardrail wiring -----------------------------------------------

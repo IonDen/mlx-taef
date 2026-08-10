@@ -77,11 +77,19 @@ watchdog (`scripts._capture_latent._install_capture_watchdog`, imported directly
 re-implemented — same discipline as `scripts/run_showcase.py`'s `_install_live_watchdog`)
 aborts the run — writing `<out-dir>/<variant>.abort.json` and exiting nonzero via
 `os._exit(70)` — if active memory nears the device ceiling or the wall budget is exceeded. A
-stale abort artifact from a prior aborted run is cleared before each new attempt, and EVERY
-variant (generation or roundtrip) gets its `<out-dir>/<variant>/` directory wiped and
-recreated fresh before capturing (`_reset_variant_dir`) — so a rerun at a different
-resolution/step count, or after an earlier partial/failed attempt, never leaves stale frames
-or a final image mixed in with the new output.
+stale abort artifact from a prior aborted run is cleared before each new attempt.
+
+Publishing is atomic (mirrors the converted-weights cache's temp-then-rename discipline, see
+`mlx_taef.download.get_or_convert`): both `_run_generation` and `_run_roundtrip` capture into a
+same-filesystem temp sibling directory (`_temp_variant_dir`, `<out-dir>/.<variant>.tmp-<pid>`)
+and only swap it into `<out-dir>/<variant>/` (`_publish_variant_dir`) after the run fully
+succeeds and, for generation, the gallery validates complete. `LivePreviewCallback.save_to`
+points at the temp dir during capture, so the swap is the only step that touches the published
+path. On any failure the temp dir is discarded (`_discard_temp_variant_dir`) and the existing
+`<out-dir>/<variant>/` — including a previously-good capture from an earlier run — is left
+completely untouched; a rerun at a different resolution/step count still fully replaces the old
+contents once it succeeds, just without a window where the published directory is missing or
+half-written.
 
 Wall-clock ETAs (M1 Max, quantize=4, 512x512 — documented estimates, not independently
 measured at this resolution): flux1-dev ~1-2 min; flux2-klein-4b (4 native steps) under a
@@ -122,6 +130,7 @@ Usage:
 """
 
 import argparse
+import os
 import shutil
 import sys
 from dataclasses import dataclass
@@ -214,18 +223,57 @@ def _resolve_generation_params(
     )
 
 
-def _reset_variant_dir(out_dir: Path, variant: str) -> Path:
-    """Return a fresh, empty `<out_dir>/<variant>/`, deleting any prior contents first.
+def _temp_variant_dir(out_dir: Path, variant: str) -> Path:
+    """Create and return a fresh temp sibling dir for `variant`'s in-progress capture.
 
-    Without this, a rerun at a different resolution or step count (or after an earlier
-    partial/aborted attempt) would leave stale frames or a stale `<variant>_final.webp`
-    sitting next to the new output — silently mixing captures from two different runs.
+    Path is `<out_dir>/.<variant>.tmp-<pid>`, a plain subdirectory of `out_dir`, so publishing
+    it (`_publish_variant_dir`) is a same-filesystem rename — atomic on POSIX, never a
+    half-written directory tree visible at the published path.
+
+    Also clears any `.{variant}.tmp-*` dirs already in `out_dir` (this process's own leftover
+    from an earlier failed attempt, or another pid's orphan left behind by a watchdog
+    `os._exit` — see the module docstring's heavy-run guardrails section) so temp dirs never
+    silently accumulate.
+    """
+    for stale in out_dir.glob(f".{variant}.tmp-*"):
+        if stale.is_dir():
+            shutil.rmtree(stale)
+    tmp_dir = out_dir / f".{variant}.tmp-{os.getpid()}"
+    tmp_dir.mkdir(parents=True)
+    return tmp_dir
+
+
+def _publish_variant_dir(out_dir: Path, variant: str, tmp_dir: Path) -> Path:
+    """Atomically swap a finished `tmp_dir` (from `_temp_variant_dir`) into `<out_dir>/<variant>/`.
+
+    Only call this after a capture has fully succeeded (and, for generation, passed gallery
+    validation) — it replaces whatever was previously published. Renames any existing
+    `<out_dir>/<variant>/` aside first, renames `tmp_dir` into its place, then removes the old
+    one — so a rerun fully replaces prior contents (no stale frame from a longer previous
+    schedule survives) without ever deleting the published path before the replacement is
+    ready to take its place.
     """
     variant_dir = out_dir / variant
+    stale_dir = out_dir / f".{variant}.stale-{os.getpid()}"
+    if stale_dir.exists():
+        shutil.rmtree(stale_dir)
     if variant_dir.exists():
-        shutil.rmtree(variant_dir)
-    variant_dir.mkdir(parents=True)
+        variant_dir.rename(stale_dir)
+    tmp_dir.rename(variant_dir)
+    if stale_dir.exists():
+        shutil.rmtree(stale_dir)
     return variant_dir
+
+
+def _discard_temp_variant_dir(tmp_dir: Path) -> None:
+    """Remove an in-progress capture's temp dir after a failed run.
+
+    Called from a failure path only — the existing published `<out_dir>/<variant>/` is never
+    touched here, which is the whole point: a failed rerun must leave a previously-good
+    capture exactly as it was.
+    """
+    if tmp_dir.exists():
+        shutil.rmtree(tmp_dir)
 
 
 def _build_argparser() -> argparse.ArgumentParser:
@@ -407,47 +455,54 @@ def _build_flux_model(variant: str, *, qwen_uniform_q4: bool = False) -> object:
 def _run_generation(variant: str, args: argparse.Namespace) -> Path:
     """Generate one quality-first example image for `variant`; return the final image path.
 
-    Registers a numbered-frame `LivePreviewCallback` (`every=1`, `numbered_frames=True`) at
-    `<out-dir>/<variant>/<variant>.webp`, which — per
-    `LivePreviewCallback._resolve_target` — writes one file per step,
-    `<out-dir>/<variant>/<variant>_step00.webp ... <variant>_stepNN.webp`, then saves the
-    full-VAE-decoded final image to `<out-dir>/<variant>/<variant>_final.webp`. The gallery
-    is validated complete before returning. See the module docstring for the full per-variant
-    recipe and its citations.
+    Captures into a temp sibling dir (`_temp_variant_dir`) and only publishes it
+    (`_publish_variant_dir`) into `<out-dir>/<variant>/` after generation succeeds AND the
+    gallery validates complete — see the module docstring's "Publishing is atomic" section. A
+    numbered-frame `LivePreviewCallback` (`every=1`, `numbered_frames=True`) is registered at
+    `<temp-dir>/<variant>.webp`, which — per `LivePreviewCallback._resolve_target` — writes one
+    file per step, `<temp-dir>/<variant>_step00.webp ... <variant>_stepNN.webp`; the
+    full-VAE-decoded final image is saved to `<temp-dir>/<variant>_final.webp`. On any failure
+    the temp dir is discarded and the existing published dir, if any, is untouched. See the
+    module docstring for the full per-variant recipe and its citations.
     """
     from mlx_taef.integrations.mflux import LivePreviewCallback
 
     params = _resolve_generation_params(variant, args.num_steps, args.guidance)
-    variant_dir = _reset_variant_dir(args.out_dir, variant)
+    tmp_dir = _temp_variant_dir(args.out_dir, variant)
+    try:
+        flux = _build_flux_model(variant, qwen_uniform_q4=args.qwen_uniform_q4)
+        callback = LivePreviewCallback(
+            flux=flux if params.auto_bn else None,
+            variant=params.callback_variant,  # type: ignore[arg-type]
+            every=1,
+            numbered_frames=True,
+            save_to=tmp_dir / f"{variant}.webp",
+            on_error="raise",
+        )
+        flux.callbacks.register(callback)  # type: ignore[attr-defined]
 
-    flux = _build_flux_model(variant, qwen_uniform_q4=args.qwen_uniform_q4)
-    callback = LivePreviewCallback(
-        flux=flux if params.auto_bn else None,
-        variant=params.callback_variant,  # type: ignore[arg-type]
-        every=1,
-        numbered_frames=True,
-        save_to=variant_dir / f"{variant}.webp",
-        on_error="raise",
-    )
-    flux.callbacks.register(callback)  # type: ignore[attr-defined]
+        generated = flux.generate_image(  # type: ignore[attr-defined]
+            seed=args.seed,
+            prompt=args.prompt,
+            num_inference_steps=params.num_steps,
+            height=args.height,
+            width=args.width,
+            guidance=params.guidance,
+        )
 
-    generated = flux.generate_image(  # type: ignore[attr-defined]
-        seed=args.seed,
-        prompt=args.prompt,
-        num_inference_steps=params.num_steps,
-        height=args.height,
-        width=args.width,
-        guidance=params.guidance,
-    )
+        tmp_final_path = tmp_dir / f"{variant}_final.webp"
+        generated.image.save(tmp_final_path, "WEBP", quality=_WEBP_QUALITY)  # type: ignore[attr-defined]
+        _validate_live_artifacts(
+            callback.saved_paths,
+            tmp_final_path,
+            expected_count=params.num_steps,  # type: ignore[attr-defined]
+        )
+    except BaseException:
+        _discard_temp_variant_dir(tmp_dir)
+        raise
 
-    final_path = variant_dir / f"{variant}_final.webp"
-    generated.image.save(final_path, "WEBP", quality=_WEBP_QUALITY)  # type: ignore[attr-defined]
-    _validate_live_artifacts(
-        callback.saved_paths,
-        final_path,
-        expected_count=params.num_steps,  # type: ignore[attr-defined]
-    )
-    return final_path
+    variant_dir = _publish_variant_dir(args.out_dir, variant, tmp_dir)
+    return variant_dir / f"{variant}_final.webp"
 
 
 def _load_roundtrip_model(variant: str) -> Taef:
@@ -465,7 +520,10 @@ def _run_roundtrip(variant: str, args: argparse.Namespace) -> tuple[Path, Path]:
 
     Tensor layout/value-space per `src/mlx_taef/api.py`'s module docstring: `encode()` takes
     NHWC float `[0, 1]`; `decode_image()` returns NHWC uint8. `--input` is loaded via PIL,
-    normalized to RGB, and given a batch axis to match that contract.
+    normalized to RGB, and given a batch axis to match that contract. Captures into a temp
+    sibling dir and only publishes it into `<out-dir>/<variant>/` once both images are
+    written — see `_run_generation`'s docstring and the module docstring's "Publishing is
+    atomic" section for the shared mechanism.
     """
     if args.input is None:
         raise ValueError(
@@ -479,25 +537,32 @@ def _run_roundtrip(variant: str, args: argparse.Namespace) -> tuple[Path, Path]:
     import numpy as np
     from PIL import Image
 
-    variant_dir = _reset_variant_dir(args.out_dir, variant)
+    tmp_dir = _temp_variant_dir(args.out_dir, variant)
+    try:
+        model = _load_roundtrip_model(variant)
 
-    model = _load_roundtrip_model(variant)
+        with Image.open(args.input) as raw:
+            img = raw.convert("RGB")
+        # HWC uint8 -> NHWC float32 [0, 1], the encode() contract (api.py module docstring).
+        arr = np.asarray(img, dtype=np.float32) / 255.0
+        batched = mx.array(arr)[None]
 
-    with Image.open(args.input) as raw:
-        img = raw.convert("RGB")
-    # HWC uint8 -> NHWC float32 [0, 1], the encode() contract (api.py module docstring).
-    arr = np.asarray(img, dtype=np.float32) / 255.0
-    batched = mx.array(arr)[None]
+        latent = model.encode(batched)
+        decoded = model.decode_image(latent)  # NHWC uint8, per decode_image()'s docstring.
+        mx.eval(decoded)
 
-    latent = model.encode(batched)
-    decoded = model.decode_image(latent)  # NHWC uint8, per decode_image()'s docstring.
-    mx.eval(decoded)
+        tmp_input_path = tmp_dir / f"{variant}_input.webp"
+        tmp_roundtrip_path = tmp_dir / f"{variant}_roundtrip.webp"
+        img.save(tmp_input_path, "WEBP", quality=_WEBP_QUALITY)
+        Image.fromarray(np.array(decoded[0])).save(
+            tmp_roundtrip_path, "WEBP", quality=_WEBP_QUALITY
+        )
+    except BaseException:
+        _discard_temp_variant_dir(tmp_dir)
+        raise
 
-    input_path = variant_dir / f"{variant}_input.webp"
-    roundtrip_path = variant_dir / f"{variant}_roundtrip.webp"
-    img.save(input_path, "WEBP", quality=_WEBP_QUALITY)
-    Image.fromarray(np.array(decoded[0])).save(roundtrip_path, "WEBP", quality=_WEBP_QUALITY)
-    return input_path, roundtrip_path
+    variant_dir = _publish_variant_dir(args.out_dir, variant, tmp_dir)
+    return variant_dir / f"{variant}_input.webp", variant_dir / f"{variant}_roundtrip.webp"
 
 
 def main(argv: list[str] | None = None) -> int:
