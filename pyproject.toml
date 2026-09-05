@@ -123,8 +123,12 @@ version-file = "src/mlx_taef/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mlx_taef"]
+# hatchling >= 1.32 emits Metadata-Version 2.5, which the release workflow's twine (6.2.0,
+# bundled by the build action) rejects; 2.4 is read by every tool in the release path.
+core-metadata-version = "2.4"
 
 [tool.hatch.build.targets.sdist]
+core-metadata-version = "2.4"
 # Allowlist: ship only the source package, user-facing docs, examples, and license.
 # Everything else stays out by construction — the test suite (its large parity fixtures
 # under tests/converted/ and tests/reference/ are excluded, so the tests can't run from an

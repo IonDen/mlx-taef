@@ -22,6 +22,33 @@ def _pyproject() -> dict:
     return tomllib.loads(_PYPROJECT.read_text())
 
 
+def test_built_distributions_declare_core_metadata_2_4() -> None:
+    """The v0.8.1 tag push failed to publish: hatchling 1.32 emits Metadata-Version 2.5 and
+    the release workflow's `twine check --strict` (twine 6.2.0, bundled by the build action)
+    rejects it. Pinning the emitted core-metadata version to 2.4 keeps the wheel and sdist
+    readable by every tool in the release path. The one-line bug this catches: dropping
+    `core-metadata-version` from either hatch build target."""
+    targets = _pyproject()["tool"]["hatch"]["build"]["targets"]
+    assert targets["wheel"]["core-metadata-version"] == "2.4"
+    assert targets["sdist"]["core-metadata-version"] == "2.4"
+
+
+def test_ci_lint_job_checks_a_built_wheel_with_the_release_twine() -> None:
+    """The metadata/tooling mismatch was only ever exercised at tag time. The lint job must
+    build the distributions and run the same `twine check --strict` the release action runs,
+    with twine pinned to the version that action bundles, so the mismatch fails a pull
+    request instead of a release. The one-line bug this catches: removing the check step or
+    unpinning twine to whatever is newest (which would pass while the release tooling fails)."""
+    workflow = _CI_WORKFLOW.read_text()
+    assert "run: uv build" in workflow
+    check_lines = [
+        line.strip() for line in workflow.splitlines() if "twine" in line and "check" in line
+    ]
+    assert len(check_lines) == 1
+    assert "twine==6.2.0" in check_lines[0]
+    assert "check --strict dist/*" in check_lines[0]
+
+
 def test_ci_uv_sync_commands_are_frozen() -> None:
     workflow = _CI_WORKFLOW.read_text()
     sync_commands = [line.strip() for line in workflow.splitlines() if "run: uv sync" in line]

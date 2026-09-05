@@ -30,6 +30,10 @@ mflux 0.19.x compatibility.
 - mflux 0.19 points its `qwen-image` model at the newer `Qwen/Qwen-Image-2512` checkpoint. Its
   VAE weights are byte-identical to Qwen-Image's, so `variant="qwen-image"` previews it
   unchanged.
+- Built distributions now declare core metadata version 2.4. The current hatchling emits 2.5,
+  which the release workflow's twine rejected, so the first v0.8.1 tag never reached PyPI. CI
+  now builds the wheel and sdist and runs the same `twine check --strict` on every pull
+  request.
 
 ## [0.8.0] - 2026-08-09
 

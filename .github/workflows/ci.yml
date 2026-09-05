@@ -21,6 +21,15 @@ jobs:
         run: uv run ruff check .
       - name: Ruff format check
         run: uv run ruff format --check .
+      - name: Build distributions
+        # hatch-vcs needs a version; the shallow checkout has no tags to derive one from.
+        run: uv build
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: "0.0.0"
+      - name: Check distributions with the release action's twine
+        # twine is pinned to the version hynek/build-and-inspect-python-package@v2 bundles,
+        # so a metadata/tooling mismatch fails here instead of on the tag push.
+        run: uvx twine==6.2.0 check --strict dist/*
 
   typecheck:
     runs-on: ubuntu-latest
