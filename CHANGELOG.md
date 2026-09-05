@@ -23,7 +23,13 @@ mflux 0.19.x compatibility.
   extra pulls those in. Verified against mflux 0.19.1 with MLX 0.32.2: the in-loop callback
   contract and every packed-latent layout are unchanged, the committed parity fixtures stay
   bit-exact under MLX 0.32.2, and a registered live preview composes with mflux's new
-  `--pid-decode` (NVIDIA PiD) option, which replaces only the post-loop VAE decode.
+  `--pid-decode` (NVIDIA PiD) option, which replaces only the post-loop VAE decode. A Krea 2
+  Turbo generation with the preview registered was re-captured end to end under 0.19.1: mflux
+  0.19 rewrote the Krea 2 sampling schedule, so the image differs from the 0.18.1 capture, and
+  the preview tracks the new final at SSIM 0.94.
+- mflux 0.19 points its `qwen-image` model at the newer `Qwen/Qwen-Image-2512` checkpoint. Its
+  VAE weights are byte-identical to Qwen-Image's, so `variant="qwen-image"` previews it
+  unchanged.
 
 ## [0.8.0] - 2026-08-09
 
