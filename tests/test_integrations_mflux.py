@@ -502,6 +502,87 @@ def test_resolve_latent_dims_against_real_mflux_config() -> None:
     assert _resolve_latent_dims(None, None, cfg, 16) == (4, 8)
 
 
+def test_call_before_loop_accepts_mflux_0_19_control_images(offline_taef2: object) -> None:
+    """mflux 0.19.0 added `control_images` (Z-Image ControlNet) to the BeforeLoopCallback
+    protocol and its GenerationContext passes it to EVERY subscriber as a keyword argument —
+    a callback without the parameter dies with TypeError before the first denoise step.
+    Two checks: the keyword call must not raise, AND `control_images` must be an explicitly
+    named parameter (mflux's `BeforeLoopCallback` Protocol declares it by name — the `**`
+    catch-all is for keywords mflux has not invented yet, not a substitute for the declared
+    ones). The one-line bug the second check catches: dropping the named `control_images`
+    parameter while leaving the catch-all, which the call alone cannot distinguish."""
+    import inspect
+
+    import mlx.core as mx
+
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    cb = LivePreviewCallback(variant="taef2")
+    params = inspect.signature(cb.call_before_loop).parameters
+    assert "control_images" in params
+    assert params["control_images"].default is None
+    cb.call_before_loop(
+        seed=1,
+        prompt="p",
+        latents=mx.zeros((1, 4, 128)),
+        config=None,
+        canny_image=None,
+        depth_image=None,
+        control_images=None,
+    )
+    assert cb.saved_paths == []
+
+
+def test_call_before_loop_tolerates_future_hook_kwargs(offline_taef2: object) -> None:
+    """mflux grows the before-loop hook by one keyword per new conditioning family
+    (canny_image, depth_image, then control_images in 0.19). Unknown extra keywords must be
+    absorbed, not fatal, so the next addition doesn't break every registered preview again.
+    The one-line bug this catches: removing the `**` catch-all from `call_before_loop`."""
+    import mlx.core as mx
+
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    cb = LivePreviewCallback(variant="taef2")
+    cb.call_before_loop(
+        seed=1,
+        prompt="p",
+        latents=mx.zeros((1, 4, 128)),
+        config=None,
+        some_future_conditioning_image=object(),
+    )
+    assert cb.saved_paths == []
+
+
+def test_live_preview_survives_real_mflux_before_loop_dispatch(offline_taef2: object) -> None:
+    """Drive the REAL installed mflux GenerationContext.before_loop over a real CallbackRegistry
+    with our callback registered, so the dispatcher's actual keyword set (whatever this mflux
+    version passes) is exercised — not a hand-written call that could lag behind mflux.
+    Pure Python, no model load, no network. Under mflux 0.19.x this is the exact call that
+    raised `TypeError: unexpected keyword argument 'control_images'` before the fix. Under an
+    older installed mflux (the pin still allows 0.17/0.18) the dispatcher passes fewer keywords
+    and this test only proves the older contract; the named-parameter assertion in
+    `test_call_before_loop_accepts_mflux_0_19_control_images` is the version-independent
+    guard. The lockfile pins CI to 0.19.1, so CI exercises the 0.19 keyword set."""
+    import mlx.core as mx
+    from mflux.callbacks.callback_registry import CallbackRegistry
+    from mflux.callbacks.generation_context import GenerationContext
+    from mflux.models.common.config.config import Config
+    from mflux.models.common.config.model_config import ModelConfig
+
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    cb = LivePreviewCallback(variant="taef2")
+    cb._iter = 3  # a stale cadence from a previous generation must be reset by the hook
+    registry = CallbackRegistry()
+    registry.register(cb)
+    cfg = Config(model_config=ModelConfig.flux2_klein_base_4b(), height=64, width=64)
+    ctx = GenerationContext(registry, 42, "p", cfg)
+
+    ctx.before_loop(mx.zeros((1, 16, 128)))
+
+    assert cb._iter == 0
+
+
 def test_binding_packed_latent_downscale_values() -> None:
     from mlx_taef.kernels import KERNELS
 

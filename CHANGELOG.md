@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-09-05
+
+mflux 0.19.x compatibility.
+
+### Fixed
+- `LivePreviewCallback` no longer crashes under mflux 0.19.x. mflux 0.19.0 added a
+  `control_images` argument (Z-Image ControlNet) to its before-loop callback hook and passes it
+  to every registered callback, so any generation with a live preview registered failed with
+  `TypeError: unexpected keyword argument 'control_images'` before the first denoise step. The
+  hook now accepts it, and absorbs whichever conditioning keyword mflux adds next, so the next
+  model family's hook argument will not break registered previews again.
+
+### Changed
+- The `mflux` extra now installs against mflux 0.19.x (`>=0.17,<0.20`); the previous `<0.19` pin
+  excluded it. mflux 0.19.1 itself requires MLX 0.32 and torch 2.13 or newer, so installing the
+  extra pulls those in. Verified against mflux 0.19.1 with MLX 0.32.2: the in-loop callback
+  contract and every packed-latent layout are unchanged, the committed parity fixtures stay
+  bit-exact under MLX 0.32.2, and a registered live preview composes with mflux's new
+  `--pid-decode` (NVIDIA PiD) option, which replaces only the post-loop VAE decode. A Krea 2
+  Turbo generation with the preview registered was re-captured end to end under 0.19.1: mflux
+  0.19 rewrote the Krea 2 sampling schedule, so the image differs from the 0.18.1 capture, and
+  the preview tracks the new final at SSIM 0.94.
+- mflux 0.19 points its `qwen-image` model at the newer `Qwen/Qwen-Image-2512` checkpoint. Its
+  VAE weights are byte-identical to Qwen-Image's, so `variant="qwen-image"` previews it
+  unchanged.
+
 ## [0.8.0] - 2026-08-09
 
 Krea 2 Turbo live preview.
