@@ -302,6 +302,8 @@ class LivePreviewCallback:
         config: object,
         canny_image: object = None,
         depth_image: object = None,
+        control_images: object = None,
+        **_future_hook_kwargs: object,
     ) -> None:
         """Reset per-generation state so a callback reused across multiple generate_image calls.
 
@@ -311,6 +313,12 @@ class LivePreviewCallback:
         `call_before_loop`, before each denoise loop. Single-generation behavior is unchanged.
         In numbered-frame mode a subsequent generation restarts at step00 and overwrites the
         prior gallery — use a fresh `save_to` per generation to keep both.
+
+        The conditioning-image parameters are accepted and ignored. mflux's GenerationContext
+        passes every one it knows as a keyword to every subscriber (`canny_image` and
+        `depth_image` since 0.17, `control_images` since 0.19.0 for Z-Image ControlNet), so a
+        callback missing one fails with TypeError before the first denoise step; the catch-all
+        absorbs whichever keyword the next conditioning family adds.
         """
         self._iter = 0
         self.saved_paths = []
