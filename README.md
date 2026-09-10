@@ -39,8 +39,8 @@ img_uint8 = taef.decode_image(latents)      # uint8 NHWC ready for PIL
 **[The latent in the callback is not the latent the decoder wants](https://github.com/IonDen/mlx-taef/blob/main/docs/papers/the-latent-in-the-callback-is-not-the-latent-the-decoder-wants.md)**
 reads nine mflux image models at a pinned version and shows that sharing a VAE, even
 byte-identical weights, does not mean sharing a latent contract: the packing, the sub-pixel fold
-order, the spatial divisor and the normalization all live in the generator, and the mistakes they
-invite keep the tensor's shape. It records the FLUX.2-versus-Ideogram 4 fold orders, a hash table
+order, the spatial divisor and the normalization all live in the generator, and the two that matter
+most, the fold order and the normalization, fail without changing the tensor's shape. It records the FLUX.2-versus-Ideogram 4 fold orders, a hash table
 for the shared VAE files, and why weight sources are pinned by digest.
 
 ## Install

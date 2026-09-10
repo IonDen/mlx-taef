@@ -24,9 +24,8 @@ to a commit. No image was generated and nothing was benchmarked for this write-u
 quality numbers quoted from the `mlx-taef` changelog are source-reported, measured earlier on a
 10-core Apple M1 Max with 32 GB of unified memory. Two file-level checks were run for this memo
 and are dated as such: the sha256 digests in section 1 were read from the Hugging Face Hub API on
-2026-09-09 with an authenticated session (the Hub hides the digests of gated repositories from
-anonymous requests), and the weight comparison in section 5 was re-run on the same day on the CPU
-with NumPy. The figure in section 3 is a synthetic tensor pushed through two reshape orders; it needs
+2026-09-09, and the weight comparison in section 5 was re-run on the same day on the CPU with
+NumPy. The figure in section 3 is a synthetic tensor pushed through two reshape orders; it needs
 no weights, and its generator script is committed beside it.
 
 ## 1. The seductive fact: same VAE, same weights
@@ -93,7 +92,7 @@ height and width in pixels.
 |---|---|---|---|---|
 | [FLUX.1](https://github.com/mflux-community/mflux/blob/v.0.19.1/src/mflux/models/flux/variants/txt2img/flux.py#L124) | `(1, h/16 · w/16, 64)` packed | 16 | [`FluxLatentCreator.unpack_latents`](https://github.com/mflux-community/mflux/blob/v.0.19.1/src/mflux/models/flux/latent_creator/flux_latent_creator.py#L19) | the VAE, scalar scale and shift inside `decode` |
 | [Qwen-Image](https://github.com/mflux-community/mflux/blob/v.0.19.1/src/mflux/models/qwen/variants/txt2img/qwen_image.py#L130) | `(1, h/16 · w/16, 64)` packed | 16 | [`QwenLatentCreator`](https://github.com/mflux-community/mflux/blob/v.0.19.1/src/mflux/models/qwen/latent_creator/qwen_latent_creator.py), which delegates to FLUX.1's | the VAE, per-channel mean and std vectors inside `decode` |
-| [FLUX.2 Klein](https://github.com/mflux-community/mflux/blob/v.0.19.1/src/mflux/models/flux2/variants/txt2img/flux2_klein.py#L111) | `(B, h/16 · w/16, 128)` packed | 16 | the VAE, [`Flux2VAE._unpatchify_latents`](https://github.com/mflux-community/mflux/blob/v.0.19.1/src/mflux/models/flux2/model/flux2_vae/vae.py#L60) | the VAE, batch-norm running statistics (`vae.bn`, 128 channels) |
+| [FLUX.2 Klein](https://github.com/mflux-community/mflux/blob/v.0.19.1/src/mflux/models/flux2/variants/txt2img/flux2_klein.py#L111) | `(1, h/16 · w/16, 128)` packed | 16 | the VAE, [`Flux2VAE._unpatchify_latents`](https://github.com/mflux-community/mflux/blob/v.0.19.1/src/mflux/models/flux2/model/flux2_vae/vae.py#L60) | the VAE, batch-norm running statistics (`vae.bn`, 128 channels) |
 | [Lens](https://github.com/mflux-community/mflux/blob/v.0.19.1/src/mflux/models/lens/variants/txt2img/lens_image.py#L118) | `(1, h/16 · w/16, 128)` packed | 16 | the VAE, as FLUX.2 | the VAE, as FLUX.2 |
 | [ERNIE-Image](https://github.com/mflux-community/mflux/blob/v.0.19.1/src/mflux/models/ernie_image/variants/txt2img/ernie_image.py#L101) | `(1, 128, h/16, w/16)`, no sequence axis | 16 | the VAE, as FLUX.2 | the VAE, as FLUX.2 |
 | [Ideogram 4](https://github.com/mflux-community/mflux/blob/v.0.19.1/src/mflux/models/ideogram4/variants/txt2img/ideogram4.py#L146) | `(1, h/16 · w/16, 128)` packed | 16 | [`Ideogram4LatentCreator.unpack_latents`](https://github.com/mflux-community/mflux/blob/v.0.19.1/src/mflux/models/ideogram4/latent_creator/ideogram4_latent_creator.py#L300) | the generator: 128 baked shift and scale constants; the VAE's `bn` buffers are never read |
@@ -122,12 +121,16 @@ the full VAE's. Each tiny decoder was distilled against a particular input domai
 taew2.1 take the sampler-space latent as it is: madebyollin's README puts TAESD's latent scale
 factor at 1, and `mlx-taef`'s
 [Qwen-Image unpack](https://github.com/IonDen/mlx-taef/blob/v0.8.1/src/mlx_taef/kernels/qwen.py)
-deliberately applies no mean and std because the weights already account for them. TAEF2 was
-distilled on the raw 32-channel latent, so it needs the batch-norm inverse the full VAE would
-apply. A binding reconciles two things: the layout and value domain the generator emits, and
-the layout and value domain the decoder in hand was trained on. Applying the full VAE's
-per-channel mean and std before taew2.1 would be as wrong as skipping the batch-norm inverse
-before TAEF2, and neither mistake changes a shape.
+deliberately applies no mean and std because the weights already account for them. TAEF2 is
+the open case: `mlx-taef` applies the VAE's batch-norm inverse before it, while madebyollin's
+own [reference wrapper](https://huggingface.co/madebyollin/taef2) plugs the decoder in behind a
+default batch norm (mean 0, variance 1, so the inverse is the identity) and ComfyUI's TAEF2
+decoder only unpatchifies. The repository has not measured which input domain the decoder was
+distilled on, and the two readings differ by a per-channel factor of about 1.8, so this is a
+value-space question the shape can never settle. A binding reconciles two things: the layout
+and value domain the generator emits, and the layout and value domain the decoder in hand was
+trained on. Applying the full VAE's per-channel mean and std before taew2.1 would be wrong, and
+whichever side of the TAEF2 question is wrong is wrong in the same silent way.
 
 None of this is documented as a contract. Each fact is read from the generator's own loop and
 latent-creator source at a pinned version, and from the tiny decoder's training convention.
@@ -140,7 +143,7 @@ callback a sequence-packed `(1, seq, 128)` tensor at one sixteenth of the image 
 fold a 2×2 sub-pixel block into the 128-channel axis. They fold it in different orders.
 
 FLUX.2 packs channel-major. Its
-[`patchify_latents`](https://github.com/mflux-community/mflux/blob/v.0.19.1/src/mflux/models/flux2/latent_creator/flux2_latent_creator.py#L7)
+[`patchify_latents`](https://github.com/mflux-community/mflux/blob/v.0.19.1/src/mflux/models/flux2/latent_creator/flux2_latent_creator.py#L8)
 reshapes the 32-channel latent to `(B, 32, H/2, 2, W/2, 2)`, transposes to
 `(B, 32, 2, 2, H/2, W/2)` and folds the 32, 2, 2 axes into one, so packed channel `k` holds
 latent channel `c` at sub-pixel row `py` and column `px` with
@@ -209,9 +212,10 @@ The normalization fails quietly. FLUX.2's in-loop tensor is batch-norm-normalize
 statistics that live in the VAE. `mlx-taef` reads them off the model instance when the caller
 passes one, and
 [falls back to identity](https://github.com/IonDen/mlx-taef/blob/v0.8.1/src/mlx_taef/integrations/mflux.py)
-otherwise, exposing which path won as `resolved_bn`. The identity path is a documented
-degradation: the preview is structurally right and its colours are wrong. Before the
-auto-extraction existed that was the default behaviour, and the
+otherwise, exposing which path won as `resolved_bn`. The repository documents the identity path
+as a degradation, structurally right with shifted colours, though that description was never
+measured against the auto path, and section 2 notes that other TAEF2 integrations take the
+identity path on purpose. Before the auto-extraction existed that was the default behaviour, and the
 [manual-verification recipe](https://github.com/IonDen/mlx-taef/blob/v0.8.1/docs/manual-verification.md)
 still lists it as the third of three precedence levels because a caller without the model
 handy will hit it. The same family of error reaches upstream code: a Diffusers review of the
@@ -250,7 +254,7 @@ constrains values, is the subject of a companion memo from the sibling library,
 
 The latent contract has a twin on the weights side. `mlx-taef`'s Qwen-Image and Krea 2
 previews use madebyollin's taew2.1 tiny decoder, whose canonical weights are published
-[on GitHub only](https://github.com/madebyollin/taehv/blob/main/safetensors/taew2_1.safetensors).
+[on GitHub only](https://github.com/madebyollin/taehv/blob/0ad83bb8fdc48e9e94138704e939d500a3b43660/safetensors/taew2_1.safetensors).
 A Hugging Face repository, `lightx2v/Autoencoders`, carries a file with the same name. On
 2026-06-23, while the Qwen-Image port was being built, the two were compared and the mirror was
 rejected. The comparison was repeated for this memo on 2026-09-09:
