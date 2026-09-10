@@ -34,6 +34,15 @@ img_uint8 = taef.decode_image(latents)      # uint8 NHWC ready for PIL
 
 **You want both: faster generation AND live previews?** Use them together. mflux 4-step Klein + TeaCache + TAEF2 previews measured 1.41× faster with 44% less peak memory than the same generation without TeaCache.
 
+## Research notes
+
+**[The latent in the callback is not the latent the decoder wants](https://github.com/IonDen/mlx-taef/blob/main/docs/papers/the-latent-in-the-callback-is-not-the-latent-the-decoder-wants.md)**
+reads nine mflux image models at a pinned version and shows that sharing a VAE, even
+byte-identical weights, does not mean sharing a latent contract: the packing, the sub-pixel fold
+order, the spatial divisor and the normalization all live in the generator, and the mistakes they
+invite keep the tensor's shape. It records the FLUX.2-versus-Ideogram 4 fold orders, a hash table
+for the shared VAE files, and why weight sources are pinned by digest.
+
 ## Install
 
 From PyPI:
