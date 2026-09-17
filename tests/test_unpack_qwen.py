@@ -5,6 +5,7 @@ real guard for the "no denormalize" decision and the packed-latent reshape.
 """
 
 import mlx.core as mx
+import numpy as np
 import pytest
 
 from mlx_taef.kernels._types import UnpackContext
@@ -15,13 +16,15 @@ def test_unpack_qwen_matches_mflux_qwen_latent_creator():
     pytest.importorskip("mflux")
     from mflux.models.qwen.latent_creator.qwen_latent_creator import QwenLatentCreator
 
-    lh, lw = 4, 6  # H,W>1
-    packed = mx.random.normal((1, lh * lw, 64), key=mx.random.key(0))
-    ours = unpack_qwen_latent(packed, UnpackContext(latent_height=lh, latent_width=lw))
+    # arange + exact equality: the unpack is a pure permutation, so any wrong axis order is an
+    # exact mismatch (a tolerance on random data could hide a swap of near-equal elements).
+    lh, lw = 4, 6  # non-square, H,W>1
+    packed = mx.arange(lh * lw * 64).reshape(1, lh * lw, 64).astype(mx.float32)
+    ours = np.array(unpack_qwen_latent(packed, UnpackContext(latent_height=lh, latent_width=lw)))
     ref_nchw = QwenLatentCreator.unpack_latents(packed, height=lh * 16, width=lw * 16)
-    ref_nhwc = mx.transpose(ref_nchw, (0, 2, 3, 1))
+    ref_nhwc = np.array(mx.transpose(ref_nchw, (0, 2, 3, 1)))
     assert ours.shape == (1, lh * 2, lw * 2, 16)
-    assert mx.allclose(ours, ref_nhwc, atol=1e-5).item()
+    assert np.array_equal(ours, ref_nhwc)
 
 
 def test_unpack_qwen_rejects_non_64_channels():
