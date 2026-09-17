@@ -1,37 +1,41 @@
 {
   "latent": "flux2_klein_base_4b.safetensors",
+  "latent_sha256": "936ea693fdd0744afc929193b9748b1aebb609287da1a1fbdb47b7c737d2908a",
   "units": {
     "vanilla_vae": {
       "status": "ok",
       "condition": "vanilla_vae",
       "latent": "flux2_klein_base_4b.safetensors",
+      "latent_sha256": "936ea693fdd0744afc929193b9748b1aebb609287da1a1fbdb47b7c737d2908a",
       "height": 512,
       "width": 512,
       "image": "flux2_klein_base_4b.vanilla_vae.png",
-      "elapsed_s": 4.57,
-      "peak_memory_gb": 1.869,
+      "unit_wall_s": 3.285,
+      "process_peak_memory_gb": 1.889,
       "installed_cap_gb": 12
     },
     "bn_inverse": {
       "status": "ok",
       "condition": "bn_inverse",
       "latent": "flux2_klein_base_4b.safetensors",
+      "latent_sha256": "936ea693fdd0744afc929193b9748b1aebb609287da1a1fbdb47b7c737d2908a",
       "height": 512,
       "width": 512,
       "image": "flux2_klein_base_4b.bn_inverse.png",
-      "elapsed_s": 0.596,
-      "peak_memory_gb": 0.496,
+      "unit_wall_s": 0.308,
+      "process_peak_memory_gb": 0.586,
       "installed_cap_gb": 2
     },
     "identity": {
       "status": "ok",
       "condition": "identity",
       "latent": "flux2_klein_base_4b.safetensors",
+      "latent_sha256": "936ea693fdd0744afc929193b9748b1aebb609287da1a1fbdb47b7c737d2908a",
       "height": 512,
       "width": 512,
       "image": "flux2_klein_base_4b.identity.png",
-      "elapsed_s": 0.241,
-      "peak_memory_gb": 0.585,
+      "unit_wall_s": 0.26,
+      "process_peak_memory_gb": 0.585,
       "installed_cap_gb": 2
     }
   },
@@ -68,8 +72,8 @@
       "ram_gb": 32,
       "machine": "arm64",
       "os": "Darwin 27.0.0",
-      "git_sha": "9be7e61a4e01ba936a5b184e96c074d83e70ffd3",
-      "mlx_taef_version": "v0.8.1-1-g9be7e61",
+      "git_sha": "35a48dbb0cf95afd4a3fe55e324b6d8cbfc31e15",
+      "mlx_taef_version": "v0.8.1-8-g35a48db-dirty",
       "mlx_taef_distribution_version": "0.8.1",
       "mlx_teacache_version": "0.9.3",
       "mflux_version": "0.19.1",

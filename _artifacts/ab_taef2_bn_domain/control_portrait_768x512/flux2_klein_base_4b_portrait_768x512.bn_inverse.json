@@ -1,0 +1,12 @@
+{
+  "status": "ok",
+  "condition": "bn_inverse",
+  "latent": "flux2_klein_base_4b_portrait_768x512.safetensors",
+  "latent_sha256": "bfee11ad6fa56692e38fe0f2b9a97084b04b6c822b1016232617e818656d5b29",
+  "height": 512,
+  "width": 768,
+  "image": "flux2_klein_base_4b_portrait_768x512.bn_inverse.png",
+  "unit_wall_s": 0.265,
+  "process_peak_memory_gb": 0.827,
+  "installed_cap_gb": 2
+}

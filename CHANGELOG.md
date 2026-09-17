@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.8.2] - 2026-09-17
 
-TAEF2 previews now match the full FLUX.2 VAE.
+TAEF2 previews now track the full FLUX.2 VAE closely.
 
 ### Fixed
 - `LivePreviewCallback` no longer applies the Flux2VAE batch-norm inverse to the latent before
@@ -17,7 +17,8 @@ TAEF2 previews now match the full FLUX.2 VAE.
   out dark and oversaturated. Measured against the full VAE decode of the same latent, TAEF2 scores
   SSIM 0.920 / LPIPS 0.058 on the latent as-is and 0.588 / 0.241 with the inverse; a fully denoised
   768×512 control gives 0.945 / 0.022 against 0.716 / 0.150. `scripts/ab_taef2_bn_domain.py`
-  reproduces both, and its images and reports are committed under `_artifacts/ab_taef2_bn_domain/`.
+  reproduces the first from the committed fixture; the control's latent is not committed, and its
+  capture recipe sits next to its images and reports under `_artifacts/ab_taef2_bn_domain/`.
 
 ### Changed
 - `auto_bn` now defaults to `False`. `auto_bn=True` with `flux=model`, or explicit `bn_mean` /
@@ -26,13 +27,13 @@ TAEF2 previews now match the full FLUX.2 VAE.
   gone. If your code asserts `resolved_bn == "auto"`, either drop the assertion or pass
   `auto_bn=True`.
 - COMPARISON and EXAMPLES carry the re-measured FLUX.2 numbers: TAEF2 against the full VAE is SSIM
-  0.960 / LPIPS 0.057 under the showcase protocol (was 0.616 / 0.216), at 30 ms against 0.27 s and
+  0.960 / LPIPS 0.057 under the showcase protocol, which scores webp files (was 0.616 / 0.216), at 30 ms against 0.27 s and
   0.59 GB against 2.80 GB. The FLUX.2 live-preview and TeaCache frames and wall clocks were
   re-captured under mflux 0.19.1 and MLX 0.32.2 (10.07 s, and 7.93 s with TeaCache); the FLUX.1
   and Z-Image rows are unchanged.
-- The benchmark, the showcase and both examples follow the new default, and the showcase gained
+- The benchmark, the showcase and the FLUX.2 examples follow the new default, and the showcase gained
   `--update-report` to re-measure one scenario into the existing report without discarding the
-  others.
+  others. If a refresh fails, the report and the scenario's previous artifacts stay as they were.
 
 ### Tests
 - The FLUX.2 unpack is now checked against mflux's own inverse (its two static unpack steps
