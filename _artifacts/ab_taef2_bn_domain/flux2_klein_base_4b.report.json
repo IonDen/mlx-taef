@@ -1,0 +1,86 @@
+{
+  "latent": "flux2_klein_base_4b.safetensors",
+  "units": {
+    "vanilla_vae": {
+      "status": "ok",
+      "condition": "vanilla_vae",
+      "latent": "flux2_klein_base_4b.safetensors",
+      "height": 512,
+      "width": 512,
+      "image": "flux2_klein_base_4b.vanilla_vae.png",
+      "elapsed_s": 4.57,
+      "peak_memory_gb": 1.869,
+      "installed_cap_gb": 12
+    },
+    "bn_inverse": {
+      "status": "ok",
+      "condition": "bn_inverse",
+      "latent": "flux2_klein_base_4b.safetensors",
+      "height": 512,
+      "width": 512,
+      "image": "flux2_klein_base_4b.bn_inverse.png",
+      "elapsed_s": 0.596,
+      "peak_memory_gb": 0.496,
+      "installed_cap_gb": 2
+    },
+    "identity": {
+      "status": "ok",
+      "condition": "identity",
+      "latent": "flux2_klein_base_4b.safetensors",
+      "height": 512,
+      "width": 512,
+      "image": "flux2_klein_base_4b.identity.png",
+      "elapsed_s": 0.241,
+      "peak_memory_gb": 0.585,
+      "installed_cap_gb": 2
+    }
+  },
+  "scores": {
+    "bn_inverse": {
+      "ssim": 0.5876196026802063,
+      "lpips": 0.24050074815750122,
+      "mae_255": 24.314,
+      "mean_rgb_shift_255": [
+        -15.398,
+        -22.064,
+        -22.804
+      ]
+    },
+    "identity": {
+      "ssim": 0.9199671745300293,
+      "lpips": 0.05847284942865372,
+      "mae_255": 4.359,
+      "mean_rgb_shift_255": [
+        0.842,
+        5.033,
+        3.917
+      ]
+    }
+  },
+  "lpips_note": null,
+  "verdict": {
+    "winner": "identity",
+    "reason": "identity leads on SSIM and LPIPS (SSIM gap 0.3323)"
+  },
+  "environment": {
+    "hardware": {
+      "chip": "Apple M1 Max",
+      "ram_gb": 32,
+      "machine": "arm64",
+      "os": "Darwin 27.0.0",
+      "git_sha": "9be7e61a4e01ba936a5b184e96c074d83e70ffd3",
+      "mlx_taef_version": "v0.8.1-1-g9be7e61",
+      "mlx_taef_distribution_version": "0.8.1",
+      "mlx_teacache_version": "0.9.3",
+      "mflux_version": "0.19.1",
+      "mlx_version": "0.32.2",
+      "python_version": "3.13.12",
+      "quantize": 4,
+      "generation_dtype": "bf16",
+      "taef_decode_dtype": "float32"
+    },
+    "mlx": "0.32.2",
+    "mflux": "0.19.1",
+    "mlx-taef": "0.8.1"
+  }
+}

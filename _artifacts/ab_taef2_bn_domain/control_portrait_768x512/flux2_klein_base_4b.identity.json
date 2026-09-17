@@ -1,0 +1,11 @@
+{
+  "status": "ok",
+  "condition": "identity",
+  "latent": "flux2_klein_base_4b.safetensors",
+  "height": 512,
+  "width": 768,
+  "image": "flux2_klein_base_4b.identity.png",
+  "elapsed_s": 0.259,
+  "peak_memory_gb": 0.815,
+  "installed_cap_gb": 2
+}

@@ -1,0 +1,11 @@
+{
+  "status": "ok",
+  "condition": "bn_inverse",
+  "latent": "flux2_klein_base_4b.safetensors",
+  "height": 512,
+  "width": 768,
+  "image": "flux2_klein_base_4b.bn_inverse.png",
+  "elapsed_s": 0.249,
+  "peak_memory_gb": 0.821,
+  "installed_cap_gb": 2
+}
