@@ -1070,6 +1070,7 @@ def test_source_version_dirtiness_follows_real_git_state(
 
     def _git(*argv: str) -> None:
         identity = ["-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+        identity += ["-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"]
         subprocess.run(["git", *identity, *argv], cwd=tmp_path, check=True, capture_output=True)
 
     (tmp_path / "src").mkdir()

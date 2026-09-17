@@ -45,6 +45,7 @@ def test_pending_units_skips_ok_results_and_retries_failed_or_missing(tmp_path: 
     ok = {"status": "ok", "latent_sha256": "aaaa"}
     failed = {"status": "failed", "latent_sha256": "aaaa"}
     ab._unit_result_path(tmp_path, "lat", "vanilla_vae").write_text(json.dumps(ok))
+    ab._unit_image_path(tmp_path, "lat", "vanilla_vae").write_bytes(b"png")
     ab._unit_result_path(tmp_path, "lat", "bn_inverse").write_text(json.dumps(failed))
     assert ab._pending_units(tmp_path, "lat", latent_sha256="aaaa") == ["bn_inverse", "identity"]
 
@@ -87,6 +88,7 @@ def test_pending_units_reruns_results_that_belong_to_a_different_latent(tmp_path
         ab._unit_result_path(tmp_path, "lat", condition).write_text(
             json.dumps({"status": "ok", "latent_sha256": "aaaa"})
         )
+        ab._unit_image_path(tmp_path, "lat", condition).write_bytes(b"png")
     assert ab._pending_units(tmp_path, "lat", latent_sha256="aaaa") == []
     assert ab._pending_units(tmp_path, "lat", latent_sha256="bbbb") == list(ab.CONDITIONS)
 
@@ -267,3 +269,59 @@ def test_image_stats_report_candidate_minus_reference(tmp_path: Path) -> None:
 
     assert stats["mean_rgb_shift_255"] == [10.0, -10.0, 0.0]
     assert stats["mae_255"] == pytest.approx(20 / 3, abs=1e-3)
+
+
+@pytest.mark.parametrize("moves_before_interrupt", [1, 2, 3, 4, 5, 6])
+def test_an_interrupted_publish_is_never_mistaken_for_a_complete_result(
+    tmp_path: Path, monkeypatch, moves_before_interrupt: int
+) -> None:
+    """Catches: Ctrl-C between two file moves leaving `--out-dir` looking complete (every later
+    run says "already measured") while an image or the report is still stuck in staging."""
+    import scripts.ab_taef2_bn_domain as ab
+
+    real_replace = Path.replace
+    moved = {"n": 0}
+
+    def _interrupting_replace(self: Path, target: Path) -> Path:
+        if moved["n"] >= moves_before_interrupt:
+            raise KeyboardInterrupt
+        moved["n"] += 1
+        return real_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", _interrupting_replace)
+    with pytest.raises(KeyboardInterrupt):
+        _orchestrate(tmp_path, monkeypatch, b"a latent", fail_on=None)
+    monkeypatch.setattr(Path, "replace", real_replace)
+
+    out, latent = tmp_path / "out", tmp_path / "lat.safetensors"
+    assert not ab._is_published(out, "lat", ab._sha256(latent))
+
+    # The next run finishes the job without loading a single model again.
+    launched: list[str] = []
+    monkeypatch.setattr(ab.subprocess, "run", lambda cmd, **kw: launched.append("x"))
+    assert ab.main(["--latent", str(latent), "--out-dir", str(out), "--no-lpips"]) == 0
+    assert launched == []
+    assert ab._is_published(out, "lat", ab._sha256(latent))
+    assert sorted(p.name for p in out.iterdir()) == sorted(
+        [f"lat.{c}.{ext}" for c in ab.CONDITIONS for ext in ("json", "png")] + ["lat.report.json"]
+    )
+
+
+def test_a_result_with_a_missing_image_is_measured_again(tmp_path: Path, monkeypatch) -> None:
+    """Catches: trusting a unit's JSON while the image it describes is gone."""
+    import scripts.ab_taef2_bn_domain as ab
+
+    assert _orchestrate(tmp_path, monkeypatch, b"a latent", fail_on=None) == 0
+    out, latent = tmp_path / "out", tmp_path / "lat.safetensors"
+    ab._unit_image_path(out, "lat", "vanilla_vae").unlink()
+
+    launched: list[str] = []
+    fake = _fake_worker_factory(None)
+    monkeypatch.setattr(
+        ab.subprocess,
+        "run",
+        lambda cmd, **kw: launched.append(cmd[cmd.index("--worker") + 1]) or fake(cmd),
+    )
+    assert ab.main(["--latent", str(latent), "--out-dir", str(out), "--no-lpips"]) == 0
+    assert launched == ["vanilla_vae"]
+    assert ab._unit_image_path(out, "lat", "vanilla_vae").exists()

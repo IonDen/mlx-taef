@@ -85,7 +85,7 @@ def _sha256(path: Path) -> str:
 
 
 def _pending_units(out_dir: Path, latent_stem: str, *, latent_sha256: str) -> list[str]:
-    """Conditions still to run: no `ok` result yet for this exact latent."""
+    """Conditions still to run: no `ok` result with its image yet for this exact latent."""
     pending: list[str] = []
     for condition in CONDITIONS:
         path = _unit_result_path(out_dir, latent_stem, condition)
@@ -96,7 +96,8 @@ def _pending_units(out_dir: Path, latent_stem: str, *, latent_sha256: str) -> li
             result = json.loads(path.read_text())
         except json.JSONDecodeError:
             result = {}
-        if result.get("status") != "ok" or result.get("latent_sha256") != latent_sha256:
+        measured = result.get("status") == "ok" and result.get("latent_sha256") == latent_sha256
+        if not (measured and _unit_image_path(out_dir, latent_stem, condition).exists()):
             pending.append(condition)
     return pending
 
@@ -299,9 +300,44 @@ def _is_published(out_dir: Path, stem: str, latent_sha256: str) -> bool:
 
 
 def _publish(staging: Path, out_dir: Path) -> None:
-    for path in sorted(staging.iterdir()):
+    """Move the staged files over: images, then unit results, then the report.
+
+    `_is_published` needs the report, every unit result and every image, so whichever move an
+    interrupt lands on, `--out-dir` cannot read as complete before it is.
+    """
+
+    def _order(path: Path) -> int:
+        if path.suffix == ".png":
+            return 0
+        return 2 if path.name.endswith(".report.json") else 1
+
+    for path in sorted(staging.iterdir(), key=lambda p: (_order(p), p.name)):
         path.replace(out_dir / path.name)
     staging.rmdir()
+
+
+def _recover_into_staging(staging: Path, out_dir: Path, stem: str, latent_sha256: str) -> None:
+    """Copy back what an interrupted publish already moved, so the run resumes without decoding.
+
+    A unit whose staged result lost its image had that image published (the worker writes the
+    image first, and publishing moves images first). A unit with nothing staged is taken from
+    `--out-dir` only when its published result is for this exact latent.
+    """
+    import shutil
+
+    for condition in _pending_units(staging, stem, latent_sha256=latent_sha256):
+        staged_result = _unit_result_path(staging, stem, condition)
+        published_image = _unit_image_path(out_dir, stem, condition)
+        if condition not in _pending_units(out_dir, stem, latent_sha256=latent_sha256):
+            shutil.copy2(_unit_result_path(out_dir, stem, condition), staged_result)
+            shutil.copy2(published_image, _unit_image_path(staging, stem, condition))
+        elif staged_result.exists() and published_image.exists():
+            try:
+                staged = json.loads(staged_result.read_text())
+            except json.JSONDecodeError:
+                continue
+            if staged.get("status") == "ok" and staged.get("latent_sha256") == latent_sha256:
+                shutil.copy2(published_image, _unit_image_path(staging, stem, condition))
 
 
 def _run_orchestrator(args: argparse.Namespace) -> int:
@@ -324,6 +360,7 @@ def _run_orchestrator(args: argparse.Namespace) -> int:
 
     staging = _staging_dir(args.out_dir, latent_sha256)
     staging.mkdir(exist_ok=True)
+    _recover_into_staging(staging, args.out_dir, stem, latent_sha256)
     for condition in _pending_units(staging, stem, latent_sha256=latent_sha256):
         print(f"[run] {condition}", flush=True)
         cmd = [
