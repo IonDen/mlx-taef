@@ -833,3 +833,108 @@ def test_flux2_live_scenarios_decode_the_normalized_latent(monkeypatch, runner: 
 
     assert captured["callback_variant"] == "taef2"
     assert captured["auto_bn"] is False
+
+
+def _committed_like_report() -> dict[str, object]:
+    return {
+        "schema_version": 2,
+        "generated_at": "2026-08-09T14:01:06+00:00",
+        "hardware": {"mflux_version": "0.18.1"},
+        "isolation": "subprocess-per-condition",
+        "prior_artifacts_moved_to": None,
+        "scenarios": {
+            "taef1_vs_vae": {"status": "ok", "ssim_median": 0.93},
+            "taef2_vs_vae": {"status": "ok", "ssim_median": 0.61},
+        },
+    }
+
+
+def test_update_report_replaces_one_scenario_and_keeps_the_rest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches: a single-scenario refresh wiping the other scenarios out of the report, or
+    trashing their committed artifacts."""
+    import scripts.run_showcase as rs
+
+    artifacts = tmp_path / "showcase"
+    (artifacts / "taef1").mkdir(parents=True)
+    (artifacts / "taef1" / "keep.webp").write_bytes(b"keep")
+    (artifacts / "taef2").mkdir()
+    (artifacts / "taef2" / "old.webp").write_bytes(b"old")
+    home = tmp_path / "home"
+    (home / ".Trash").mkdir(parents=True)
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps(_committed_like_report()))
+
+    monkeypatch.setattr(rs, "_ARTIFACTS_DIR", artifacts)
+    monkeypatch.setattr(rs.Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(rs, "_build_hardware_metadata", lambda: {"mflux_version": "0.19.1"})
+    monkeypatch.setattr(
+        rs,
+        "_SCENARIO_DISPATCH",
+        {"taef2_vs_vae": lambda args: {"status": "ok", "ssim_median": 0.92}},
+    )
+
+    code = rs.main(["--scenario", "taef2_vs_vae", "--report", str(report_path), "--update-report"])
+
+    assert code == 0
+    merged = json.loads(report_path.read_text())
+    assert merged["scenarios"]["taef1_vs_vae"] == {"status": "ok", "ssim_median": 0.93}
+    assert merged["scenarios"]["taef2_vs_vae"]["ssim_median"] == 0.92
+    assert merged["generated_at"] == "2026-08-09T14:01:06+00:00"
+    assert merged["hardware"] == {"mflux_version": "0.18.1"}
+    (update,) = merged["scenario_updates"]
+    assert update["scenario"] == "taef2_vs_vae"
+    assert update["hardware"] == {"mflux_version": "0.19.1"}
+    assert update["generated_at"] != merged["generated_at"]
+    assert (artifacts / "taef1" / "keep.webp").read_bytes() == b"keep"
+    assert not (artifacts / "taef2" / "old.webp").exists()
+    trashed = list((home / ".Trash").iterdir())
+    assert len(trashed) == 1
+    assert (trashed[0] / "old.webp").read_bytes() == b"old"
+
+
+@pytest.mark.parametrize(
+    "argv_tail",
+    [["--scenario", "all"], ["--scenario", "taef2_vs_vae", "--report", "MISSING"]],
+)
+def test_update_report_refuses_a_full_run_or_a_missing_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, argv_tail: list[str]
+) -> None:
+    """Catches: `--update-report` silently degrading into a fresh one-scenario report."""
+    import scripts.run_showcase as rs
+
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps(_committed_like_report()))
+    # Harmless fakes: if the refusal ever regresses, this must not launch real scenarios.
+    monkeypatch.setattr(rs, "_SCENARIO_DISPATCH", {"taef2_vs_vae": lambda args: {"status": "ok"}})
+    monkeypatch.setattr(rs, "_all_scenario_order", lambda: ["taef2_vs_vae"])
+    monkeypatch.setattr(rs, "_ARTIFACTS_DIR", tmp_path / "showcase")
+    argv = [a if a != "MISSING" else str(tmp_path / "absent.json") for a in argv_tail]
+    if "--report" not in argv:
+        argv += ["--report", str(report_path)]
+
+    with pytest.raises(SystemExit) as excinfo:
+        rs.main([*argv, "--update-report"])
+    assert excinfo.value.code == 2
+
+
+def test_update_report_keeps_the_old_entry_when_the_scenario_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches: a failed refresh overwriting a good committed measurement with an error stub."""
+    import scripts.run_showcase as rs
+
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps(_committed_like_report()))
+    monkeypatch.setattr(rs, "_ARTIFACTS_DIR", tmp_path / "showcase")
+
+    def _boom(args: object) -> dict[str, str]:
+        raise RuntimeError("no GPU today")
+
+    monkeypatch.setattr(rs, "_SCENARIO_DISPATCH", {"taef2_vs_vae": _boom})
+
+    code = rs.main(["--scenario", "taef2_vs_vae", "--report", str(report_path), "--update-report"])
+
+    assert code == 1
+    assert json.loads(report_path.read_text()) == _committed_like_report()

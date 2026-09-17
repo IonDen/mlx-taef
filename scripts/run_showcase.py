@@ -90,6 +90,15 @@ def _build_argparser() -> argparse.ArgumentParser:
         help="Override the per-condition wired memory cap (GB).",
     )
     parser.add_argument(
+        "--update-report",
+        action="store_true",
+        help=(
+            "Re-measure a single --scenario and merge it into the existing --report, keeping "
+            "every other scenario and its artifacts. The refreshed scenario's provenance "
+            "(time, hardware, versions) is recorded under `scenario_updates`."
+        ),
+    )
+    parser.add_argument(
         "--no-trash-prior",
         action="store_true",
         help=(
@@ -112,7 +121,7 @@ def _build_argparser() -> argparse.ArgumentParser:
     return parser
 
 
-def _move_prior_artifacts_to_trash(artifacts_dir: Path) -> Path | None:
+def _move_prior_artifacts_to_trash(artifacts_dir: Path, *, label: str = "") -> Path | None:
     """Move an existing artifacts dir to ~/.Trash with a dated tag.
 
     Returns the new Trash path on success, None if there was nothing to
@@ -127,7 +136,7 @@ def _move_prior_artifacts_to_trash(artifacts_dir: Path) -> Path | None:
         logger.warning("~/.Trash not found; leaving prior artifacts in place at %s", artifacts_dir)
         return None
     stamp = datetime.datetime.now().strftime("%Y-%m-%d-%H%M%S")
-    target = trash / f"mlx-taef-showcase-{stamp}"
+    target = trash / f"mlx-taef-showcase-{label + '-' if label else ''}{stamp}"
     artifacts_dir.rename(target)
     logger.info("moved prior artifacts to %s", target)
     return target
@@ -940,6 +949,63 @@ def _run_scenarios(
     return failures
 
 
+# Artifact subdirectory each scenario owns under `_ARTIFACTS_DIR` (the vs-VAE scenarios save
+# under their TAEF condition name, the live scenarios under their own name).
+_SCENARIO_ARTIFACT_SUBDIR = {
+    "taef2_vs_vae": "taef2",
+    "taef1_vs_vae": "taef1",
+    "zimage_vs_vae": "zimage",
+}
+
+
+def _merge_scenario_update(
+    base: dict[str, Any],
+    scenario: str,
+    result: dict[str, Any],
+    *,
+    generated_at: str,
+    hardware: dict[str, Any],
+) -> dict[str, Any]:
+    """Return `base` with one scenario replaced and the refresh's provenance appended."""
+    merged = {**base, "scenarios": {**base["scenarios"], scenario: result}}
+    merged["scenario_updates"] = [
+        *base.get("scenario_updates", []),
+        {"scenario": scenario, "generated_at": generated_at, "hardware": hardware},
+    ]
+    return merged
+
+
+def _run_report_update(args: argparse.Namespace) -> int:
+    """Re-measure `args.scenario` and merge it into the existing report.
+
+    A failed refresh leaves the report untouched: a good committed measurement is never
+    replaced by an error stub.
+    """
+    base = _load_report(args.report)
+    scenario = args.scenario
+    if not args.no_trash_prior:
+        subdir = _SCENARIO_ARTIFACT_SUBDIR.get(scenario, scenario)
+        _move_prior_artifacts_to_trash(_ARTIFACTS_DIR / subdir, label=subdir)
+    try:
+        if scenario in _LIVE_SCENARIOS:
+            result = _run_live_scenario_subprocess(scenario, args)
+        else:
+            result = _SCENARIO_DISPATCH[scenario](args)
+    except Exception as e:  # noqa: BLE001, RUF100 - report the failure, keep the old entry
+        logger.warning("scenario %s failed; report left unchanged: %s", scenario, e)
+        return 1
+    merged = _merge_scenario_update(
+        base,
+        scenario,
+        result,
+        generated_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        hardware=_build_hardware_metadata(),
+    )
+    _write_report(args.report, merged)
+    print(f"Updated {scenario} in {args.report}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point. Builds report, dispatches scenarios, writes JSON."""
     parser = _build_argparser()
@@ -955,6 +1021,13 @@ def main(argv: list[str] | None = None) -> int:
             watchdog.stop()
         _write_report(args.live_result, result)
         return 0
+
+    if args.update_report:
+        if args.scenario == "all":
+            parser.error("--update-report refreshes one scenario; pass --scenario <name>")
+        if not args.report.exists():
+            parser.error(f"--update-report needs an existing report, not found: {args.report}")
+        return _run_report_update(args)
 
     trashed = None
     if not args.no_trash_prior:
