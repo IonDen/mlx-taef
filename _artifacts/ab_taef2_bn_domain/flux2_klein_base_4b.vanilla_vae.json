@@ -1,0 +1,12 @@
+{
+  "status": "ok",
+  "condition": "vanilla_vae",
+  "latent": "flux2_klein_base_4b.safetensors",
+  "latent_sha256": "936ea693fdd0744afc929193b9748b1aebb609287da1a1fbdb47b7c737d2908a",
+  "height": 512,
+  "width": 512,
+  "image": "flux2_klein_base_4b.vanilla_vae.png",
+  "unit_wall_s": 3.285,
+  "process_peak_memory_gb": 1.889,
+  "installed_cap_gb": 12
+}

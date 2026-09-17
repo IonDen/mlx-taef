@@ -32,14 +32,25 @@ def test_unpack_flux1_matches_mflux_unpack_latents_oracle():
     assert np.array_equal(out, expected)
 
 
-def test_unpack_flux2_value_routing():
-    packed = mx.arange(128).reshape(1, 1, 128).astype(mx.float32)
-    out = np.array(unpack_flux2_latent(packed, UnpackContext(latent_height=1, latent_width=1)))
-    assert out.shape == (1, 2, 2, 32)
-    assert out[0, 0, 0, 0] == 0.0
-    assert out[0, 0, 1, 0] == 1.0
-    assert out[0, 1, 0, 0] == 2.0
-    assert out[0, 0, 0, 1] == 4.0
+def test_unpack_flux2_matches_mflux_composed_unpack_oracle():
+    """FLUX.2's inverse lives upstream as two statics; composed they are the packed-sequence oracle.
+
+    Catches: any wrong axis order in the 128 -> 32 channel unpatchify (swapped patch axes, channel
+    vs patch interleave) or an lh/lw swap in the sequence reshape. `arange` makes every permutation
+    an exact mismatch; the non-square grid makes an h/w swap a shape or value mismatch.
+    """
+    pytest.importorskip("mflux")
+    from mflux.models.flux2.latent_creator.flux2_latent_creator import Flux2LatentCreator
+    from mflux.models.flux2.model.flux2_vae.vae import Flux2VAE
+
+    lh, lw = 2, 3
+    packed = mx.arange(lh * lw * 128).reshape(1, lh * lw, 128).astype(mx.float32)
+    nchw_128 = Flux2LatentCreator.unpack_latents(packed, lh * 16, lw * 16)  # (1, 128, lh, lw)
+    oracle_nchw = Flux2VAE._unpatchify_latents(nchw_128)  # (1, 32, lh*2, lw*2)
+    expected = np.array(mx.transpose(oracle_nchw, (0, 2, 3, 1)))  # NHWC
+    out = np.array(unpack_flux2_latent(packed, UnpackContext(latent_height=lh, latent_width=lw)))
+    assert out.shape == (1, lh * 2, lw * 2, 32)
+    assert np.array_equal(out, expected)
 
 
 def test_binding_dispatch_routes_each_model_to_its_unpack():

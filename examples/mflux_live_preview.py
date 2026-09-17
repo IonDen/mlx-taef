@@ -12,9 +12,9 @@ Run with:
     uv run python examples/mflux_live_preview.py
 
 Generates a 4-step FLUX.2 Klein base 4B image at 512x512 with a
-TAEF2 live-preview callback. Demonstrates the auto-bn extraction
-flow added in v0.2.0: pass `flux=model` and the callback walks
-`model.vae.bn.running_mean / running_var` automatically.
+TAEF2 live-preview callback. The callback needs only the variant and
+a save path: resolution is read from the generation config, and TAEF2
+decodes the latent exactly as mflux hands it over.
 """
 
 import time
@@ -72,19 +72,15 @@ def main() -> None:
         model_config=ModelConfig.flux2_klein_base_4b(),
     )
 
-    # LivePreviewCallback auto-extracts VAE BN stats from model.vae.bn so that the
-    # TAEF2 decoder produces color-correct previews without manual BN configuration.
+    # TAEF2 decodes the normalized latent mflux hands the callback, so no batch-norm
+    # statistics are needed: variant + where to save is the whole configuration.
     callback = _TimedPreviewCallback(
-        flux=model,
         variant="taef2",
         every=1,
         numbered_frames=True,
         save_to=OUT_DIR / "preview.png",
         # latent_height / latent_width are auto-detected from the generation config
     )
-
-    print(f"  resolved_bn = {callback.resolved_bn}  (expect 'auto')")
-    assert callback.resolved_bn == "auto", "auto-bn extraction failed; check flux.vae.bn"
 
     vae_timer = _VaeTimer()
     model.callbacks.register(callback)

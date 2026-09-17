@@ -13,7 +13,7 @@ Tiny AutoEncoders for diffusion latents on Apple Silicon, in pure MLX.
 `mlx-taef` is the first MLX port of the TAESD family — TAESD (SD1.x), TAESDXL (SDXL), TAEF1 (FLUX.1), TAEF2 (FLUX.2 Klein), and Z-Image (which reuses the TAEF1 weights for previews) — plus Qwen-Image / Qwen-Image-Edit on a port of the taew2.1 (Wan 2.1 VAE) autoencoder. All are distilled mini-autoencoders that decode diffusion latents to RGB in milliseconds using a few-MB model instead of multi-GB full VAEs.
 
 Use it for:
-- **Live previews** during long generations on Mac — the decode step itself takes ~30 ms for both TAEF1 and TAEF2 on M1 Max, versus ~0.3 s for the full VAE decode (~9–10× faster). [Watch a step-by-step decode](https://github.com/IonDen/mlx-taef/blob/main/PREVIEW.md), or see [COMPARISON.md](COMPARISON.md) for the measured table and reproducer.
+- **Live previews** during long generations on Mac — the decode step itself takes ~30 ms for both TAEF1 and TAEF2 on M1 Max, versus ~0.3 s for the full VAE decode (~8–10× faster). [Watch a step-by-step decode](https://github.com/IonDen/mlx-taef/blob/main/PREVIEW.md), or see [COMPARISON.md](COMPARISON.md) for the measured table and reproducer.
 - **Low-memory fallbacks** when the full VAE OOMs on 16 GB Macs (TAEF2 peaks at ~0.59 GB decode memory vs ~2.8 GB for the full FLUX.2 VAE on the same latent).
 - **Quick latent inspection** in notebooks and ML research.
 
@@ -32,7 +32,7 @@ img_uint8 = taef.decode_image(latents)      # uint8 NHWC ready for PIL
 
 **You want FLUX generation itself to be faster on Apple Silicon?** You want [`mlx-teacache`](https://github.com/IonDen/mlx-teacache) — it skips redundant denoising steps when the schedule is cacheable (measured 1.46× on FLUX.1-dev at 25 steps).
 
-**You want both: faster generation AND live previews?** Use them together. mflux 4-step Klein + TeaCache + TAEF2 previews measured 1.41× faster with 44% less peak memory than the same generation without TeaCache.
+**You want both: faster generation AND live previews?** Use them together. mflux 4-step Klein + TeaCache + TAEF2 previews measured 1.27× faster with 48% less peak memory than the same generation without TeaCache.
 
 ## Research notes
 
@@ -143,7 +143,6 @@ from mlx_taef.integrations.mflux import LivePreviewCallback
 
 model = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_base_4b())
 preview = LivePreviewCallback(
-    flux=model,            # auto-extracts the Flux2VAE BN stats for exact color
     variant="taef2",
     every=5,
     save_to="preview.png",
@@ -160,7 +159,7 @@ model.generate_image(
 )
 ```
 
-Passing `flux=model` lets the callback auto-extract `model.vae.bn.running_mean` and `running_var` so TAEF2 previews are color-correct out of the box (`callback.resolved_bn == "auto"`). If you have a custom integration where `flux=` isn't convenient, pass `bn_mean=` and `bn_var=` explicitly — those take precedence (`resolved_bn == "explicit"`). Without either path you get identity-BN previews with correct structure but shifted colors (`resolved_bn == "none"`).
+TAEF2 decodes the latent exactly as mflux hands it to the callback, so the variant and a save path are all the configuration it needs. Releases before 0.8.2 also read the Flux2VAE batch-norm statistics from `flux=model` and applied the VAE's inverse normalization before decoding. Measured against the full VAE that made previews worse (SSIM 0.59 against 0.92 on the same latent, with crushed shadows and oversaturated color), so it is off by default now. `auto_bn=True` with `flux=model`, or explicit `bn_mean=` / `bn_var=`, still turn it on and log a warning. `callback.resolved_bn` reports which path is active: `"none"`, `"auto"` or `"explicit"`.
 
 Preview failures default to `on_error="disable"`: the callback logs one warning, stops previewing for the rest of that generation, and lets mflux finish the image. Use `on_error="raise"` when an integration or test needs fail-fast behavior. Calling the same callback in a later generation resets the disabled state.
 
@@ -185,6 +184,7 @@ See `docs/manual-verification.md` for the full verification recipe.
 - **v0.7.1 — released on PyPI** (2026-07-25). Python 3.10 is now supported: the floor drops from 3.11 to 3.10 and CI runs the full offline suite on 3.10 through 3.14, so no advertised version is untested. `mlx-teacache` (used by the showcase and test extras, and 3.11-only) installs on 3.11+ only; the runtime dependencies all work on 3.10.
 - **v0.8.0 — released on PyPI** (2026-08-09). Krea 2 Turbo live preview: a new `Krea2` model reuses the taew2.1 weights already converted for `QwenImage`, with no new download. Decode quality against mflux's full Krea 2 VAE is gated by an SSIM check (measured 0.9678). `mlx-teacache` now installs on Python 3.10 as well, so the showcase's combined scenario runs on every supported Python version. The showcase report adds LPIPS alongside SSIM, `ZImage.encode()` gets its own SSIM-gated validation (measured 0.9580), and the live-preview integration is verified against mflux 0.18.1. Every model-loading showcase and benchmark subprocess now runs under the active-memory watchdog, not just the live-generation workers.
 - **v0.8.1 — released on PyPI** (2026-09-05). mflux 0.19.x compatibility. mflux 0.19.0 started passing a new `control_images` argument to every before-loop callback, which made any generation with a `LivePreviewCallback` registered fail before its first step; the hook now accepts it (and whichever conditioning keyword mflux adds next), and the `mflux` extra installs against 0.19.x (`>=0.17,<0.20`). Verified against mflux 0.19.1 / MLX 0.32.2: callback contract, latent layouts, and parity fixtures unchanged; a registered preview composes with mflux's new `--pid-decode` final decode.
+- **v0.8.2 — released on PyPI** (2026-09-17). TAEF2 previews now match the full FLUX.2 VAE much more closely: SSIM against the full VAE decode rises from 0.616 to 0.960 on the benchmark latent (webp-scored, as in COMPARISON; 0.59 to 0.92 on lossless PNGs). Earlier releases applied the VAE's batch-norm inverse to the latent before TAEF2 whenever `flux=model` was passed, which is not the input TAEF2 wants, so previews came out dark and oversaturated. The default now feeds TAEF2 the latent as mflux produces it; `auto_bn=True` or explicit `bn_mean` / `bn_var` keep the old behavior and log a warning. COMPARISON and EXAMPLES carry the re-measured FLUX.2 numbers and frames.
 
 Track future releases via the [PyPI history](https://pypi.org/project/mlx-taef/#history) or `gh release list -R IonDen/mlx-taef`.
 

@@ -90,6 +90,15 @@ def _build_argparser() -> argparse.ArgumentParser:
         help="Override the per-condition wired memory cap (GB).",
     )
     parser.add_argument(
+        "--update-report",
+        action="store_true",
+        help=(
+            "Re-measure a single --scenario and merge it into the existing --report, keeping "
+            "every other scenario and its artifacts. The refreshed scenario's provenance "
+            "(time, hardware, versions) is recorded under `scenario_updates`."
+        ),
+    )
+    parser.add_argument(
         "--no-trash-prior",
         action="store_true",
         help=(
@@ -112,7 +121,7 @@ def _build_argparser() -> argparse.ArgumentParser:
     return parser
 
 
-def _move_prior_artifacts_to_trash(artifacts_dir: Path) -> Path | None:
+def _move_prior_artifacts_to_trash(artifacts_dir: Path, *, label: str = "") -> Path | None:
     """Move an existing artifacts dir to ~/.Trash with a dated tag.
 
     Returns the new Trash path on success, None if there was nothing to
@@ -127,7 +136,7 @@ def _move_prior_artifacts_to_trash(artifacts_dir: Path) -> Path | None:
         logger.warning("~/.Trash not found; leaving prior artifacts in place at %s", artifacts_dir)
         return None
     stamp = datetime.datetime.now().strftime("%Y-%m-%d-%H%M%S")
-    target = trash / f"mlx-taef-showcase-{stamp}"
+    target = trash / f"mlx-taef-showcase-{label + '-' if label else ''}{stamp}"
     artifacts_dir.rename(target)
     logger.info("moved prior artifacts to %s", target)
     return target
@@ -252,7 +261,7 @@ def _run_live_preview(args: argparse.Namespace) -> dict[str, Any]:
         num_steps=4,
         guidance=1.0,
         with_teacache=False,
-        auto_bn=True,
+        auto_bn=False,
         scenario_dir="live_preview",
     )
 
@@ -274,7 +283,7 @@ def _run_combined(args: argparse.Namespace) -> dict[str, Any]:
         num_steps=4,
         guidance=1.0,
         with_teacache=True,
-        auto_bn=True,
+        auto_bn=False,
         scenario_dir="combined",
     )
 
@@ -316,9 +325,9 @@ def _live_generation(
     """Run one generation with a preview gallery and optional TeaCache wrap.
 
     Parameterized over model factory, callback variant, prompt, steps, guidance,
-    and auto_bn so each scenario supplies its own pinned recipe. Set auto_bn=True
-    for TAEF2 scenarios (enables BN extraction from the mflux model for
-    color-correct previews); False for all other variants.
+    and auto_bn so each scenario supplies its own pinned recipe. Every committed scenario
+    uses auto_bn=False: TAEF2 decodes the normalized latent, and the batch-norm inverse
+    scores lower against the full VAE (see scripts/ab_taef2_bn_domain.py).
     """
     import mlx.core as mx
 
@@ -359,6 +368,7 @@ def _live_generation(
 
     callback = LivePreviewCallback(
         flux=flux if auto_bn else None,
+        auto_bn=auto_bn,
         variant=callback_variant,
         every=1,
         numbered_frames=True,
@@ -553,22 +563,38 @@ def _detect_git_sha() -> str | None:
     return None
 
 
-def _detect_source_version() -> str:
-    """Return a git-derived version tied to the source being benchmarked."""
+# Paths whose uncommitted edits change what a report measures. Generated artifacts are left out on
+# purpose: the harnesses rewrite tracked files under `_artifacts/` while they run, so a plain
+# `git describe --dirty` would read dirty on every run and say nothing.
+_SOURCE_PATHS = ("src", "scripts", "pyproject.toml", "uv.lock")
+
+
+def _git_stdout(*argv: str) -> str | None:
     try:
         result = subprocess.run(
-            ["git", "describe", "--tags", "--long", "--always"],
+            ["git", *argv],
             capture_output=True,
             text=True,
             check=False,
             timeout=5,
             cwd=_REPO_ROOT,
         )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
     except (OSError, subprocess.SubprocessError):  # pragma: no cover
-        pass
-    return "unknown"
+        return None
+    return result.stdout if result.returncode == 0 else None
+
+
+def _detect_source_version() -> str:
+    """Return a git-derived version tied to the source being benchmarked.
+
+    `-dirty` is appended when source files have uncommitted changes, so a report never claims a
+    clean commit for code that was not the code that ran.
+    """
+    described = (_git_stdout("describe", "--tags", "--long", "--always") or "").strip()
+    if not described:
+        return "unknown"
+    dirty = (_git_stdout("status", "--porcelain", "--", *_SOURCE_PATHS) or "").strip()
+    return f"{described}-dirty" if dirty else described
 
 
 def _migrate_report_v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
@@ -939,6 +965,71 @@ def _run_scenarios(
     return failures
 
 
+# Artifact subdirectory each scenario owns under `_ARTIFACTS_DIR` (the vs-VAE scenarios save
+# under their TAEF condition name, the live scenarios under their own name).
+_SCENARIO_ARTIFACT_SUBDIR = {
+    "taef2_vs_vae": "taef2",
+    "taef1_vs_vae": "taef1",
+    "zimage_vs_vae": "zimage",
+}
+
+
+def _merge_scenario_update(
+    base: dict[str, Any],
+    scenario: str,
+    result: dict[str, Any],
+    *,
+    generated_at: str,
+    hardware: dict[str, Any],
+) -> dict[str, Any]:
+    """Return `base` with one scenario replaced and the refresh's provenance appended."""
+    merged = {**base, "scenarios": {**base["scenarios"], scenario: result}}
+    merged["scenario_updates"] = [
+        *base.get("scenario_updates", []),
+        {"scenario": scenario, "generated_at": generated_at, "hardware": hardware},
+    ]
+    return merged
+
+
+def _run_report_update(args: argparse.Namespace) -> int:
+    """Re-measure `args.scenario` and merge it into the existing report.
+
+    A failed or interrupted refresh leaves the report and the scenario's previous artifacts as
+    they were: a good committed measurement is never replaced by an error stub or a half-written
+    gallery. That guarantee rests on moving the previous artifacts aside first, which is why
+    `main` rejects `--update-report` together with `--no-trash-prior`.
+    """
+    base = _load_report(args.report)
+    scenario = args.scenario
+    scenario_dir = _ARTIFACTS_DIR / _SCENARIO_ARTIFACT_SUBDIR.get(scenario, scenario)
+    trashed = _move_prior_artifacts_to_trash(scenario_dir, label=scenario_dir.name)
+    try:
+        if scenario in _LIVE_SCENARIOS:
+            result = _run_live_scenario_subprocess(scenario, args)
+        else:
+            result = _SCENARIO_DISPATCH[scenario](args)
+    except BaseException as e:  # Ctrl-C included: the old artifacts must come back either way
+        if trashed is not None:
+            # The unchanged report still describes the old artifacts, so put them back; whatever
+            # the failed run wrote goes to the Trash in their place.
+            _move_prior_artifacts_to_trash(scenario_dir, label=f"{scenario_dir.name}-failed")
+            trashed.rename(scenario_dir)
+        if not isinstance(e, Exception):
+            raise
+        logger.warning("scenario %s failed; report left unchanged: %s", scenario, e)
+        return 1
+    merged = _merge_scenario_update(
+        base,
+        scenario,
+        result,
+        generated_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        hardware=_build_hardware_metadata(),
+    )
+    _write_report(args.report, merged)
+    print(f"Updated {scenario} in {args.report}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point. Builds report, dispatches scenarios, writes JSON."""
     parser = _build_argparser()
@@ -954,6 +1045,18 @@ def main(argv: list[str] | None = None) -> int:
             watchdog.stop()
         _write_report(args.live_result, result)
         return 0
+
+    if args.update_report:
+        if args.scenario == "all":
+            parser.error("--update-report refreshes one scenario; pass --scenario <name>")
+        if not args.report.exists():
+            parser.error(f"--update-report needs an existing report, not found: {args.report}")
+        if args.no_trash_prior:
+            parser.error(
+                "--update-report restores the previous artifacts from the Trash if the run "
+                "fails, so it cannot be combined with --no-trash-prior"
+            )
+        return _run_report_update(args)
 
     trashed = None
     if not args.no_trash_prior:

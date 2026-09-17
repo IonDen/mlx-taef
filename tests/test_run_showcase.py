@@ -359,8 +359,9 @@ def test_showcase_main_exits_nonzero_when_a_scenario_fails(
     )
 
 
+@pytest.mark.parametrize("auto_bn", [True, False])
 def test_live_generation_uses_strict_callback_and_requires_complete_gallery(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, auto_bn: bool
 ) -> None:
     import argparse
 
@@ -414,11 +415,15 @@ def test_live_generation_uses_strict_callback_and_requires_complete_gallery(
         num_steps=2,
         guidance=1.0,
         with_teacache=False,
-        auto_bn=True,
+        auto_bn=auto_bn,
         scenario_dir="strict",
     )
 
     assert callback_kwargs["on_error"] == "raise"
+    # The recipe flag must reach the callback: `flux=` alone no longer opts in to the BN inverse.
+    assert callback_kwargs["auto_bn"] is auto_bn
+    # Only the opt-in path hands the model over; the default recipe keeps no reference to it.
+    assert (callback_kwargs["flux"] is not None) is auto_bn
     assert result["preview_count"] == 2
     assert result["status"] == "ok"
 
@@ -806,3 +811,283 @@ def test_compute_lpips_real_scorer_identical_vs_different(tmp_path: Path) -> Non
 
     different = _compute_lpips([path_a], [path_c])
     assert different["lpips_median"] > 0.05
+
+
+@pytest.mark.parametrize("runner", ["_run_live_preview", "_run_combined"])
+def test_flux2_live_scenarios_decode_the_normalized_latent(monkeypatch, runner: str) -> None:
+    """Catches: a FLUX.2 showcase recipe opting back in to the batch-norm inverse.
+
+    TAEF2 decodes the normalized latent; the inverse scores lower against the full VAE, so a
+    recipe that re-enables it would publish the lower-fidelity previews.
+    """
+    import argparse
+
+    pytest.importorskip("mflux")
+    import scripts.run_showcase as rs
+
+    captured: dict[str, object] = {}
+
+    def _capture(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return {}
+
+    monkeypatch.setattr(rs, "_live_generation", _capture)
+    getattr(rs, runner)(argparse.Namespace(cap_gb=None))
+
+    assert captured["callback_variant"] == "taef2"
+    assert captured["auto_bn"] is False
+
+
+def _committed_like_report() -> dict[str, object]:
+    return {
+        "schema_version": 2,
+        "generated_at": "2026-08-09T14:01:06+00:00",
+        "hardware": {"mflux_version": "0.18.1"},
+        "isolation": "subprocess-per-condition",
+        "prior_artifacts_moved_to": None,
+        "scenarios": {
+            "taef1_vs_vae": {"status": "ok", "ssim_median": 0.93},
+            "taef2_vs_vae": {"status": "ok", "ssim_median": 0.61},
+        },
+    }
+
+
+def test_update_report_replaces_one_scenario_and_keeps_the_rest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches: a single-scenario refresh wiping the other scenarios out of the report, or
+    trashing their committed artifacts."""
+    import scripts.run_showcase as rs
+
+    artifacts = tmp_path / "showcase"
+    (artifacts / "taef1").mkdir(parents=True)
+    (artifacts / "taef1" / "keep.webp").write_bytes(b"keep")
+    (artifacts / "taef2").mkdir()
+    (artifacts / "taef2" / "old.webp").write_bytes(b"old")
+    home = tmp_path / "home"
+    (home / ".Trash").mkdir(parents=True)
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps(_committed_like_report()))
+
+    monkeypatch.setattr(rs, "_ARTIFACTS_DIR", artifacts)
+    monkeypatch.setattr(rs.Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(rs, "_build_hardware_metadata", lambda: {"mflux_version": "0.19.1"})
+    monkeypatch.setattr(
+        rs,
+        "_SCENARIO_DISPATCH",
+        {"taef2_vs_vae": lambda args: {"status": "ok", "ssim_median": 0.92}},
+    )
+
+    code = rs.main(["--scenario", "taef2_vs_vae", "--report", str(report_path), "--update-report"])
+
+    assert code == 0
+    merged = json.loads(report_path.read_text())
+    assert merged["scenarios"]["taef1_vs_vae"] == {"status": "ok", "ssim_median": 0.93}
+    assert merged["scenarios"]["taef2_vs_vae"]["ssim_median"] == 0.92
+    assert merged["generated_at"] == "2026-08-09T14:01:06+00:00"
+    assert merged["hardware"] == {"mflux_version": "0.18.1"}
+    (update,) = merged["scenario_updates"]
+    assert update["scenario"] == "taef2_vs_vae"
+    assert update["hardware"] == {"mflux_version": "0.19.1"}
+    assert update["generated_at"] != merged["generated_at"]
+    assert (artifacts / "taef1" / "keep.webp").read_bytes() == b"keep"
+    assert not (artifacts / "taef2" / "old.webp").exists()
+    trashed = list((home / ".Trash").iterdir())
+    assert len(trashed) == 1
+    assert (trashed[0] / "old.webp").read_bytes() == b"old"
+
+
+@pytest.mark.parametrize(
+    "argv_tail",
+    [["--scenario", "all"], ["--scenario", "taef2_vs_vae", "--report", "MISSING"]],
+)
+def test_update_report_refuses_a_full_run_or_a_missing_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, argv_tail: list[str]
+) -> None:
+    """Catches: `--update-report` silently degrading into a fresh one-scenario report."""
+    import scripts.run_showcase as rs
+
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps(_committed_like_report()))
+    # Harmless fakes: if the refusal ever regresses, this must not launch real scenarios.
+    monkeypatch.setattr(rs, "_SCENARIO_DISPATCH", {"taef2_vs_vae": lambda args: {"status": "ok"}})
+    monkeypatch.setattr(rs, "_all_scenario_order", lambda: ["taef2_vs_vae"])
+    monkeypatch.setattr(rs, "_ARTIFACTS_DIR", tmp_path / "showcase")
+    argv = [a if a != "MISSING" else str(tmp_path / "absent.json") for a in argv_tail]
+    if "--report" not in argv:
+        argv += ["--report", str(report_path)]
+
+    with pytest.raises(SystemExit) as excinfo:
+        rs.main([*argv, "--update-report"])
+    assert excinfo.value.code == 2
+
+
+def test_update_report_keeps_the_old_entry_when_the_scenario_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches: a failed refresh replacing a good measurement with an error stub, or leaving the
+    unchanged report pointing at artifacts that were moved to the Trash before the run."""
+    import scripts.run_showcase as rs
+
+    artifacts = tmp_path / "showcase"
+    (artifacts / "taef2").mkdir(parents=True)
+    (artifacts / "taef2" / "committed.webp").write_bytes(b"committed")
+    home = tmp_path / "home"
+    (home / ".Trash").mkdir(parents=True)
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps(_committed_like_report()))
+    monkeypatch.setattr(rs, "_ARTIFACTS_DIR", artifacts)
+    monkeypatch.setattr(rs.Path, "home", classmethod(lambda cls: home))
+
+    def _boom(args: object) -> dict[str, str]:
+        (artifacts / "taef2").mkdir(parents=True, exist_ok=True)
+        (artifacts / "taef2" / "half_written.webp").write_bytes(b"partial")
+        raise RuntimeError("no GPU today")
+
+    monkeypatch.setattr(rs, "_SCENARIO_DISPATCH", {"taef2_vs_vae": _boom})
+
+    code = rs.main(["--scenario", "taef2_vs_vae", "--report", str(report_path), "--update-report"])
+
+    assert code == 1
+    assert json.loads(report_path.read_text()) == _committed_like_report()
+    assert (artifacts / "taef2" / "committed.webp").read_bytes() == b"committed"
+    assert not (artifacts / "taef2" / "half_written.webp").exists()
+
+
+def test_update_report_accumulates_provenance_across_refreshes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches: a second refresh dropping the first refresh's provenance entry."""
+    import scripts.run_showcase as rs
+
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps(_committed_like_report()))
+    monkeypatch.setattr(rs, "_ARTIFACTS_DIR", tmp_path / "showcase")
+    monkeypatch.setattr(rs, "_build_hardware_metadata", lambda: {"mflux_version": "0.19.1"})
+    monkeypatch.setattr(
+        rs,
+        "_SCENARIO_DISPATCH",
+        {"taef2_vs_vae": lambda a: {"status": "ok"}, "taef1_vs_vae": lambda a: {"status": "ok"}},
+    )
+
+    for scenario in ("taef2_vs_vae", "taef1_vs_vae"):
+        argv = ["--scenario", scenario, "--report", str(report_path), "--update-report"]
+        assert rs.main(argv) == 0
+
+    updates = json.loads(report_path.read_text())["scenario_updates"]
+    assert [u["scenario"] for u in updates] == ["taef2_vs_vae", "taef1_vs_vae"]
+
+
+def test_source_version_marks_uncommitted_source_changes_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches: a report stamped clean although the harness had uncommitted edits, AND the
+    opposite: every report reading dirty because the harness itself rewrites tracked artifacts."""
+    import subprocess
+
+    import scripts.run_showcase as rs
+
+    seen: list[list[str]] = []
+    status_output = {"value": ""}
+
+    def _fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        seen.append(cmd)
+        if "describe" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout="v0.8.1-5-g5d97cd5\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout=status_output["value"], stderr="")
+
+    monkeypatch.setattr(rs.subprocess, "run", _fake_run)
+
+    assert rs._detect_source_version() == "v0.8.1-5-g5d97cd5"
+    status = next(cmd for cmd in seen if "status" in cmd)
+    assert "_artifacts" not in status
+    assert {"src", "scripts"} <= set(status)
+
+    status_output["value"] = " M scripts/run_showcase.py\n"
+    assert rs._detect_source_version() == "v0.8.1-5-g5d97cd5-dirty"
+
+
+def test_update_report_restores_artifacts_when_the_run_is_interrupted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches: Ctrl-C during a re-measure leaving the committed artifacts in the Trash."""
+    import scripts.run_showcase as rs
+
+    artifacts = tmp_path / "showcase"
+    (artifacts / "taef2").mkdir(parents=True)
+    (artifacts / "taef2" / "committed.webp").write_bytes(b"committed")
+    home = tmp_path / "home"
+    (home / ".Trash").mkdir(parents=True)
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps(_committed_like_report()))
+    monkeypatch.setattr(rs, "_ARTIFACTS_DIR", artifacts)
+    monkeypatch.setattr(rs.Path, "home", classmethod(lambda cls: home))
+
+    def _interrupted(args: object) -> dict[str, str]:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(rs, "_SCENARIO_DISPATCH", {"taef2_vs_vae": _interrupted})
+
+    with pytest.raises(KeyboardInterrupt):
+        rs.main(["--scenario", "taef2_vs_vae", "--report", str(report_path), "--update-report"])
+
+    assert (artifacts / "taef2" / "committed.webp").read_bytes() == b"committed"
+    assert json.loads(report_path.read_text()) == _committed_like_report()
+
+
+def test_update_report_refuses_to_run_without_the_trash_safety_net(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches: `--no-trash-prior` letting a failed refresh overwrite artifacts it cannot restore."""
+    import scripts.run_showcase as rs
+
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps(_committed_like_report()))
+    monkeypatch.setattr(rs, "_SCENARIO_DISPATCH", {"taef2_vs_vae": lambda args: {"status": "ok"}})
+    monkeypatch.setattr(rs, "_ARTIFACTS_DIR", tmp_path / "showcase")
+
+    argv = ["--scenario", "taef2_vs_vae", "--report", str(report_path)]
+    with pytest.raises(SystemExit) as excinfo:
+        rs.main([*argv, "--update-report", "--no-trash-prior"])
+    assert excinfo.value.code == 2
+
+
+def test_source_version_dirtiness_follows_real_git_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Runs real git: regenerated artifacts must not read as dirty, edited source must.
+
+    Catches: a repo-wide dirty check (every harness run rewrites tracked files under
+    `_artifacts/`, so it would stamp `-dirty` on every report) or a check that misses `src`.
+    """
+    import shutil
+    import subprocess
+
+    import scripts.run_showcase as rs
+
+    if shutil.which("git") is None:
+        pytest.skip("git not available")
+
+    def _git(*argv: str) -> None:
+        identity = ["-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+        identity += ["-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"]
+        subprocess.run(["git", *identity, *argv], cwd=tmp_path, check=True, capture_output=True)
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "_artifacts").mkdir()
+    (tmp_path / "src" / "a.py").write_text("x = 1\n")
+    (tmp_path / "_artifacts" / "report.json").write_text("{}\n")
+    _git("init", "-q")
+    _git("add", ".")
+    _git("commit", "-q", "-m", "init")
+    _git("tag", "v9.9.9")
+    monkeypatch.setattr(rs, "_REPO_ROOT", tmp_path)
+
+    assert rs._detect_source_version().startswith("v9.9.9-0-g")
+    assert not rs._detect_source_version().endswith("-dirty")
+
+    (tmp_path / "_artifacts" / "report.json").write_text('{"regenerated": true}\n')
+    assert not rs._detect_source_version().endswith("-dirty")
+
+    (tmp_path / "src" / "a.py").write_text("x = 2\n")
+    assert rs._detect_source_version().endswith("-dirty")

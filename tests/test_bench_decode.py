@@ -489,3 +489,32 @@ def test_worker_main_installs_watchdog_with_condition_scoped_wall_budget(
 
     assert bench._worker_main(args) == 0
     assert install_calls == [{"wall_budget_s": bench._worker_wall_budget_s("taef1")}]
+
+
+def test_prep_taef2_decodes_the_normalized_latent(monkeypatch) -> None:
+    """The TAEF2 bench condition must measure the domain the library ships.
+
+    Catches: the bench re-applying the Flux2VAE batch-norm inverse (the pre-0.8.2 recipe), which
+    would time and score a different image than `LivePreviewCallback` produces by default.
+    """
+    import mlx.core as mx
+    import numpy as np
+    import scripts.bench_decode as bench
+
+    from mlx_taef.api import TAEF2
+    from mlx_taef.integrations.mflux import unpack_flux2_latent
+
+    seen: dict[str, object] = {}
+
+    class _FakeTaef2:
+        def decode_image(self, nhwc: mx.array) -> mx.array:
+            seen["nhwc"] = nhwc
+            return nhwc
+
+    monkeypatch.setattr(TAEF2, "from_pretrained", classmethod(lambda cls, **kw: _FakeTaef2()))
+
+    packed = mx.arange(2 * 3 * 128).reshape(1, 6, 128).astype(mx.float32)
+    bench._prep_taef2(packed, 32, 48)()
+
+    expected = unpack_flux2_latent(packed, latent_height=2, latent_width=3)
+    assert np.array_equal(np.array(seen["nhwc"]), np.array(expected))

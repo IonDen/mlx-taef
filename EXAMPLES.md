@@ -16,7 +16,8 @@ mflux 0.18.1, MLX 0.31.2; weights quantized to int4 (`quantize=4`), bf16 generat
 times measure the decode step in isolation, outside of model construction and after one untimed
 warmup call, as the median over several timed reps — the steady-state per-step cost a live preview
 pays after its first step. SSIM compares the tiny-decoder image against the full VAE on the same
-latent. Captured for mlx-taef v0.7.1-8-g28af6c5 at commit `28af6c5` on 2026-08-09, on CPython 3.13.12.
+latent. Captured for mlx-taef v0.7.1-8-g28af6c5 at commit `28af6c5` on 2026-08-09, on CPython 3.13.12. The FLUX.2 Klein
+section was re-captured on 2026-09-17 (mflux 0.19.1, MLX 0.32.2).
 
 Runnable scripts live in [`examples/`](examples/).
 
@@ -144,11 +145,10 @@ captured on this reference machine, for the same reason Qwen-Image's is.
 
 ## FLUX.2 Klein live preview
 
-A live preview of FLUX.2 Klein with `auto_bn` color correction. Pass `flux=model` and the
-callback reads the VAE's batch-norm stats so the previews are color-correct from the first step.
-The `auto_bn` API itself is demonstrated against FLUX.2 Klein base 4B in
-[`examples/mflux_live_preview.py`](examples/mflux_live_preview.py); the frames pictured below are
-from the distilled 4B Klein instead (its own native 4-step schedule, no separate `--steps` flag to
+A live preview of FLUX.2 Klein. TAEF2 decodes the latent as mflux produces it, so the callback
+needs nothing model-specific beyond `variant="taef2"`. The same wiring runs against FLUX.2 Klein
+base 4B in [`examples/mflux_live_preview.py`](examples/mflux_live_preview.py); the frames pictured
+below are from the distilled 4B Klein instead (its own native 4-step schedule, no separate `--steps` flag to
 set).
 
 Recipe: FLUX.2 Klein 4B (distilled), prompt `"a red apple on a wooden table"`, seed 42, 512×512, 4
@@ -162,11 +162,15 @@ uv run python scripts/capture_examples.py --variant flux2-klein-4b
 |---|---|---|
 | ![f21](_artifacts/examples/flux2-klein-4b/flux2-klein-4b_step02.webp) | ![f23](_artifacts/examples/flux2-klein-4b/flux2-klein-4b_step03.webp) | ![f2f](_artifacts/examples/flux2-klein-4b/flux2-klein-4b_final.webp) |
 
-The gain: TAEF2 decodes a Klein latent in **30 ms** versus **0.28 s** for the full FLUX.2 VAE
-(~9.4× faster), at **0.59 GB** versus 2.80 GB peak. SSIM here is **0.616**, lower than the FLUX.1
-family because TAEF2 is a 4 MB preview decoder standing in for a ~340 MB VAE: it keeps the
-structure and color and fudges fine detail. That is the deliberate trade for a real-time preview;
-reach for the full VAE when you need final-quality fidelity. This benchmark itself runs on FLUX.2
+The gain: TAEF2 decodes a Klein latent in **30 ms** versus **0.27 s** for the full FLUX.2 VAE
+(~8.7× faster), at **0.59 GB** versus 2.80 GB peak. SSIM against the full VAE is **0.960** (LPIPS
+0.057) on the showcase's webp files, in line with the FLUX.1 family; scored on lossless PNGs it is
+0.920. Up to v0.8.1 this page reported 0.616: those releases
+applied the VAE's batch-norm inverse to the latent before TAEF2, which is not the input the decoder
+wants, and the previews came out dark and oversaturated. TAEF2 is still a 4 MB decoder
+standing in for a ~340 MB VAE and it softens fine detail, so reach for the full VAE when you need
+final-quality output. The frames above and these numbers were captured on 2026-09-17 with mflux
+0.19.1 and MLX 0.32.2. This benchmark itself runs on FLUX.2
 Klein base 4B at a fixed 4-step timing recipe, not the distilled 4B pictured above. The decoder
 being measured is the same TAEF2 either way, so the number holds regardless of which Klein config
 produced the latent. Reproduce:

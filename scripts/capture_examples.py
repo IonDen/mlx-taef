@@ -212,7 +212,7 @@ _GENERATION_SETTINGS: dict[str, _GenerationSettings] = {
         callback_variant="taef1", num_steps=14, guidance=3.5, auto_bn=False
     ),
     "flux2-klein-4b": _GenerationSettings(
-        callback_variant="taef2", num_steps=4, guidance=1.0, auto_bn=True
+        callback_variant="taef2", num_steps=4, guidance=1.0, auto_bn=False
     ),
     "qwen-image": _GenerationSettings(
         callback_variant="qwen-image", num_steps=20, guidance=3.5, auto_bn=False
@@ -649,6 +649,7 @@ def _run_generation(variant: str, args: argparse.Namespace) -> Path:
         handle = _apply_teacache(flux) if params.teacache else None
         callback = LivePreviewCallback(
             flux=flux if params.auto_bn else None,
+            auto_bn=params.auto_bn,
             variant=params.callback_variant,  # type: ignore[arg-type]
             every=1,
             numbered_frames=True,

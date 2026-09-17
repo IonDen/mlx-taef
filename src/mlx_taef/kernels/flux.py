@@ -44,8 +44,11 @@ def unpack_flux1_latent(latent: mx.array, ctx: UnpackContext) -> mx.array:
 def unpack_flux2_latent(latent: mx.array, ctx: UnpackContext) -> mx.array:
     """Unpack mflux's packed FLUX.2 latent into NHWC (B, lh*2, lw*2, 32) for TAEF2.
 
-    BN denormalize (128-ch stats) + unpatchify + NCHW->NHWC. BN stats come from ctx; absent
-    -> identity BN. Transpose order matches the shipped pre-refactor unpack_flux2_latent.
+    Unpatchify (128 -> 32 channels) + NCHW->NHWC. TAEF2 decodes the normalized latent, so the
+    default (no BN stats in ctx) leaves values untouched. When ctx carries BN stats the Flux2VAE
+    batch-norm inverse is applied first; that matches the full VAE's input domain, not TAEF2's,
+    and scores lower against the full VAE decode. The transpose order matches mflux's own
+    `Flux2LatentCreator.unpack_latents` + `Flux2VAE._unpatchify_latents`.
     """
     b, sequence_length, c = latent.shape
     if c != 128:

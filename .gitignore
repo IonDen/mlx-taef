@@ -27,3 +27,4 @@ notes/
 
 # durable live-benchmark worker checkpoints; the consolidated report is tracked
 /_artifacts/.*-partials/
+/_artifacts/**/.staging-*/

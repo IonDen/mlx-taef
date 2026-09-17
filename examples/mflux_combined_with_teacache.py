@@ -37,7 +37,6 @@ def main() -> None:
     handle = apply_teacache(model)
 
     callback = LivePreviewCallback(
-        flux=model,
         variant="taef2",
         every=1,
         numbered_frames=True,
