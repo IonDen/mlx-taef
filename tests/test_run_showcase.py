@@ -359,8 +359,9 @@ def test_showcase_main_exits_nonzero_when_a_scenario_fails(
     )
 
 
+@pytest.mark.parametrize("auto_bn", [True, False])
 def test_live_generation_uses_strict_callback_and_requires_complete_gallery(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, auto_bn: bool
 ) -> None:
     import argparse
 
@@ -414,14 +415,15 @@ def test_live_generation_uses_strict_callback_and_requires_complete_gallery(
         num_steps=2,
         guidance=1.0,
         with_teacache=False,
-        auto_bn=True,
+        auto_bn=auto_bn,
         scenario_dir="strict",
     )
 
     assert callback_kwargs["on_error"] == "raise"
     # The recipe flag must reach the callback: `flux=` alone no longer opts in to the BN inverse.
-    assert callback_kwargs["auto_bn"] is True
-    assert callback_kwargs["flux"] is not None  # the opt-in path hands the model over
+    assert callback_kwargs["auto_bn"] is auto_bn
+    # Only the opt-in path hands the model over; the default recipe keeps no reference to it.
+    assert (callback_kwargs["flux"] is not None) is auto_bn
     assert result["preview_count"] == 2
     assert result["status"] == "ok"
 
@@ -976,20 +978,115 @@ def test_update_report_accumulates_provenance_across_refreshes(
     assert [u["scenario"] for u in updates] == ["taef2_vs_vae", "taef1_vs_vae"]
 
 
-def test_source_version_marks_uncommitted_harness_changes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Catches: a report stamped with a clean commit although the harness that produced it had
-    uncommitted edits (the recorded source would not be the code that ran)."""
+def test_source_version_marks_uncommitted_source_changes_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches: a report stamped clean although the harness had uncommitted edits, AND the
+    opposite: every report reading dirty because the harness itself rewrites tracked artifacts."""
     import subprocess
 
     import scripts.run_showcase as rs
 
     seen: list[list[str]] = []
+    status_output = {"value": ""}
 
     def _fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         seen.append(cmd)
-        return subprocess.CompletedProcess(cmd, 0, stdout="v0.8.1-5-g5d97cd5-dirty\n", stderr="")
+        if "describe" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout="v0.8.1-5-g5d97cd5\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout=status_output["value"], stderr="")
 
     monkeypatch.setattr(rs.subprocess, "run", _fake_run)
 
+    assert rs._detect_source_version() == "v0.8.1-5-g5d97cd5"
+    status = next(cmd for cmd in seen if "status" in cmd)
+    assert "_artifacts" not in status
+    assert {"src", "scripts"} <= set(status)
+
+    status_output["value"] = " M scripts/run_showcase.py\n"
     assert rs._detect_source_version() == "v0.8.1-5-g5d97cd5-dirty"
-    assert "--dirty" in seen[0]
+
+
+def test_update_report_restores_artifacts_when_the_run_is_interrupted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches: Ctrl-C during a re-measure leaving the committed artifacts in the Trash."""
+    import scripts.run_showcase as rs
+
+    artifacts = tmp_path / "showcase"
+    (artifacts / "taef2").mkdir(parents=True)
+    (artifacts / "taef2" / "committed.webp").write_bytes(b"committed")
+    home = tmp_path / "home"
+    (home / ".Trash").mkdir(parents=True)
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps(_committed_like_report()))
+    monkeypatch.setattr(rs, "_ARTIFACTS_DIR", artifacts)
+    monkeypatch.setattr(rs.Path, "home", classmethod(lambda cls: home))
+
+    def _interrupted(args: object) -> dict[str, str]:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(rs, "_SCENARIO_DISPATCH", {"taef2_vs_vae": _interrupted})
+
+    with pytest.raises(KeyboardInterrupt):
+        rs.main(["--scenario", "taef2_vs_vae", "--report", str(report_path), "--update-report"])
+
+    assert (artifacts / "taef2" / "committed.webp").read_bytes() == b"committed"
+    assert json.loads(report_path.read_text()) == _committed_like_report()
+
+
+def test_update_report_refuses_to_run_without_the_trash_safety_net(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches: `--no-trash-prior` letting a failed refresh overwrite artifacts it cannot restore."""
+    import scripts.run_showcase as rs
+
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps(_committed_like_report()))
+    monkeypatch.setattr(rs, "_SCENARIO_DISPATCH", {"taef2_vs_vae": lambda args: {"status": "ok"}})
+    monkeypatch.setattr(rs, "_ARTIFACTS_DIR", tmp_path / "showcase")
+
+    argv = ["--scenario", "taef2_vs_vae", "--report", str(report_path)]
+    with pytest.raises(SystemExit) as excinfo:
+        rs.main([*argv, "--update-report", "--no-trash-prior"])
+    assert excinfo.value.code == 2
+
+
+def test_source_version_dirtiness_follows_real_git_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Runs real git: regenerated artifacts must not read as dirty, edited source must.
+
+    Catches: a repo-wide dirty check (every harness run rewrites tracked files under
+    `_artifacts/`, so it would stamp `-dirty` on every report) or a check that misses `src`.
+    """
+    import shutil
+    import subprocess
+
+    import scripts.run_showcase as rs
+
+    if shutil.which("git") is None:
+        pytest.skip("git not available")
+
+    def _git(*argv: str) -> None:
+        identity = ["-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+        subprocess.run(["git", *identity, *argv], cwd=tmp_path, check=True, capture_output=True)
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "_artifacts").mkdir()
+    (tmp_path / "src" / "a.py").write_text("x = 1\n")
+    (tmp_path / "_artifacts" / "report.json").write_text("{}\n")
+    _git("init", "-q")
+    _git("add", ".")
+    _git("commit", "-q", "-m", "init")
+    _git("tag", "v9.9.9")
+    monkeypatch.setattr(rs, "_REPO_ROOT", tmp_path)
+
+    assert rs._detect_source_version().startswith("v9.9.9-0-g")
+    assert not rs._detect_source_version().endswith("-dirty")
+
+    (tmp_path / "_artifacts" / "report.json").write_text('{"regenerated": true}\n')
+    assert not rs._detect_source_version().endswith("-dirty")
+
+    (tmp_path / "src" / "a.py").write_text("x = 2\n")
+    assert rs._detect_source_version().endswith("-dirty")

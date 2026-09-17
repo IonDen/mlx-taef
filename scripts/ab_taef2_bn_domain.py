@@ -64,6 +64,20 @@ def _cache_limit_bytes(condition: str) -> int:
     return _CACHE_LIMIT_BYTES[condition]
 
 
+def _install_worker_limits(condition: str) -> int:
+    """Pin the wired/soft memory caps and bound the MLX cache pool; return the wired cap in GB."""
+    import mlx.core as mx
+
+    from scripts import bench_decode
+
+    bench_condition = "vanilla_vae" if condition == "vanilla_vae" else "taef2"
+    installed_cap_gb = bench_decode._install_memory_caps(
+        bench_decode._resolve_cap_gb(condition=bench_condition)
+    )
+    mx.set_cache_limit(_cache_limit_bytes(condition))
+    return installed_cap_gb
+
+
 def _sha256(path: Path) -> str:
     import hashlib
 
@@ -139,7 +153,7 @@ def _save_png(image_uint8_nhwc: Any, target: Path) -> None:
 
 def _worker_main(args: argparse.Namespace) -> int:
     """Decode one condition in this process; write the PNG and result JSON; exit."""
-    from scripts.bench_decode import _install_memory_caps, _prep_full_vae_flux2, _resolve_cap_gb
+    from scripts.bench_decode import _prep_full_vae_flux2
     from scripts.run_showcase import _install_live_watchdog
 
     condition: str = args.worker
@@ -150,12 +164,9 @@ def _worker_main(args: argparse.Namespace) -> int:
     args.out_dir.mkdir(parents=True, exist_ok=True)
     abort_path.unlink(missing_ok=True)
 
-    bench_condition = "vanilla_vae" if condition == "vanilla_vae" else "taef2"
-    installed_cap_gb = _install_memory_caps(_resolve_cap_gb(condition=bench_condition))
+    installed_cap_gb = _install_worker_limits(condition)
 
     import mlx.core as mx
-
-    mx.set_cache_limit(_cache_limit_bytes(condition))
 
     watchdog = _install_live_watchdog(
         abort_path, f"ab_{condition}", wall_budget_s=_WORKER_TIMEOUT_S[condition] - 30.0
@@ -272,11 +283,48 @@ def _environment() -> dict[str, Any]:
     return env
 
 
+def _staging_dir(out_dir: Path, latent_sha256: str) -> Path:
+    return out_dir / f".staging-{latent_sha256[:12]}"
+
+
+def _is_published(out_dir: Path, stem: str, latent_sha256: str) -> bool:
+    """True when `out_dir` already holds a complete, scored result for this exact latent."""
+    try:
+        report = json.loads((out_dir / f"{stem}.report.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    return report.get("latent_sha256") == latent_sha256 and not _pending_units(
+        out_dir, stem, latent_sha256=latent_sha256
+    )
+
+
+def _publish(staging: Path, out_dir: Path) -> None:
+    for path in sorted(staging.iterdir()):
+        path.replace(out_dir / path.name)
+    staging.rmdir()
+
+
 def _run_orchestrator(args: argparse.Namespace) -> int:
+    """Run the pending units in a staging directory; publish into `--out-dir` only as a whole.
+
+    `--out-dir` may already hold another latent's results under the same file names. Units are
+    therefore written to `.staging-<sha>` and moved over in one step after every unit succeeded
+    and the report was scored, so a failed or interrupted run never leaves an old report next to
+    images decoded from a different latent. A later run resumes from the staged units.
+    """
     stem = args.latent.stem
     latent_sha256 = _sha256(args.latent)
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    for condition in _pending_units(args.out_dir, stem, latent_sha256=latent_sha256):
+    report_path = args.out_dir / f"{stem}.report.json"
+    if _is_published(args.out_dir, stem, latent_sha256):
+        report = json.loads(report_path.read_text())
+        print(json.dumps({"scores": report["scores"], "verdict": report["verdict"]}, indent=2))
+        print(f"[skip] already measured for this latent: {report_path}", flush=True)
+        return 0
+
+    staging = _staging_dir(args.out_dir, latent_sha256)
+    staging.mkdir(exist_ok=True)
+    for condition in _pending_units(staging, stem, latent_sha256=latent_sha256):
         print(f"[run] {condition}", flush=True)
         cmd = [
             sys.executable,
@@ -286,7 +334,7 @@ def _run_orchestrator(args: argparse.Namespace) -> int:
             "--latent",
             str(args.latent),
             "--out-dir",
-            str(args.out_dir),
+            str(staging),
         ]
         try:
             proc = subprocess.run(cmd, timeout=_WORKER_TIMEOUT_S[condition], check=False)
@@ -294,7 +342,7 @@ def _run_orchestrator(args: argparse.Namespace) -> int:
         except subprocess.TimeoutExpired:
             code = -1
         if code != 0:
-            _unit_result_path(args.out_dir, stem, condition).write_text(
+            _unit_result_path(staging, stem, condition).write_text(
                 json.dumps(
                     {
                         "status": "failed",
@@ -304,7 +352,7 @@ def _run_orchestrator(args: argparse.Namespace) -> int:
                     }
                 )
             )
-            print(f"[stop] {condition} failed (returncode {code})", flush=True)
+            print(f"[stop] {condition} failed (returncode {code}); staged in {staging}", flush=True)
             return 1
         print(f"[end] {condition}", flush=True)
 
@@ -312,13 +360,13 @@ def _run_orchestrator(args: argparse.Namespace) -> int:
         "latent": args.latent.name,
         "latent_sha256": latent_sha256,
         "units": {
-            c: json.loads(_unit_result_path(args.out_dir, stem, c).read_text()) for c in CONDITIONS
+            c: json.loads(_unit_result_path(staging, stem, c).read_text()) for c in CONDITIONS
         },
-        **_score(args.out_dir, stem, with_lpips=not args.no_lpips),
+        **_score(staging, stem, with_lpips=not args.no_lpips),
         "environment": _environment(),
     }
-    report_path = args.out_dir / f"{stem}.report.json"
-    report_path.write_text(json.dumps(report, indent=2))
+    (staging / report_path.name).write_text(json.dumps(report, indent=2))
+    _publish(staging, args.out_dir)
     print(json.dumps({"scores": report["scores"], "verdict": report["verdict"]}, indent=2))
     print(f"[report] {report_path}", flush=True)
     return 0

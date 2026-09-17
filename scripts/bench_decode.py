@@ -348,7 +348,8 @@ def _prep_taef2(latent: Any, height: int, width: int) -> Callable[[], Any]:
     """Construct TAEF2 + unpack (UN-timed); return a thunk that decodes only.
 
     TAEF2 decodes the normalized latent, so no batch-norm statistics are applied here; this is
-    the same domain `LivePreviewCallback` uses by default.
+    the same domain `LivePreviewCallback` uses by default. The unpack is forced with `mx.eval`
+    during setup so it stays outside the timed region: the thunk measures the decode alone.
     """
     import mlx.core as mx
 
