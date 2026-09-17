@@ -293,7 +293,13 @@ class LivePreviewCallback:
                     variant,
                 )
             self.resolved_bn = "none"
-        if self.resolved_bn != "none":
+        if self.resolved_bn != "none" and variant != "taef2":
+            logger.info(
+                "bn_mean/bn_var are ignored for variant=%r: only the FLUX.2 (taef2) unpack reads "
+                "batch-norm statistics.",
+                variant,
+            )
+        elif self.resolved_bn != "none":
             logger.warning(
                 "Applying the Flux2VAE batch-norm inverse before TAEF2 (resolved_bn=%r) gives "
                 "lower fidelity against the full VAE decode than the default normalized latent "

@@ -567,7 +567,7 @@ def _detect_source_version() -> str:
     """Return a git-derived version tied to the source being benchmarked."""
     try:
         result = subprocess.run(
-            ["git", "describe", "--tags", "--long", "--always"],
+            ["git", "describe", "--tags", "--long", "--always", "--dirty"],
             capture_output=True,
             text=True,
             check=False,
@@ -978,14 +978,15 @@ def _merge_scenario_update(
 def _run_report_update(args: argparse.Namespace) -> int:
     """Re-measure `args.scenario` and merge it into the existing report.
 
-    A failed refresh leaves the report untouched: a good committed measurement is never
-    replaced by an error stub.
+    A failed refresh leaves the report and the scenario's previous artifacts as they were: a
+    good committed measurement is never replaced by an error stub or a half-written gallery.
     """
     base = _load_report(args.report)
     scenario = args.scenario
+    scenario_dir = _ARTIFACTS_DIR / _SCENARIO_ARTIFACT_SUBDIR.get(scenario, scenario)
+    trashed = None
     if not args.no_trash_prior:
-        subdir = _SCENARIO_ARTIFACT_SUBDIR.get(scenario, scenario)
-        _move_prior_artifacts_to_trash(_ARTIFACTS_DIR / subdir, label=subdir)
+        trashed = _move_prior_artifacts_to_trash(scenario_dir, label=scenario_dir.name)
     try:
         if scenario in _LIVE_SCENARIOS:
             result = _run_live_scenario_subprocess(scenario, args)
@@ -993,6 +994,11 @@ def _run_report_update(args: argparse.Namespace) -> int:
             result = _SCENARIO_DISPATCH[scenario](args)
     except Exception as e:  # noqa: BLE001, RUF100 - report the failure, keep the old entry
         logger.warning("scenario %s failed; report left unchanged: %s", scenario, e)
+        if trashed is not None:
+            # The unchanged report still describes the old artifacts, so put them back; whatever
+            # the failed run wrote goes to the Trash in their place.
+            _move_prior_artifacts_to_trash(scenario_dir, label=f"{scenario_dir.name}-failed")
+            trashed.rename(scenario_dir)
         return 1
     merged = _merge_scenario_update(
         base,

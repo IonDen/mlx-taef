@@ -209,6 +209,54 @@ def test_opting_into_the_bn_inverse_warns_about_fidelity(
     assert len(fidelity_warnings) == 1
 
 
+def test_explicit_bn_stats_on_a_non_taef2_variant_do_not_claim_a_fidelity_cost(
+    caplog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the FLUX.2 unpack reads the statistics, so the fidelity warning is false elsewhere.
+
+    Catches: `variant="taef1"` with bn_mean/bn_var logging that a batch-norm inverse is being
+    applied before TAEF2 when nothing is applied at all.
+    """
+    import logging
+
+    from mlx_taef import TAEF1
+
+    converted = Path(__file__).parent / "converted" / "taef1_decoder.safetensors"
+    real = TAEF1.from_pretrained_local(converted)
+    monkeypatch.setattr(TAEF1, "from_pretrained", classmethod(lambda cls, **kw: real))
+
+    with caplog.at_level(logging.WARNING, logger="mlx_taef"):
+        LivePreviewCallback(
+            variant="taef1", save_to="/tmp/preview.png", bn_mean=mx.ones(128), bn_var=mx.ones(128)
+        )
+
+    assert [m for m in caplog.messages if "lower fidelity" in m] == []
+
+
+def test_flux2_bn_inverse_path_matches_mflux_own_denormalize_then_unpatchify() -> None:
+    """The opt-in path must be the full VAE's own input transform, in the VAE's order.
+
+    Catches: applying the inverse after the unpatchify (wrong channel statistics per element) or
+    with std and mean swapped, which would make the measured A/B compare against a strawman.
+    """
+    from mflux.models.flux2.latent_creator.flux2_latent_creator import Flux2LatentCreator
+    from mflux.models.flux2.model.flux2_vae.vae import Flux2VAE
+
+    lh, lw, eps = 2, 3, 1e-4
+    packed = mx.arange(lh * lw * 128).reshape(1, lh * lw, 128).astype(mx.float32) / 50.0
+    bn_mean = mx.arange(128).astype(mx.float32) / 64.0 - 1.0
+    bn_var = mx.arange(128).astype(mx.float32) / 32.0 + 2.0
+
+    nchw = Flux2LatentCreator.unpack_latents(packed, lh * 16, lw * 16)
+    denorm = nchw * mx.sqrt(bn_var.reshape(1, -1, 1, 1) + eps) + bn_mean.reshape(1, -1, 1, 1)
+    expected = mx.transpose(Flux2VAE._unpatchify_latents(denorm), (0, 2, 3, 1))
+
+    ours = unpack_flux2_latent(
+        packed, latent_height=lh, latent_width=lw, bn_mean=bn_mean, bn_var=bn_var, bn_eps=eps
+    )
+    assert np.array_equal(np.array(ours), np.array(expected))
+
+
 def test_auto_bn_resolved_auto_when_flux_has_bn_for_taef2(offline_taef2: object) -> None:
     from mlx_taef.integrations.mflux import LivePreviewCallback
 
@@ -271,6 +319,7 @@ def test_explicit_kwargs_win_over_auto_bn(offline_taef2: object) -> None:
     user_var = mx.ones(128) * 99.0
     cb = LivePreviewCallback(
         flux=flux,
+        auto_bn=True,
         variant="taef2",
         save_to="/tmp/preview.png",
         bn_mean=user_mean,
@@ -324,8 +373,9 @@ def test_auto_bn_resolved_none_when_variant_not_taef2(monkeypatch: pytest.Monkey
     monkeypatch.setattr(TAEF1, "from_pretrained", classmethod(lambda cls, **kw: real_taef1))
 
     flux = _build_fake_flux_with_nontrivial_bn()
-    cb = LivePreviewCallback(flux=flux, variant="taef1", save_to="/tmp/preview.png")
+    cb = LivePreviewCallback(flux=flux, auto_bn=True, variant="taef1", save_to="/tmp/preview.png")
     assert cb.resolved_bn == "none"
+    assert cb.bn_mean is None
 
 
 def test_auto_bn_noop_logs_for_non_taef2(caplog, monkeypatch: pytest.MonkeyPatch) -> None:

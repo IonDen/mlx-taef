@@ -41,9 +41,11 @@ def test_pending_units_skips_ok_results_and_retries_failed_or_missing(tmp_path: 
     """Catches: a resume that re-runs finished units, or trusts a failed unit's file."""
     import scripts.ab_taef2_bn_domain as ab
 
-    ab._unit_result_path(tmp_path, "lat", "vanilla_vae").write_text(json.dumps({"status": "ok"}))
-    ab._unit_result_path(tmp_path, "lat", "bn_inverse").write_text(json.dumps({"status": "failed"}))
-    assert ab._pending_units(tmp_path, "lat") == ["bn_inverse", "identity"]
+    ok = {"status": "ok", "latent_sha256": "aaaa"}
+    failed = {"status": "failed", "latent_sha256": "aaaa"}
+    ab._unit_result_path(tmp_path, "lat", "vanilla_vae").write_text(json.dumps(ok))
+    ab._unit_result_path(tmp_path, "lat", "bn_inverse").write_text(json.dumps(failed))
+    assert ab._pending_units(tmp_path, "lat", latent_sha256="aaaa") == ["bn_inverse", "identity"]
 
 
 def test_verdict_needs_both_metrics_to_agree_and_treats_lpips_as_lower_is_better() -> None:
@@ -74,3 +76,58 @@ def test_verdict_without_lpips_decides_on_ssim_margin_alone() -> None:
         {"bn_inverse": {"ssim": 0.85, "lpips": None}, "identity": {"ssim": 0.60, "lpips": None}}
     )
     assert out["winner"] == "bn_inverse"
+
+
+def test_pending_units_reruns_results_that_belong_to_a_different_latent(tmp_path: Path) -> None:
+    """Catches: a second latent with the same file stem re-scoring the first latent's images."""
+    import scripts.ab_taef2_bn_domain as ab
+
+    for condition in ab.CONDITIONS:
+        ab._unit_result_path(tmp_path, "lat", condition).write_text(
+            json.dumps({"status": "ok", "latent_sha256": "aaaa"})
+        )
+    assert ab._pending_units(tmp_path, "lat", latent_sha256="aaaa") == []
+    assert ab._pending_units(tmp_path, "lat", latent_sha256="bbbb") == list(ab.CONDITIONS)
+
+
+def test_every_worker_bounds_the_mlx_cache_pool() -> None:
+    """Catches: the full-VAE arm (the heaviest) running with MLX's near-device-size default cache
+    limit, where retained buffers can sit far above the active-memory watchdog's view."""
+    import scripts.ab_taef2_bn_domain as ab
+
+    limits = {c: ab._cache_limit_bytes(c) for c in ab.CONDITIONS}
+    assert all(0 < v <= 8 * 1024**3 for v in limits.values())
+    assert limits["vanilla_vae"] >= limits["identity"]
+
+
+def test_score_keeps_a_computed_lpips_when_the_other_arm_fails(tmp_path: Path, monkeypatch) -> None:
+    """Catches: one arm's scoring error silently discarding the other arm's valid LPIPS."""
+    import scripts.ab_taef2_bn_domain as ab
+    import scripts.run_showcase as rs
+    from PIL import Image
+
+    rng = np.random.default_rng(0)
+    for condition in ab.CONDITIONS:
+        pixels = rng.integers(0, 255, size=(16, 16, 3), dtype=np.uint8)
+        Image.fromarray(pixels).save(ab._unit_image_path(tmp_path, "lat", condition))
+
+    def _fake_scorer(ref: Path, cand: Path) -> float:
+        if "identity" in cand.name:
+            raise RuntimeError("scorer fell over")
+        return 0.25
+
+    monkeypatch.setattr(rs, "_build_lpips_score_fn", lambda: _fake_scorer)
+
+    out = ab._score(tmp_path, "lat", with_lpips=True)
+
+    assert out["scores"]["bn_inverse"]["lpips"] == 0.25
+    assert out["scores"]["identity"]["lpips"] is None
+    assert "identity" in out["lpips_note"]
+
+
+def test_pending_units_treats_a_truncated_result_file_as_pending(tmp_path: Path) -> None:
+    """Catches: a worker killed mid-write crashing the orchestrator's resume with a JSON error."""
+    import scripts.ab_taef2_bn_domain as ab
+
+    ab._unit_result_path(tmp_path, "lat", "vanilla_vae").write_text('{"status": "o')
+    assert ab._pending_units(tmp_path, "lat", latent_sha256="aaaa") == list(ab.CONDITIONS)

@@ -5,16 +5,18 @@ the batch-norm inverse (`latent * sqrt(var + eps) + mean`) before decoding. This
 captured latent three ways and scores the two TAEF2 readings against the full VAE:
 
 - `vanilla_vae`  — mflux's full Flux2VAE (the reference image).
-- `bn_inverse`   — TAEF2 on the denormalized latent (the library default with `flux=model`).
-- `identity`     — TAEF2 on the normalized latent as-is (no BN statistics).
+- `bn_inverse`   — TAEF2 on the denormalized latent (the library default up to v0.8.1).
+- `identity`     — TAEF2 on the normalized latent as-is (the default since v0.8.2).
 
-One model per subprocess; every unit writes its PNG and result JSON the moment it finishes, and a
-re-run skips units whose result is already `ok`. Images are PNG so no codec sits between the
-decoders and the scores.
+Every unit writes its PNG and result JSON the moment it finishes, and a re-run skips units whose
+result is already `ok`. Images are PNG so no codec sits between the decoders and the scores.
 
-Wall clock (M1 Max, warm HF cache): `vanilla_vae` ~3-8 min (constructs Klein base 4B at 4-bit to
-reach its VAE), each TAEF2 unit ~10 s, scoring ~20 s (LPIPS is skipped with a note when the
-`fixtures` dependency group is not installed).
+One model per subprocess; results are keyed on the latent's sha256, so pointing the script at a
+different latent never re-scores another latent's images.
+
+Wall clock (M1 Max, warm HF cache): a few seconds per unit (mflux materializes only the VAE), plus
+~20 s of scoring. LPIPS needs the `fixtures` dependency group; a missing or failing scorer is
+recorded in `lpips_note` and the verdict falls back to SSIM.
 
 Usage:
     uv run python scripts/ab_taef2_bn_domain.py --out-dir _artifacts/ab_taef2_bn_domain
@@ -38,7 +40,13 @@ from mlx_taef.errors import TaefError  # noqa: E402  (after sys.path tweak)
 CONDITIONS = ("vanilla_vae", "bn_inverse", "identity")
 _TAEF2_CONDITIONS = ("bn_inverse", "identity")
 _WORKER_TIMEOUT_S = {"vanilla_vae": 1500, "bn_inverse": 300, "identity": 300}
-_TAEF2_CACHE_LIMIT_BYTES = 2 * 1024**3
+# Every worker bounds MLX's retained-buffer pool: its default limit sits near device memory, and
+# the watchdog samples active memory only.
+_CACHE_LIMIT_BYTES = {
+    "vanilla_vae": 6 * 1024**3,
+    "bn_inverse": 2 * 1024**3,
+    "identity": 2 * 1024**3,
+}
 # A winner has to lead by more than run-to-run and fixture noise on SSIM, and must not lose on
 # LPIPS. Both TAEF2 readings differ by a ~1.8x per-channel scale, so a real effect is far larger.
 _SSIM_MARGIN = 0.02
@@ -52,8 +60,18 @@ def _unit_image_path(out_dir: Path, latent_stem: str, condition: str) -> Path:
     return out_dir / f"{latent_stem}.{condition}.png"
 
 
-def _pending_units(out_dir: Path, latent_stem: str) -> list[str]:
-    """Conditions still to run: no result file yet, or one whose status is not `ok`."""
+def _cache_limit_bytes(condition: str) -> int:
+    return _CACHE_LIMIT_BYTES[condition]
+
+
+def _sha256(path: Path) -> str:
+    import hashlib
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _pending_units(out_dir: Path, latent_stem: str, *, latent_sha256: str) -> list[str]:
+    """Conditions still to run: no `ok` result yet for this exact latent."""
     pending: list[str] = []
     for condition in CONDITIONS:
         path = _unit_result_path(out_dir, latent_stem, condition)
@@ -61,10 +79,10 @@ def _pending_units(out_dir: Path, latent_stem: str) -> list[str]:
             pending.append(condition)
             continue
         try:
-            status = json.loads(path.read_text()).get("status")
+            result = json.loads(path.read_text())
         except json.JSONDecodeError:
-            status = None
-        if status != "ok":
+            result = {}
+        if result.get("status") != "ok" or result.get("latent_sha256") != latent_sha256:
             pending.append(condition)
     return pending
 
@@ -137,8 +155,7 @@ def _worker_main(args: argparse.Namespace) -> int:
 
     import mlx.core as mx
 
-    if condition in _TAEF2_CONDITIONS:
-        mx.set_cache_limit(_TAEF2_CACHE_LIMIT_BYTES)
+    mx.set_cache_limit(_cache_limit_bytes(condition))
 
     watchdog = _install_live_watchdog(
         abort_path, f"ab_{condition}", wall_budget_s=_WORKER_TIMEOUT_S[condition] - 30.0
@@ -173,11 +190,14 @@ def _worker_main(args: argparse.Namespace) -> int:
                 "status": "ok",
                 "condition": condition,
                 "latent": args.latent.name,
+                "latent_sha256": _sha256(args.latent),
                 "height": height,
                 "width": width,
                 "image": image_path.name,
-                "elapsed_s": round(time.perf_counter() - started, 3),
-                "peak_memory_gb": round(peak_gb, 3),
+                # Whole-unit wall clock and whole-process peak (load + decode + PNG write); the
+                # decode-only figures live in the showcase report.
+                "unit_wall_s": round(time.perf_counter() - started, 3),
+                "process_peak_memory_gb": round(peak_gb, 3),
                 "installed_cap_gb": installed_cap_gb,
             },
             indent=2,
@@ -202,25 +222,38 @@ def _image_stats(ref: Path, cand: Path) -> dict[str, Any]:
 
 
 def _score(out_dir: Path, stem: str, *, with_lpips: bool) -> dict[str, Any]:
-    from scripts.run_showcase import _compute_lpips, _compute_ssim
+    from scripts import run_showcase
 
     ref = _unit_image_path(out_dir, stem, "vanilla_vae")
+    notes: list[str] = []
+    score_fn = None
+    if with_lpips:
+        try:
+            score_fn = run_showcase._build_lpips_score_fn()
+        except Exception as exc:  # LPIPS is optional evidence; record why it is missing.
+            notes.append(f"scorer unavailable: {type(exc).__name__}: {exc}")
+
     scores: dict[str, dict[str, Any]] = {}
-    lpips_note: str | None = None
     for condition in _TAEF2_CONDITIONS:
         cand = _unit_image_path(out_dir, stem, condition)
-        entry: dict[str, Any] = {"ssim": _compute_ssim([ref], [cand])["ssim_median"], "lpips": None}
+        entry: dict[str, Any] = {
+            "ssim": run_showcase._compute_ssim([ref], [cand])["ssim_median"],
+            "lpips": None,
+        }
         entry.update(_image_stats(ref, cand))
-        if with_lpips and lpips_note is None:
+        if score_fn is not None:
             try:
-                entry["lpips"] = _compute_lpips([ref], [cand])["lpips_median"]
-            except Exception as exc:  # LPIPS is optional evidence; record why it is missing.
-                lpips_note = f"{type(exc).__name__}: {exc}"
+                entry["lpips"] = run_showcase._compute_lpips([ref], [cand], score_fn=score_fn)[
+                    "lpips_median"
+                ]
+            except Exception as exc:  # one arm failing must not discard the other's score
+                notes.append(f"{condition}: {type(exc).__name__}: {exc}")
         scores[condition] = entry
-    if lpips_note is not None:
-        for entry in scores.values():
-            entry["lpips"] = None
-    return {"scores": scores, "lpips_note": lpips_note, "verdict": _verdict(scores)}
+    return {
+        "scores": scores,
+        "lpips_note": "; ".join(notes) or None,
+        "verdict": _verdict(scores),
+    }
 
 
 def _environment() -> dict[str, Any]:
@@ -241,8 +274,9 @@ def _environment() -> dict[str, Any]:
 
 def _run_orchestrator(args: argparse.Namespace) -> int:
     stem = args.latent.stem
+    latent_sha256 = _sha256(args.latent)
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    for condition in _pending_units(args.out_dir, stem):
+    for condition in _pending_units(args.out_dir, stem, latent_sha256=latent_sha256):
         print(f"[run] {condition}", flush=True)
         cmd = [
             sys.executable,
@@ -261,7 +295,14 @@ def _run_orchestrator(args: argparse.Namespace) -> int:
             code = -1
         if code != 0:
             _unit_result_path(args.out_dir, stem, condition).write_text(
-                json.dumps({"status": "failed", "condition": condition, "returncode": code})
+                json.dumps(
+                    {
+                        "status": "failed",
+                        "condition": condition,
+                        "latent_sha256": latent_sha256,
+                        "returncode": code,
+                    }
+                )
             )
             print(f"[stop] {condition} failed (returncode {code})", flush=True)
             return 1
@@ -269,6 +310,7 @@ def _run_orchestrator(args: argparse.Namespace) -> int:
 
     report = {
         "latent": args.latent.name,
+        "latent_sha256": latent_sha256,
         "units": {
             c: json.loads(_unit_result_path(args.out_dir, stem, c).read_text()) for c in CONDITIONS
         },
