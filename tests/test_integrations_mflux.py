@@ -121,9 +121,10 @@ def test_taef2_auto_bn_without_flux_warns(offline_taef2: object, caplog) -> None
     import logging
 
     with caplog.at_level(logging.WARNING, logger="mlx_taef"):
-        LivePreviewCallback(variant="taef2", save_to="/tmp/preview.png")
+        cb = LivePreviewCallback(variant="taef2", auto_bn=True, save_to="/tmp/preview.png")
 
-    assert any("flux" in message and "identity BN" in message for message in caplog.messages)
+    assert cb.resolved_bn == "none"
+    assert any("no flux instance" in message for message in caplog.messages)
 
 
 @dataclass
@@ -160,11 +161,59 @@ def _build_fake_flux_with_nontrivial_bn() -> _FakeFlux:
     )
 
 
+def test_default_taef2_with_flux_decodes_the_normalized_latent(offline_taef2: object) -> None:
+    """TAEF2 is distilled on the normalized latent mflux hands the callback.
+
+    Catches: the default still extracting the VAE statistics and applying the batch-norm inverse,
+    which measurably lowers fidelity against the full VAE.
+    """
+    cb = LivePreviewCallback(
+        flux=_build_fake_flux_with_nontrivial_bn(), variant="taef2", save_to="/tmp/preview.png"
+    )
+    assert cb.auto_bn is False
+    assert cb.resolved_bn == "none"
+    assert cb.bn_mean is None
+    assert cb.bn_var is None
+
+
+def test_default_taef2_identity_path_logs_no_warning(offline_taef2: object, caplog) -> None:
+    """Catches: the old "previews may be color-shifted" warning firing on the correct path."""
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="mlx_taef"):
+        LivePreviewCallback(variant="taef2", save_to="/tmp/preview.png")
+        LivePreviewCallback(
+            flux=_build_fake_flux_with_nontrivial_bn(), variant="taef2", save_to="/tmp/preview.png"
+        )
+
+    assert caplog.messages == []
+
+
+@pytest.mark.parametrize("opt_in", ["auto", "explicit"])
+def test_opting_into_the_bn_inverse_warns_about_fidelity(
+    offline_taef2: object, caplog, opt_in: str
+) -> None:
+    """Catches: a caller silently opting in to the lower-fidelity domain."""
+    import logging
+
+    kwargs: dict[str, object] = (
+        {"flux": _build_fake_flux_with_nontrivial_bn(), "auto_bn": True}
+        if opt_in == "auto"
+        else {"bn_mean": mx.ones(128), "bn_var": mx.ones(128)}
+    )
+    with caplog.at_level(logging.WARNING, logger="mlx_taef"):
+        cb = LivePreviewCallback(variant="taef2", save_to="/tmp/preview.png", **kwargs)
+
+    assert cb.resolved_bn == opt_in
+    fidelity_warnings = [m for m in caplog.messages if "lower fidelity" in m]
+    assert len(fidelity_warnings) == 1
+
+
 def test_auto_bn_resolved_auto_when_flux_has_bn_for_taef2(offline_taef2: object) -> None:
     from mlx_taef.integrations.mflux import LivePreviewCallback
 
     flux = _build_fake_flux_with_nontrivial_bn()
-    cb = LivePreviewCallback(flux=flux, variant="taef2", save_to="/tmp/preview.png")
+    cb = LivePreviewCallback(flux=flux, auto_bn=True, variant="taef2", save_to="/tmp/preview.png")
     assert cb.resolved_bn == "auto"
     assert cb.bn_mean is not None
     assert cb.bn_var is not None
@@ -182,7 +231,9 @@ def test_auto_bn_changes_decoded_output_vs_identity_bn(offline_taef2: object) ->
     from mlx_taef.integrations.mflux import LivePreviewCallback, unpack_flux2_latent
 
     flux = _build_fake_flux_with_nontrivial_bn()
-    cb_auto = LivePreviewCallback(flux=flux, variant="taef2", save_to="/tmp/preview_auto.png")
+    cb_auto = LivePreviewCallback(
+        flux=flux, auto_bn=True, variant="taef2", save_to="/tmp/preview_auto.png"
+    )
     cb_none = LivePreviewCallback(variant="taef2", save_to="/tmp/preview_none.png")
 
     assert cb_auto.resolved_bn == "auto"
@@ -254,6 +305,7 @@ def test_auto_bn_resolved_none_when_flux_missing_vae(offline_taef2: object, capl
     with caplog.at_level(logging.WARNING, logger="mlx_taef"):
         cb = LivePreviewCallback(
             flux=flux_without_vae,
+            auto_bn=True,
             variant="taef2",
             save_to="/tmp/preview.png",
         )
@@ -645,7 +697,7 @@ def test_auto_bn_extracts_and_stores_eps(offline_taef2: object) -> None:
     from mlx_taef.integrations.mflux import LivePreviewCallback
 
     flux = _build_fake_flux_with_nontrivial_bn()  # _FakeBN(eps=1e-5)
-    cb = LivePreviewCallback(flux=flux, variant="taef2", save_to="/tmp/preview.png")
+    cb = LivePreviewCallback(flux=flux, auto_bn=True, variant="taef2", save_to="/tmp/preview.png")
     assert cb.resolved_bn == "auto"
     assert cb.bn_eps == 1e-5
 
@@ -691,7 +743,7 @@ def test_auto_bn_with_bn_missing_eps_falls_back_to_default(offline_taef2: object
         vae: object
 
     flux = _Flux(vae=_VAE(bn=_BNNoEps(running_mean=mx.ones(128), running_var=mx.ones(128))))
-    cb = LivePreviewCallback(flux=flux, variant="taef2", save_to="/tmp/preview.png")
+    cb = LivePreviewCallback(flux=flux, auto_bn=True, variant="taef2", save_to="/tmp/preview.png")
     assert cb.resolved_bn == "auto"  # mean + var present
     assert cb.bn_eps == 1e-4  # eps absent -> documented fallback
 
@@ -705,7 +757,9 @@ def test_call_in_loop_forwards_bn_eps_and_auto_dims_into_unpack_context(
     from mlx_taef.integrations.mflux import LivePreviewCallback
 
     flux = _build_fake_flux_with_nontrivial_bn()  # eps=1e-5
-    cb = LivePreviewCallback(flux=flux, variant="taef2", save_to=tmp_path / "p.png")  # auto dims
+    cb = LivePreviewCallback(  # auto dims
+        flux=flux, auto_bn=True, variant="taef2", save_to=tmp_path / "p.png"
+    )
     assert cb.bn_eps == 1e-5  # extracted at construction
     assert cb._packed_downscale == 16  # read from the real taef2 binding
 

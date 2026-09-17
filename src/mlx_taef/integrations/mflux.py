@@ -49,11 +49,12 @@ def unpack_flux2_latent(
     bn_var: mx.array | None = None,
     bn_eps: float = 1e-4,
 ) -> mx.array:
-    """Back-compat keyword API for the FLUX.2 unpack; delegates to the kernel unpack.
+    """Unpack mflux's packed `(B, N, 128)` FLUX.2 latent to the NHWC `(B, 2h, 2w, 32)` TAEF2 takes.
 
-    The canonical implementation now lives in `mlx_taef.kernels.flux.unpack_flux2_latent`
-    with the `(latent, UnpackContext)` signature; this wrapper preserves the original
-    keyword call shape for existing callers.
+    Leave `bn_mean` / `bn_var` unset: TAEF2 decodes the normalized latent as mflux produces it.
+    Passing the Flux2VAE batch-norm statistics applies the VAE's inverse first, which lowers
+    fidelity against the full VAE decode; the parameters remain for callers that depend on it.
+    Delegates to `mlx_taef.kernels.flux.unpack_flux2_latent`.
     """
     if (bn_mean is None) != (bn_var is None):
         raise ValueError("bn_mean and bn_var must be set together")
@@ -145,11 +146,14 @@ class LivePreviewCallback:
             mflux; intended to be a `Flux2Klein` instance when `auto_bn=True` and
             `variant="taef2"`. Required for auto-bn extraction (the mflux callback
             contract does not pass the flux instance at fire time).
-        auto_bn: TAEF2-only. When True (default) and a `flux` instance is passed for
-            `variant='taef2'`, the VAE BN running stats (and eps) are auto-extracted for
-            color-correct previews. For 'taef1'/'zimage' it is a no-op (those have no BN
-            step) and logs an info line so the no-op is observable. Explicit `bn_mean`/
-            `bn_var` always take precedence.
+        auto_bn: TAEF2-only, default False. TAEF2 decodes the normalized latent mflux hands
+            the callback, so by default no batch-norm statistics are applied. Setting it to
+            True (with a `flux` instance, `variant='taef2'`) extracts the VAE BN running stats
+            and eps and applies the batch-norm inverse first, as the full VAE does. That is
+            measured to give lower fidelity against the full VAE decode (SSIM 0.59 vs 0.92 on
+            the committed FLUX.2 Klein latent) and logs a warning; it remains for callers who
+            relied on it. For other variants it is a no-op and logs an info line. Explicit
+            `bn_mean`/`bn_var` take precedence and carry the same warning.
         variant: 'taef1' (FLUX.1), 'taef2' (FLUX.2 Klein), 'zimage' (Z-Image /
             Z-Image-Turbo, which reuses TAEF1's weights), 'qwen-image'
             (Qwen-Image / Qwen-Image-Edit, via taew2.1), or 'krea2' (Krea 2,
@@ -172,8 +176,9 @@ class LivePreviewCallback:
             'zimage' and 'krea2' — since their unpack reads spatial dims from the latent's own
             shape instead.
         latent_width: latent spatial width; None auto-detects (see latent_height).
-        bn_mean: optional BN running_mean for TAEF2 (see `unpack_flux2_latent`).
-        bn_var: optional BN running_var for TAEF2.
+        bn_mean: optional Flux2VAE BN running_mean; opts in to the batch-norm inverse for
+            TAEF2 (lower fidelity than the default, see `auto_bn`). Set together with `bn_var`.
+        bn_var: optional Flux2VAE BN running_var; see `bn_mean`.
         bn_eps: epsilon for explicit BN statistics. Default 1e-4. Auto-extracted model
             statistics use the model's epsilon when available.
         on_error: runtime emission policy. ``"disable"`` logs the first failure and disables
@@ -185,7 +190,7 @@ class LivePreviewCallback:
         self,
         *,
         flux: object | None = None,
-        auto_bn: bool = True,
+        auto_bn: bool = False,
         variant: Literal["taef1", "taef2", "zimage", "qwen-image", "krea2"] = "taef2",
         every: int = 5,
         save_to: str | Path = "preview.png",
@@ -252,10 +257,10 @@ class LivePreviewCallback:
                 "is not packed, so the unpack reads spatial dims from the latent's own shape.",
                 variant,
             )
-        # Resolve BN source. Precedence:
+        # Resolve BN source. The default is "none": TAEF2 was distilled on the normalized
+        # latent, which is what mflux hands the callback. Opt-in precedence:
         #   explicit (user passed bn_mean + bn_var)
         #     > auto (auto_bn=True + variant=="taef2" + flux.vae.bn extractable)
-        #     > none (identity BN, v0.1.x behavior)
         if bn_mean is not None and bn_var is not None:
             self.resolved_bn = "explicit"
         elif auto_bn and variant == "taef2" and flux is not None:
@@ -269,18 +274,16 @@ class LivePreviewCallback:
             else:
                 logger.warning(
                     "auto_bn=True but flux instance does not expose "
-                    ".vae.bn.running_mean / running_var; falling back to "
-                    "identity BN (previews will be color-shifted on taef2). "
-                    "Pass bn_mean= and bn_var= explicitly, or check the "
-                    "mflux Flux2VAE.bn attribute path."
+                    ".vae.bn.running_mean / running_var; decoding the normalized latent "
+                    "instead (the default, and the higher-fidelity path for taef2)."
                 )
                 self.resolved_bn = "none"
         else:
             if auto_bn and variant == "taef2":
                 logger.warning(
-                    "auto_bn=True for taef2 but no flux instance was provided; falling back "
-                    "to identity BN (previews may be color-shifted). Pass flux=model or "
-                    "explicit bn_mean/bn_var."
+                    "auto_bn=True for taef2 but no flux instance was provided, so no "
+                    "statistics can be extracted; decoding the normalized latent instead "
+                    "(the default, and the higher-fidelity path for taef2)."
                 )
             elif auto_bn and flux is not None:
                 logger.info(
@@ -291,6 +294,14 @@ class LivePreviewCallback:
                     variant,
                 )
             self.resolved_bn = "none"
+        if self.resolved_bn != "none":
+            logger.warning(
+                "Applying the Flux2VAE batch-norm inverse before TAEF2 (resolved_bn=%r) gives "
+                "lower fidelity against the full VAE decode than the default normalized latent "
+                "(measured SSIM 0.59 vs 0.92). Drop auto_bn=True / bn_mean / bn_var unless you "
+                "depend on the old look.",
+                self.resolved_bn,
+            )
         self._iter = 0
         self._disabled = False
 
