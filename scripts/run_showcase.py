@@ -252,7 +252,7 @@ def _run_live_preview(args: argparse.Namespace) -> dict[str, Any]:
         num_steps=4,
         guidance=1.0,
         with_teacache=False,
-        auto_bn=True,
+        auto_bn=False,
         scenario_dir="live_preview",
     )
 
@@ -274,7 +274,7 @@ def _run_combined(args: argparse.Namespace) -> dict[str, Any]:
         num_steps=4,
         guidance=1.0,
         with_teacache=True,
-        auto_bn=True,
+        auto_bn=False,
         scenario_dir="combined",
     )
 
@@ -316,9 +316,9 @@ def _live_generation(
     """Run one generation with a preview gallery and optional TeaCache wrap.
 
     Parameterized over model factory, callback variant, prompt, steps, guidance,
-    and auto_bn so each scenario supplies its own pinned recipe. Set auto_bn=True
-    for TAEF2 scenarios (enables BN extraction from the mflux model for
-    color-correct previews); False for all other variants.
+    and auto_bn so each scenario supplies its own pinned recipe. Every committed scenario
+    uses auto_bn=False: TAEF2 decodes the normalized latent, and the batch-norm inverse
+    scores lower against the full VAE (see scripts/ab_taef2_bn_domain.py).
     """
     import mlx.core as mx
 
@@ -359,6 +359,7 @@ def _live_generation(
 
     callback = LivePreviewCallback(
         flux=flux if auto_bn else None,
+        auto_bn=auto_bn,
         variant=callback_variant,
         every=1,
         numbered_frames=True,

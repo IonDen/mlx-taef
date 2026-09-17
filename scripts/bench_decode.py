@@ -344,10 +344,12 @@ def _prep_taef1(latent: Any, height: int, width: int) -> Callable[[], Any]:
     return lambda: taef.decode_image(unpacked_nhwc)
 
 
-def _prep_taef2(
-    latent: Any, height: int, width: int, bn_mean: Any, bn_var: Any
-) -> Callable[[], Any]:
-    """Construct TAEF2 + unpack (BN denorm, UN-timed); return a thunk that decodes only."""
+def _prep_taef2(latent: Any, height: int, width: int) -> Callable[[], Any]:
+    """Construct TAEF2 + unpack (UN-timed); return a thunk that decodes only.
+
+    TAEF2 decodes the normalized latent, so no batch-norm statistics are applied here; this is
+    the same domain `LivePreviewCallback` uses by default.
+    """
     import mlx.core as mx
 
     from mlx_taef.api import TAEF2
@@ -360,8 +362,6 @@ def _prep_taef2(
         latent,
         latent_height=latent_h,
         latent_width=latent_w,
-        bn_mean=bn_mean,
-        bn_var=bn_var,
     )
     mx.eval(unpacked)
     return lambda: taef.decode_image(unpacked)
@@ -483,16 +483,12 @@ def _worker_main(args: argparse.Namespace) -> int:
         latent = arrays["latent"]
         height = int(arrays["height"].item())
         width = int(arrays["width"].item())
-        bn_mean = arrays.get("bn_mean")
-        bn_var = arrays.get("bn_var")
 
         # Setup (UN-timed): construct the model + unpack the latent.
         if args.condition == "taef1":
             decode_fn = _prep_taef1(latent, height, width)
         elif args.condition == "taef2":
-            if bn_mean is None or bn_var is None:
-                raise TaefError("taef2 condition requires bn_mean+bn_var in the latent safetensors")
-            decode_fn = _prep_taef2(latent, height, width, bn_mean, bn_var)
+            decode_fn = _prep_taef2(latent, height, width)
         elif args.condition == "zimage":
             decode_fn = _prep_zimage(latent, height, width)
         elif args.condition == "vanilla_vae":

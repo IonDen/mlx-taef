@@ -419,6 +419,8 @@ def test_live_generation_uses_strict_callback_and_requires_complete_gallery(
     )
 
     assert callback_kwargs["on_error"] == "raise"
+    # The recipe flag must reach the callback: `flux=` alone no longer opts in to the BN inverse.
+    assert callback_kwargs["auto_bn"] is True
     assert result["preview_count"] == 2
     assert result["status"] == "ok"
 
@@ -806,3 +808,28 @@ def test_compute_lpips_real_scorer_identical_vs_different(tmp_path: Path) -> Non
 
     different = _compute_lpips([path_a], [path_c])
     assert different["lpips_median"] > 0.05
+
+
+@pytest.mark.parametrize("runner", ["_run_live_preview", "_run_combined"])
+def test_flux2_live_scenarios_decode_the_normalized_latent(monkeypatch, runner: str) -> None:
+    """Catches: a FLUX.2 showcase recipe opting back in to the batch-norm inverse.
+
+    TAEF2 decodes the normalized latent; the inverse scores lower against the full VAE, so a
+    recipe that re-enables it would publish the lower-fidelity previews.
+    """
+    import argparse
+
+    pytest.importorskip("mflux")
+    import scripts.run_showcase as rs
+
+    captured: dict[str, object] = {}
+
+    def _capture(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return {}
+
+    monkeypatch.setattr(rs, "_live_generation", _capture)
+    getattr(rs, runner)(argparse.Namespace(cap_gb=None))
+
+    assert captured["callback_variant"] == "taef2"
+    assert captured["auto_bn"] is False

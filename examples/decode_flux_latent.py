@@ -34,8 +34,6 @@ def main() -> None:
     latent = arrays["latent"]
     height = int(arrays["height"].item())
     width = int(arrays["width"].item())
-    bn_mean = arrays["bn_mean"]
-    bn_var = arrays["bn_var"]
     print(f"  latent shape: {latent.shape}, target image: {height}x{width}")
 
     print("unpacking + decoding with TAEF2...")
@@ -44,8 +42,6 @@ def main() -> None:
         latent,
         latent_height=height // 16,
         latent_width=width // 16,
-        bn_mean=bn_mean,
-        bn_var=bn_var,
     )
     img_uint8 = taef.decode_image(nhwc)
     mx.eval(img_uint8)

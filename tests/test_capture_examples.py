@@ -118,7 +118,8 @@ def test_argparse_qwen_uniform_q4_flag_sets_true() -> None:
         # flux2_klein_base_4b); mflux/cli/defaults/defaults.py:53 MODEL_INFERENCE_STEPS
         # ["flux2-klein-4b"] = 4 (native step count); mflux/models/flux2/cli/
         # flux2_generate.py:28-31 forces guidance=1.0 for distilled (non-"base") configs.
-        ("flux2-klein-4b", "taef2", 4, 1.0, True),
+        # TAEF2 decodes the normalized latent, so the recipe does not opt in to the BN inverse.
+        ("flux2-klein-4b", "taef2", 4, 1.0, False),
         # mflux/models/common/config/model_config.py:143-144 ModelConfig.qwen_image();
         # mflux/models/qwen/variants/txt2img/qwen_image.py:23-41 QwenImage class;
         # mflux/cli/defaults/defaults.py:43 MODEL_INFERENCE_STEPS["qwen-image"] = 20 (the
@@ -724,10 +725,13 @@ def test_run_generation_wires_callback_and_saves_final(tmp_path: Path, monkeypat
     assert call["width"] == args.width
 
 
-def test_run_generation_passes_flux_instance_for_auto_bn_variant(
+def test_run_generation_forwards_the_recipe_bn_choice_to_the_callback(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """flux2-klein-4b has auto_bn=True: LivePreviewCallback must get flux=<the model>."""
+    """flux2-klein-4b previews the normalized latent: no flux instance, auto_bn=False.
+
+    Catches: the recipe flag not reaching the callback, so flipping it in the table does nothing.
+    """
     from scripts import capture_examples as ce
 
     import mlx_taef.integrations.mflux as mflux_integration
@@ -753,7 +757,8 @@ def test_run_generation_passes_flux_instance_for_auto_bn_variant(
     ce._run_generation("flux2-klein-4b", args)
 
     _, kwargs = fake_callback_cls.call_args
-    assert kwargs["flux"] is fake_flux
+    assert kwargs["flux"] is None
+    assert kwargs["auto_bn"] is False
     assert kwargs["variant"] == "taef2"
     assert kwargs["numbered_frames"] is True
 
