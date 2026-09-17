@@ -17,18 +17,18 @@ This validates that `LivePreviewCallback` produces recognizable previews during 
 2. Run a generation with the callback:
    ```python
    from pathlib import Path
+   from mflux.models.common.config.model_config import ModelConfig
    from mflux.models.flux2 import Flux2Klein
    from mlx_taef.integrations.mflux import LivePreviewCallback
 
-   model = Flux2Klein.from_pretrained("4bit")
+   model = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_base_4b())
    callback = LivePreviewCallback(
-       flux=model,             # auto-extracts Flux2VAE BN stats for exact color
        variant="taef2",
        every=5,
        save_to=Path("preview.png"),
        # latent_height / latent_width auto-detected from the generation config
    )
-   assert callback.resolved_bn == "auto"   # confirms BN extraction succeeded
+   assert callback.resolved_bn == "none"   # TAEF2 decodes the latent as mflux produces it
    model.callbacks.register(callback)
    model.generate_image(
        prompt="a red apple on a wooden table",
@@ -41,23 +41,21 @@ This validates that `LivePreviewCallback` produces recognizable previews during 
 
 3. Verify `preview.png` updates every 5 steps with progressively clearer images. The final preview should be recognizable as "red apple on a wooden table."
 
-## BN precedence
+## Batch-norm statistics (opt-in, not recommended)
 
-`LivePreviewCallback` resolves the FLUX.2 VAE BN stats in this order:
+The full FLUX.2 VAE applies a batch-norm inverse (`latent * sqrt(var + eps) + mean`) to the latent
+before it decodes. TAEF2 does not want that: it was distilled on the normalized latent, which is
+what mflux hands the callback. Measured against the full VAE on the same latent, decoding the
+latent as-is scores SSIM 0.920 and applying the inverse first scores 0.588
+(`scripts/ab_taef2_bn_domain.py`; results under `_artifacts/ab_taef2_bn_domain/`). So the default is
+to apply nothing, and `callback.resolved_bn == "none"` is the normal state.
 
-1. **Explicit** — pass `bn_mean=...` and `bn_var=...`. Always wins. `callback.resolved_bn == "explicit"`.
-2. **Auto** — pass `flux=model` with `auto_bn=True` (default). The callback walks `model.vae.bn.running_mean` / `running_var` at construction time. `callback.resolved_bn == "auto"`.
-3. **Identity (fallback)** — no BN source resolved. Structure is correct, colors shift. `callback.resolved_bn == "none"`.
+Releases before 0.8.2 applied the inverse whenever `flux=model` was passed. If you depend on that
+look, you can still opt in, and the callback logs a warning when you do:
 
-The auto path is the default for v0.2.0 — the example above relies on it. Explicit overrides exist for integrations where you don't have the mflux instance handy (e.g. precomputed BN stats loaded from disk):
-
-```python
-callback = LivePreviewCallback(
-    bn_mean=precomputed_mean,
-    bn_var=precomputed_var,
-    ...
-)
-```
+1. **Explicit**: pass `bn_mean=...` and `bn_var=...` together. `callback.resolved_bn == "explicit"`.
+2. **Auto**: pass `flux=model` with `auto_bn=True`. The callback reads `model.vae.bn.running_mean`,
+   `running_var` and `eps` at construction time. `callback.resolved_bn == "auto"`.
 
 ## Cross-process MLX non-determinism
 

@@ -142,10 +142,9 @@ class LivePreviewCallback:
 
     Args:
         flux: optional reference to the mflux model instance the callback will be
-            registered on. Typed as `object` to keep this module import-clean of
-            mflux; intended to be a `Flux2Klein` instance when `auto_bn=True` and
-            `variant="taef2"`. Required for auto-bn extraction (the mflux callback
-            contract does not pass the flux instance at fire time).
+            registered on. Only read when `auto_bn=True` (the mflux callback contract does
+            not pass the model at fire time); previews do not need it otherwise. Typed as
+            `object` to keep this module import-clean of mflux.
         auto_bn: TAEF2-only, default False. TAEF2 decodes the normalized latent mflux hands
             the callback, so by default no batch-norm statistics are applied. Setting it to
             True (with a `flux` instance, `variant='taef2'`) extracts the VAE BN running stats
