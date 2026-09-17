@@ -166,8 +166,8 @@ The gain: TAEF2 decodes a Klein latent in **30 ms** versus **0.27 s** for the fu
 (~8.7× faster), at **0.59 GB** versus 2.80 GB peak. SSIM against the full VAE is **0.960** (LPIPS
 0.057) on the showcase's webp files, in line with the FLUX.1 family; scored on lossless PNGs it is
 0.920. Up to v0.8.1 this page reported 0.616: those releases
-applied the VAE's batch-norm inverse to the latent before TAEF2, an input the decoder was never
-trained on, and the previews came out dark and oversaturated. TAEF2 is still a 4 MB decoder
+applied the VAE's batch-norm inverse to the latent before TAEF2, which is not the input the decoder
+wants, and the previews came out dark and oversaturated. TAEF2 is still a 4 MB decoder
 standing in for a ~340 MB VAE and it softens fine detail, so reach for the full VAE when you need
 final-quality output. The frames above and these numbers were captured on 2026-09-17 with mflux
 0.19.1 and MLX 0.32.2. This benchmark itself runs on FLUX.2

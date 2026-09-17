@@ -150,7 +150,7 @@ class LivePreviewCallback:
             True (with a `flux` instance, `variant='taef2'`) extracts the VAE BN running stats
             and eps and applies the batch-norm inverse first, as the full VAE does. That is
             measured to give lower fidelity against the full VAE decode (SSIM 0.59 vs 0.92 on
-            the committed FLUX.2 Klein latent) and logs a warning; it remains for callers who
+            a 512x512 FLUX.2 Klein base 4B latent) and logs a warning; it remains for callers who
             relied on it. For other variants it is a no-op and logs an info line. Explicit
             `bn_mean`/`bn_var` take precedence and carry the same warning.
         variant: 'taef1' (FLUX.1), 'taef2' (FLUX.2 Klein), 'zimage' (Z-Image /
@@ -256,8 +256,8 @@ class LivePreviewCallback:
                 "is not packed, so the unpack reads spatial dims from the latent's own shape.",
                 variant,
             )
-        # Resolve BN source. The default is "none": TAEF2 was distilled on the normalized
-        # latent, which is what mflux hands the callback. Opt-in precedence:
+        # Resolve BN source. The default is "none": TAEF2 scores far better against the full
+        # VAE on the normalized latent mflux hands the callback. Opt-in precedence:
         #   explicit (user passed bn_mean + bn_var)
         #     > auto (auto_bn=True + variant=="taef2" + flux.vae.bn extractable)
         if bn_mean is not None and bn_var is not None:

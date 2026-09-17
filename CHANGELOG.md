@@ -12,9 +12,9 @@ TAEF2 previews now track the full FLUX.2 VAE closely.
 ### Fixed
 - `LivePreviewCallback` no longer applies the Flux2VAE batch-norm inverse to the latent before
   TAEF2. Since v0.2.0, passing `flux=model` made the callback read the VAE's running statistics and
-  denormalize the latent first, as the full VAE does. TAEF2 was distilled on the normalized latent
-  mflux hands the callback, so that step pushed it off its training distribution and previews came
-  out dark and oversaturated. Measured against the full VAE decode of the same latent, TAEF2 scores
+  denormalize the latent first, as the full VAE does. TAEF2 wants the normalized latent mflux hands
+  the callback, which is also how its upstream reference code feeds it. The inverse widens the
+  latent by about 1.8× per channel, and previews came out dark and oversaturated. Measured against the full VAE decode of the same latent, TAEF2 scores
   SSIM 0.920 / LPIPS 0.058 on the latent as-is and 0.588 / 0.241 with the inverse; a fully denoised
   768×512 control gives 0.945 / 0.022 against 0.716 / 0.150. `scripts/ab_taef2_bn_domain.py`
   reproduces the first from the committed fixture; the control's latent is not committed, and its
@@ -33,7 +33,8 @@ TAEF2 previews now track the full FLUX.2 VAE closely.
   and Z-Image rows are unchanged.
 - The benchmark, the showcase and the FLUX.2 examples follow the new default, and the showcase gained
   `--update-report` to re-measure one scenario into the existing report without discarding the
-  others. If a refresh fails, the report and the scenario's previous artifacts stay as they were.
+  others. If a refresh fails or is interrupted, the report and the scenario's previous artifacts
+  stay as they were.
 
 ### Tests
 - The FLUX.2 unpack is now checked against mflux's own inverse (its two static unpack steps

@@ -44,8 +44,8 @@ This validates that `LivePreviewCallback` produces recognizable previews during 
 ## Batch-norm statistics (opt-in, not recommended)
 
 The full FLUX.2 VAE applies a batch-norm inverse (`latent * sqrt(var + eps) + mean`) to the latent
-before it decodes. TAEF2 does not want that: it was distilled on the normalized latent, which is
-what mflux hands the callback. Measured against the full VAE on the same latent, decoding the
+before it decodes. TAEF2 does not want that: it takes the normalized latent, which is what mflux
+hands the callback and how its upstream reference code feeds it. Measured against the full VAE on the same latent, decoding the
 latent as-is scores SSIM 0.920 and applying the inverse first scores 0.588
 (`scripts/ab_taef2_bn_domain.py`; results under `_artifacts/ab_taef2_bn_domain/`). So the default is
 to apply nothing, and `callback.resolved_bn == "none"` is the normal state.
