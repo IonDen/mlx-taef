@@ -60,14 +60,15 @@ gate (TAEF1-encode -> full Z-Image VAE decode, SSIM >= 0.75, measured 0.9580).
 
 Qwen-Image and Qwen-Image-Edit generate in the Wan 2.1 VAE's 16-channel latent space, which the
 rest of the TAESD family doesn't cover. `QwenImage` ports madebyollin's taew2.1 tiny autoencoder
-for it, so `LivePreviewCallback(variant="qwen-image")` previews an in-flight Qwen generation the
-same way the other variants do:
+for it, so `LivePreviewCallback(flux=model)` on a Qwen-Image model previews an in-flight Qwen
+generation the same way the other variants do (the variant is inferred from the model;
+`variant="qwen-image"` spells it out):
 
 ```python
 from mlx_taef.integrations.mflux import LivePreviewCallback
 
-callback = LivePreviewCallback(variant="qwen-image", save_to="preview.png", every=5)
-# pass `callback` to your mflux Qwen-Image generation
+callback = LivePreviewCallback(flux=model, save_to="preview.png", every=5)
+# register `callback` on your mflux Qwen-Image model before generating
 ```
 
 Correctness is gated by committed parity fixtures: the decode and encode paths match the upstream
@@ -115,8 +116,8 @@ preview = taef.decode_image(unpacked_latent)  # uint8 NHWC
 ```python
 from mlx_taef.integrations.mflux import LivePreviewCallback
 
-callback = LivePreviewCallback(variant="krea2", save_to="preview.png", every=5)
-# pass `callback` to your mflux Krea 2 generation
+callback = LivePreviewCallback(flux=model, save_to="preview.png", every=5)  # infers krea2
+# register `callback` on your mflux Krea 2 model before generating
 ```
 
 Correctness is gated the same way as Qwen-Image: decoding the committed (red apple, seed 42) Krea 2

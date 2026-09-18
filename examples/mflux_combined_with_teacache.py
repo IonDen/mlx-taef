@@ -37,7 +37,7 @@ def main() -> None:
     handle = apply_teacache(model)
 
     callback = LivePreviewCallback(
-        variant="taef2",
+        flux=model,  # taef2, inferred from the Klein model config
         every=1,
         numbered_frames=True,
         save_to=OUT_DIR / "combined.png",

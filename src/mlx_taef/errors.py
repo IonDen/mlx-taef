@@ -103,6 +103,15 @@ class TeaCacheDidNotEngageError(TaefError):
     """
 
 
+class UnsupportedMfluxModelError(TaefError, LookupError):
+    """No preview kernel is registered for the mflux model handed to the callback.
+
+    Raised at construction, before any weights load, when `LivePreviewCallback(flux=model)` is
+    asked to infer its variant and the model's `model_config` names no supported family. Pass
+    `variant=` explicitly to override.
+    """
+
+
 class UnknownKernelError(TaefError, KeyError):
     """Raised when a kernel name is not in the registry."""
 

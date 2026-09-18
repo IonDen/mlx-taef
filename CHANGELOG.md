@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `LivePreviewCallback(flux=model)` now picks the tiny decoder from the model itself. The
+  callback reads the mflux model's config (`model_name`, `base_model` and the CLI aliases) and
+  resolves it to `taef1` for the FLUX.1 family (dev, schnell, Kontext, Fill, Depth, Redux,
+  Krea-dev), `taef2` for FLUX.2 Klein, `zimage` for Z-Image and Z-Image-Turbo, `qwen-image` for
+  Qwen-Image and Qwen-Image-Edit, and `krea2` for Krea 2 Turbo; pinned mirrors and quantized
+  copies resolve through `base_model`. `variant=` still overrides. A model outside those families
+  raises `UnsupportedMfluxModelError` at construction, before any weights load, naming the model
+  and the override; `LivePreviewCallback()` with no model keeps the `taef2` default. The
+  callback exposes the resolved choice as `callback.variant`.
+
 ### Changed
 - The showcase, benchmark, latent-capture and A/B harness workers now count MLX's retained
   buffer cache toward their memory ceiling instead of active memory alone; together those are

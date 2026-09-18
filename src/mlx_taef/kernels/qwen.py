@@ -56,9 +56,22 @@ QWEN_IMAGE = ModelKernel(
         sha256="04766eac0221b5390b985ae3fdcca652cbb4b1e8b82b28ea7ff89dfad1b1a93f",
     ),
     integration=MfluxBinding(
-        mflux_models=("qwen-image", "qwen-image-edit"),
+        # mflux 0.19.1 aliases of Qwen-Image and Qwen-Image-Edit (one Wan 2.1 VAE latent).
+        mflux_models=(
+            "qwen-image",
+            "qwen",
+            "qwen-image-2512",
+            "qwen-2512",
+            "qwen-image-edit",
+            "qwen-edit",
+            "qwen-edit-plus",
+            "qwen-edit-2509",
+            "qwen-edit-2511",
+            "qwen-image-edit-2511",
+        ),
         unpack=unpack_qwen_latent,
         packed_latent_downscale=16,
+        mflux_model_name_prefixes=("Qwen/Qwen-Image",),
     ),
     memory_cap_hint_gb=1,
 )

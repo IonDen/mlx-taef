@@ -48,6 +48,8 @@ KREA2 = ModelKernel(
         ),  # verified aliases, mflux 0.18.1 AVAILABLE_MODELS["krea-2"]
         unpack=unpack_krea2_latent,
         packed_latent_downscale=None,  # 4-D unpacked latent, like zimage — not packed like qwen
+        # Krea-2-Raw is deliberately absent: its latent contract is unverified here.
+        mflux_model_name_prefixes=("krea/Krea-2-Turbo",),
     ),
     memory_cap_hint_gb=1,
 )

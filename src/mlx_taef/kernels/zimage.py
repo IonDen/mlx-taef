@@ -42,9 +42,20 @@ ZIMAGE = ModelKernel(
     latent=LatentSpec(channels=16),
     source=TAEF1.source,
     integration=MfluxBinding(
-        mflux_models=("z-image", "z-image-turbo"),
+        # mflux 0.19.1 aliases: Z-Image, Z-Image-Turbo and its ControlNet variants.
+        mflux_models=(
+            "z-image",
+            "zimage",
+            "z-image-turbo",
+            "zimage-turbo",
+            "z-image-turbo-controlnet",
+            "z-image-controlnet",
+            "z-image-turbo-controlnet-union-2.1",
+            "z-image-controlnet-union-2.1",
+        ),
         unpack=unpack_zimage_latent,
         packed_latent_downscale=None,
+        mflux_model_name_prefixes=("Tongyi-MAI/Z-Image",),
     ),
     memory_cap_hint_gb=1,
 )

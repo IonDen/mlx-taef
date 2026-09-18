@@ -22,7 +22,8 @@ def test_qwen_image_kernel_registered():
     assert k.arch.name == "taehv"
     assert k.latent.channels == 16
     assert k.integration is not None
-    assert k.integration.mflux_models == ("qwen-image", "qwen-image-edit")
+    assert {"qwen-image", "qwen-image-edit"} <= set(k.integration.mflux_models)
+    assert k.integration.mflux_model_name_prefixes == ("Qwen/Qwen-Image",)
     assert k.integration.packed_latent_downscale == 16
     assert k.source.sha256 == "04766eac0221b5390b985ae3fdcca652cbb4b1e8b82b28ea7ff89dfad1b1a93f"
 
