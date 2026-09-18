@@ -23,7 +23,7 @@ This validates that `LivePreviewCallback` produces recognizable previews during 
 
    model = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_base_4b())
    callback = LivePreviewCallback(
-       variant="taef2",
+       flux=model,  # taef2, inferred from the Klein model config
        every=5,
        save_to=Path("preview.png"),
        # latent_height / latent_width auto-detected from the generation config

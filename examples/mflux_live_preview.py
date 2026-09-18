@@ -73,9 +73,10 @@ def main() -> None:
     )
 
     # TAEF2 decodes the normalized latent mflux hands the callback, so no batch-norm
-    # statistics are needed: variant + where to save is the whole configuration.
+    # statistics are needed: the model (which picks taef2) + where to save is the whole
+    # configuration.
     callback = _TimedPreviewCallback(
-        variant="taef2",
+        flux=model,
         every=1,
         numbered_frames=True,
         save_to=OUT_DIR / "preview.png",

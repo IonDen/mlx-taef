@@ -129,6 +129,8 @@ class MfluxBinding:
     """Binds a kernel to the mflux model(s) it previews and how to unpack their latent."""
 
     mflux_models: tuple[str, ...]
+    """mflux CLI aliases this kernel previews, as `ModelConfig.aliases` lists them (verified
+    against mflux 0.19.1). Matched case-insensitively when a model's names miss every prefix."""
     unpack: Callable[[mx.array, UnpackContext], mx.array]
     packed_latent_downscale: int | None = 16
     """Image-pixels per packed in-loop latent cell, for auto-resolution. FLUX in-loop latents
@@ -140,6 +142,10 @@ class MfluxBinding:
     (Z-Image: `(16, 1, h, w)`) — the callback then skips config-derived resolution entirely. If a
     future unpack for such a model ever consumes `ctx` dims, set this to its image/latent ratio
     (8 for Z-Image) instead of `None`."""
+    mflux_model_name_prefixes: tuple[str, ...] = ()
+    """Owner-qualified Hugging Face name prefixes (`ModelConfig.model_name` / `base_model`) this
+    kernel previews, matched case-insensitively. A prefix names a model family that shares one
+    VAE latent, e.g. `black-forest-labs/FLUX.1-` covers dev, schnell, Kontext, Fill and Krea-dev."""
 
 
 class ConversionStrategy(Protocol):

@@ -29,7 +29,7 @@ def main() -> None:
     model = MfluxZImage(quantize=4, model_config=ModelConfig.z_image_turbo())
 
     callback = LivePreviewCallback(
-        variant="zimage",
+        flux=model,  # zimage, inferred from the Z-Image model config
         every=1,
         numbered_frames=True,
         save_to=OUT_DIR / "preview.png",

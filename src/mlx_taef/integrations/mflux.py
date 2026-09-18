@@ -19,7 +19,7 @@ from typing import Literal
 import mlx.core as mx
 import numpy as np
 
-from mlx_taef.errors import MfluxNotInstalledError
+from mlx_taef.errors import MfluxNotInstalledError, UnsupportedMfluxModelError
 
 try:
     importlib.import_module("mflux.callbacks.callback")
@@ -131,6 +131,27 @@ def _resolve_latent_dims(
     return int(h) // downscale, int(w) // downscale
 
 
+def _infer_variant(flux: object | None) -> str:
+    """Pick the variant for `flux` from its mflux `model_config`; taef2 when there is no model.
+
+    With no model in hand (pure-decoder use) the documented default stays `taef2`. With a
+    model, the kernel registry resolves it from `model_config`; an unknown model raises
+    `UnsupportedMfluxModelError` before any weights load, naming the `variant=` override.
+    """
+    if flux is None:
+        return "taef2"
+    from mlx_taef.kernels import resolve_kernel_from_model_config
+
+    model_config = getattr(flux, "model_config", None)
+    if model_config is None:
+        raise UnsupportedMfluxModelError(
+            f"cannot infer the preview variant: {type(flux).__name__!r} has no usable "
+            "model_config (every mflux model sets one before generating). Pass variant= "
+            "explicitly."
+        )
+    return resolve_kernel_from_model_config(model_config).name
+
+
 class LivePreviewCallback:
     """mflux callback that writes a low-quality preview image every N iterations.
 
@@ -142,9 +163,10 @@ class LivePreviewCallback:
 
     Args:
         flux: optional reference to the mflux model instance the callback will be
-            registered on. Only read when `auto_bn=True` (the mflux callback contract does
-            not pass the model at fire time); previews do not need it otherwise. Typed as
-            `object` to keep this module import-clean of mflux.
+            registered on. Read at construction to infer `variant` from the model's
+            `model_config` (when `variant` is not given) and, with `auto_bn=True`, to extract
+            the Flux2VAE batch-norm statistics; the mflux callback contract does not pass the
+            model at fire time. Typed as `object` to keep this module import-clean of mflux.
         auto_bn: TAEF2-only, default False. TAEF2 decodes the normalized latent mflux hands
             the callback, so by default no batch-norm statistics are applied. Setting it to
             True (with a `flux` instance, `variant='taef2'`) extracts the VAE BN running stats
@@ -153,10 +175,15 @@ class LivePreviewCallback:
             a 512x512 FLUX.2 Klein base 4B latent) and logs a warning; it remains for callers who
             relied on it. For other variants it is a no-op and logs an info line. Explicit
             `bn_mean`/`bn_var` take precedence and carry the same warning.
-        variant: 'taef1' (FLUX.1), 'taef2' (FLUX.2 Klein), 'zimage' (Z-Image /
-            Z-Image-Turbo, which reuses TAEF1's weights), 'qwen-image'
-            (Qwen-Image / Qwen-Image-Edit, via taew2.1), or 'krea2' (Krea 2,
-            which shares the qwen-image taew2.1 weights).
+        variant: which tiny decoder to run. Default None: with `flux` given, it is inferred
+            from the model's `model_config` (FLUX.1 family -> 'taef1', FLUX.2 Klein ->
+            'taef2', Z-Image -> 'zimage', Qwen-Image / Qwen-Image-Edit -> 'qwen-image',
+            Krea 2 -> 'krea2'); a model outside those families raises
+            `UnsupportedMfluxModelError` before any weights load. With no `flux`, None means
+            'taef2'. An explicit value always wins: 'taef1' (FLUX.1), 'taef2' (FLUX.2 Klein),
+            'zimage' (Z-Image / Z-Image-Turbo, which reuses TAEF1's weights), 'qwen-image'
+            (via taew2.1), or 'krea2' (which shares the qwen-image taew2.1 weights). The
+            resolved choice is readable as `callback.variant`.
         every: emit a preview every Nth iteration. Default 5. When
             `numbered_frames=True` this is forced to 1 so the gallery
             captures every step.
@@ -190,7 +217,7 @@ class LivePreviewCallback:
         *,
         flux: object | None = None,
         auto_bn: bool = False,
-        variant: Literal["taef1", "taef2", "zimage", "qwen-image", "krea2"] = "taef2",
+        variant: Literal["taef1", "taef2", "zimage", "qwen-image", "krea2"] | None = None,
         every: int = 5,
         save_to: str | Path = "preview.png",
         numbered_frames: bool = False,
@@ -221,11 +248,12 @@ class LivePreviewCallback:
             raise ValueError(f"bn_eps must be positive, got {bn_eps!r}.")
         if on_error not in ("disable", "raise"):
             raise ValueError(f"on_error must be 'disable' or 'raise', got {on_error!r}.")
+        resolved_variant: str = _infer_variant(flux) if variant is None else variant
         try:
-            model_cls = _VARIANT_CLASSES[variant]
+            model_cls = _VARIANT_CLASSES[resolved_variant]
         except KeyError:
             raise ValueError(
-                f"variant must be one of {sorted(_VARIANT_CLASSES)}, got {variant!r}"
+                f"variant must be one of {sorted(_VARIANT_CLASSES)}, got {resolved_variant!r}"
             ) from None
         self.model: Taef = model_cls.from_pretrained(include_encoder=False)
         _binding = self.model._kernel.integration
@@ -233,7 +261,7 @@ class LivePreviewCallback:
         self._packed_downscale: int | None = _binding.packed_latent_downscale
         self.flux = flux
         self.auto_bn = auto_bn
-        self._variant = variant
+        self._variant: str = resolved_variant
         self.on_error = on_error
         # Numbered-frame mode emits every step (galleries capture progression);
         # caller's `every` is honored only in single-frame mode.
@@ -254,7 +282,7 @@ class LivePreviewCallback:
             logger.info(
                 "latent_height/latent_width are ignored for variant=%r: its in-loop latent "
                 "is not packed, so the unpack reads spatial dims from the latent's own shape.",
-                variant,
+                resolved_variant,
             )
         # Resolve BN source. The default is "none": TAEF2 scores far better against the full
         # VAE on the normalized latent mflux hands the callback. Opt-in precedence:
@@ -262,7 +290,7 @@ class LivePreviewCallback:
         #     > auto (auto_bn=True + variant=="taef2" + flux.vae.bn extractable)
         if bn_mean is not None and bn_var is not None:
             self.resolved_bn = "explicit"
-        elif auto_bn and variant == "taef2" and flux is not None:
+        elif auto_bn and resolved_variant == "taef2" and flux is not None:
             extracted_mean, extracted_var, extracted_eps = _try_extract_bn(flux)
             if extracted_mean is not None and extracted_var is not None:
                 self.bn_mean = extracted_mean
@@ -278,7 +306,7 @@ class LivePreviewCallback:
                 )
                 self.resolved_bn = "none"
         else:
-            if auto_bn and variant == "taef2":
+            if auto_bn and resolved_variant == "taef2":
                 logger.warning(
                     "auto_bn=True for taef2 but no flux instance was provided, so no "
                     "statistics can be extracted; decoding the normalized latent instead "
@@ -289,15 +317,15 @@ class LivePreviewCallback:
                     "auto_bn=True is a no-op for variant=%r: BN denormalization is "
                     "TAEF2-only, so previews use identity BN (correct for %s — it has "
                     "no BN step).",
-                    variant,
-                    variant,
+                    resolved_variant,
+                    resolved_variant,
                 )
             self.resolved_bn = "none"
-        if self.resolved_bn != "none" and variant != "taef2":
+        if self.resolved_bn != "none" and resolved_variant != "taef2":
             logger.info(
                 "bn_mean/bn_var are ignored for variant=%r: only the FLUX.2 (taef2) unpack reads "
                 "batch-norm statistics.",
-                variant,
+                resolved_variant,
             )
         elif self.resolved_bn != "none":
             logger.warning(
@@ -309,6 +337,11 @@ class LivePreviewCallback:
             )
         self._iter = 0
         self._disabled = False
+
+    @property
+    def variant(self) -> str:
+        """The tiny-decoder variant in use: the one passed, or the one inferred from `flux`."""
+        return self._variant
 
     def call_before_loop(
         self,

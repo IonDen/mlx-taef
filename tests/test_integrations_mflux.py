@@ -1150,3 +1150,133 @@ def test_strict_error_policy_emits_preview_on_success(
 
     assert len(cb.saved_paths) == 1
     assert cb.saved_paths[0].exists()
+
+
+# ---------------------------------------------------------------------------
+# Variant inference from the mflux model (0084)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _FakeModelConfig:
+    model_name: str
+    aliases: list[str]
+    base_model: str | None = None
+
+
+@dataclass
+class _FakeFluxWithConfig:
+    """An mflux model as the callback sees it: the `model_config` attribute every mflux
+    initializer sets (`model.model_config = model_config`), and nothing else."""
+
+    model_config: _FakeModelConfig
+
+
+@pytest.fixture
+def offline_zimage(monkeypatch: pytest.MonkeyPatch) -> object:
+    """Z-Image reuses the TAEF1 weights, so the committed taef1 decoder keeps it offline."""
+    from mlx_taef import ZImage
+
+    converted = Path(__file__).parent / "converted" / "taef1_decoder.safetensors"
+    real = ZImage.from_pretrained_local(converted)
+    monkeypatch.setattr(ZImage, "from_pretrained", classmethod(lambda cls, **kw: real))
+    return real
+
+
+def test_callback_infers_the_variant_from_the_mflux_model(offline_zimage: object) -> None:
+    """Catches: `LivePreviewCallback(flux=model)` still landing on taef2 for a Z-Image model,
+    which fails with a wrong-channel error at the first preview step."""
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    flux = _FakeFluxWithConfig(
+        _FakeModelConfig("Tongyi-MAI/Z-Image-Turbo", ["z-image-turbo", "zimage-turbo"])
+    )
+    callback = LivePreviewCallback(flux=flux)
+
+    assert callback.variant == "zimage"
+    assert callback.model is offline_zimage
+
+
+def test_explicit_variant_wins_over_the_model_config(offline_taef2: object) -> None:
+    """Catches: inference overriding a deliberate `variant=` (a user previewing a Z-Image
+    fine-tune through taef2 on purpose, or working around a wrong registry entry)."""
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    flux = _FakeFluxWithConfig(_FakeModelConfig("Tongyi-MAI/Z-Image-Turbo", ["z-image-turbo"]))
+    callback = LivePreviewCallback(flux=flux, variant="taef2")
+
+    assert callback.variant == "taef2"
+    assert callback.model is offline_taef2
+
+
+def test_no_flux_and_no_variant_keeps_the_taef2_default(offline_taef2: object) -> None:
+    """Catches: the pure-decoder construction `LivePreviewCallback()` (no mflux model in hand)
+    starting to raise; it must keep the documented taef2 default."""
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    callback = LivePreviewCallback()
+
+    assert callback.variant == "taef2"
+
+
+def test_unknown_mflux_model_raises_before_any_weights_load(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches: an unsupported model (Lens, FIBO, a new family) falling back to taef2 and
+    failing later, instead of a construction-time error that names the model and the fix."""
+    from mlx_taef import TAEF2
+    from mlx_taef.errors import UnsupportedMfluxModelError
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    def _boom(cls: object, **kw: object) -> object:
+        raise AssertionError("from_pretrained reached: inference must fail before loading")
+
+    monkeypatch.setattr(TAEF2, "from_pretrained", classmethod(_boom))
+    flux = _FakeFluxWithConfig(_FakeModelConfig("Comfy-Org/Lens", ["lens-turbo", "lens"]))
+
+    with pytest.raises(UnsupportedMfluxModelError) as excinfo:
+        LivePreviewCallback(flux=flux)
+    assert "Comfy-Org/Lens" in str(excinfo.value)
+    assert "variant=" in str(excinfo.value)
+
+
+def test_flux_without_a_model_config_is_rejected_with_the_fix_named(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches: an object that is not an mflux model (or a fork without `model_config`) being
+    read as "no model" and silently defaulting to taef2."""
+    from mlx_taef import TAEF2
+    from mlx_taef.errors import UnsupportedMfluxModelError
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    monkeypatch.setattr(
+        TAEF2, "from_pretrained", classmethod(lambda cls, **kw: pytest.fail("loaded weights"))
+    )
+
+    with pytest.raises(UnsupportedMfluxModelError, match="model_config"):
+        LivePreviewCallback(flux=object())
+
+
+def test_inferred_variant_survives_the_real_mflux_model_config(offline_taef2: object) -> None:
+    """Catches: drift between the resolver and the real mflux ModelConfig object the callback
+    receives (attribute renamed, aliases moved), which no fake can detect."""
+    mflux_config = pytest.importorskip("mflux.models.common.config.model_config")
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    flux = _FakeFluxWithConfig(mflux_config.ModelConfig.flux2_klein_base_4b())  # type: ignore[arg-type]
+    callback = LivePreviewCallback(flux=flux)
+
+    assert callback.variant == "taef2"
+
+
+def test_bad_variant_message_names_the_resolved_value_not_the_argument(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches: a kernel that ships an mflux binding without a `_VARIANT_CLASSES` entry making
+    the callback report "got None" (the argument the user never passed) instead of the
+    inferred name that has no class."""
+    import mlx_taef.integrations.mflux as m
+
+    monkeypatch.setattr(m, "_infer_variant", lambda flux: "some-new-kernel")
+    with pytest.raises(ValueError, match="some-new-kernel"):
+        m.LivePreviewCallback(flux=object())

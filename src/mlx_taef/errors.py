@@ -6,6 +6,7 @@ Hierarchy:
     ├── MfluxNotInstalledError             (+ ImportError) mflux integration dep missing
     ├── MlxTeacacheNotInstalledError       (+ ImportError) showcase teacache dep missing
     ├── UnknownKernelError                 (+ KeyError) name not in the kernel registry
+    ├── UnsupportedMfluxModelError         (+ LookupError) mflux model has no preview kernel here
     ├── UnknownArchitectureError           (+ KeyError) arch/role has no registered builder
     ├── SchemaVersionError                 raised by the bundled showcase tooling
     ├── FixtureLatentMissingError          (+ FileNotFoundError) bundled showcase tooling
@@ -100,6 +101,15 @@ class TeaCacheDidNotEngageError(TaefError):
     working together; a capture where the gate never fired would demo a mechanism that
     did nothing, so the script refuses to publish it instead of shipping a dishonest
     gallery. See mlx-teacache's documented negative result on short distilled schedules.
+    """
+
+
+class UnsupportedMfluxModelError(TaefError, LookupError):
+    """No preview kernel is registered for the mflux model handed to the callback.
+
+    Raised at construction, before any weights load, when `LivePreviewCallback(flux=model)` is
+    asked to infer its variant and the model's `model_config` names no supported family. Pass
+    `variant=` explicitly to override.
     """
 
 
