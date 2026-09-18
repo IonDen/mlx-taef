@@ -235,3 +235,161 @@ def test_capture_watchdog_abort_exits_even_when_write_fails(monkeypatch, tmp_pat
             tmp_path / "r.abort.json", {"status": "aborted"}, stop_event=threading.Event()
         )
     assert exits == [70]
+
+
+def test_capture_watchdog_breach_reason_counts_retained_cache_toward_the_ceiling() -> None:
+    """Catches: the capture ceiling compared against active memory alone (see the same
+    test for scripts/run_showcase.py; the two watchdogs must agree on the accounting)."""
+    import scripts._capture_latent as cl
+
+    assert (
+        cl._watchdog_breach_reason(
+            active_bytes=20, cache_bytes=8, ceiling_bytes=28, elapsed_s=0, wall_budget_s=5
+        )
+        == "memory_ceiling"
+    )
+    assert (
+        cl._watchdog_breach_reason(
+            active_bytes=20, cache_bytes=7, ceiling_bytes=28, elapsed_s=0, wall_budget_s=5
+        )
+        is None
+    )
+    assert (
+        cl._watchdog_breach_reason(
+            active_bytes=20, cache_bytes=7, ceiling_bytes=28, elapsed_s=6, wall_budget_s=5
+        )
+        == "wall_budget"
+    )
+
+
+def _install_capture_watchdog_with_fake_mlx(
+    monkeypatch, tmp_path: Path, *, active_bytes: object, cache_bytes: int
+) -> tuple[object, list[dict[str, object]]]:
+    """Run the real capture watchdog thread against a fake MLX memory API (32 GiB device).
+
+    `active_bytes` may be an exception instance, raised by the active-memory sample. The
+    abort commit is replaced by a recorder that stops the thread, so exactly one payload is
+    observed and the process is never exited.
+    """
+    import threading
+
+    import scripts._capture_latent as cl
+
+    monkeypatch.setattr(cl.mx, "device_info", lambda: {"memory_size": 32 * 1024**3})
+    monkeypatch.setattr(cl.mx, "set_cache_limit", lambda n: 0)
+
+    def _active() -> int:
+        if isinstance(active_bytes, BaseException):
+            raise active_bytes
+        return int(active_bytes)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(cl.mx, "get_active_memory", _active)
+    monkeypatch.setattr(cl.mx, "get_cache_memory", lambda: cache_bytes)
+
+    payloads: list[dict[str, object]] = []
+
+    def _record_abort(
+        abort_path: Path, payload: dict[str, object], *, stop_event: threading.Event
+    ) -> None:
+        payloads.append(payload)
+        stop_event.set()
+
+    monkeypatch.setattr(cl, "_commit_capture_watchdog_abort", _record_abort)
+    watchdog = cl._install_capture_watchdog("flux1-dev", tmp_path, interval_s=0.005)
+    watchdog._thread.join(timeout=5)
+    assert not watchdog._thread.is_alive(), "watchdog thread never reached the abort path"
+    return watchdog, payloads
+
+
+def test_capture_watchdog_aborts_on_active_plus_cache_and_records_both(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Catches: `_watch` sampling `mx.get_active_memory()` only — 20 GiB active under a
+    28 GiB ceiling, but 29 GiB with the retained cache counted."""
+    active = 20 * 1024**3
+    cache = 9 * 1024**3
+    _, payloads = _install_capture_watchdog_with_fake_mlx(
+        monkeypatch, tmp_path, active_bytes=active, cache_bytes=cache
+    )
+
+    assert len(payloads) == 1
+    payload = payloads[0]
+    assert payload["reason"] == "memory_ceiling"
+    assert payload["variant"] == "flux1-dev"
+    assert payload["active_memory_bytes"] == active
+    assert payload["cache_memory_bytes"] == cache
+    assert payload["total_memory_bytes"] == active + cache
+    assert payload["ceiling_bytes"] == 28 * 1024**3
+
+
+def test_capture_watchdog_aborts_explicitly_when_a_memory_sample_fails(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Catches: a sampling exception killing the daemon thread silently and leaving an
+    hour-long capture with no memory backstop."""
+    _, payloads = _install_capture_watchdog_with_fake_mlx(
+        monkeypatch, tmp_path, active_bytes=RuntimeError("metal device gone"), cache_bytes=0
+    )
+
+    assert len(payloads) == 1
+    assert payloads[0]["reason"] == "sample_error"
+    assert "metal device gone" in str(payloads[0]["error"])
+    assert "active_memory_bytes" not in payloads[0]
+
+
+def test_capture_watchdog_bounds_the_cache_pool_and_records_its_policy(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Catches: a capture run under MLX's default (near device-size) cache limit, and a
+    polling cadence that regressed to the old 0.5 s."""
+    import scripts._capture_latent as cl
+
+    limits: list[int] = []
+    monkeypatch.setattr(cl.mx, "device_info", lambda: {"memory_size": 32 * 1024**3})
+    monkeypatch.setattr(cl.mx, "set_cache_limit", lambda n: limits.append(n) or 0)
+    monkeypatch.setattr(cl.mx, "get_active_memory", lambda: 0)
+    monkeypatch.setattr(cl.mx, "get_cache_memory", lambda: 0)
+
+    watchdog = cl._install_capture_watchdog("flux1-dev", tmp_path)
+    watchdog.stop()
+
+    assert limits == [cl._CAPTURE_CACHE_LIMIT_BYTES]
+    # Captures run the live generation recipes, so they share the live bound's floor.
+    from scripts.run_showcase import _LIVE_CACHE_LIMIT_BYTES
+
+    assert cl._CAPTURE_CACHE_LIMIT_BYTES == _LIVE_CACHE_LIMIT_BYTES
+    assert watchdog.policy == {
+        "ceiling_bytes": 28 * 1024**3,
+        "cache_limit_bytes": cl._CAPTURE_CACHE_LIMIT_BYTES,
+        "interval_s": 0.05,
+        "wall_budget_s": cl._WALL_BUDGET_S,
+    }
+
+
+def test_capture_watchdog_reports_the_observed_active_plus_cache_peak(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Catches: a capture run that prints its active peak only while the watchdog's own
+    reading, active plus cache, came within a few MiB of firing; the high-water marks of the
+    sum and of the cache term must both track the samples."""
+    import time
+
+    import scripts._capture_latent as cl
+
+    active = iter([1, 5, 2])
+    cache = iter([1, 3, 6])
+    monkeypatch.setattr(cl.mx, "device_info", lambda: {"memory_size": 32 * 1024**3})
+    monkeypatch.setattr(cl.mx, "set_cache_limit", lambda n: 0)
+    monkeypatch.setattr(cl.mx, "get_active_memory", lambda: next(active, 2))
+    monkeypatch.setattr(cl.mx, "get_cache_memory", lambda: next(cache, 1))
+
+    watchdog = cl._install_capture_watchdog("flux1-dev", tmp_path, interval_s=0.002)
+    end = time.monotonic() + 5.0
+    while int(watchdog.observed["samples"]) < 3:  # type: ignore[call-overload]
+        assert time.monotonic() < end, "watchdog took fewer than 3 samples in 5s"
+        time.sleep(0.001)
+    watchdog.stop()
+
+    assert watchdog.observed["peak_total_memory_bytes"] == 8
+    assert watchdog.observed["peak_cache_memory_bytes"] == 6
+    assert watchdog.observed["samples"] >= 3

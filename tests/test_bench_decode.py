@@ -6,6 +6,7 @@ parsing, JSON schema, dispatch table run for real.
 
 import json
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import patch
 
 import pytest
@@ -348,6 +349,9 @@ def test_worker_main_clears_stale_watchdog_abort_artifact_before_running(
     )
 
     class _FakeWatchdog:
+        policy: ClassVar[dict[str, object]] = {"cache_limit_bytes": 0, "interval_s": 0.05}
+        observed: ClassVar[dict[str, object]] = {}
+
         def stop(self) -> None:
             pass
 
@@ -397,6 +401,9 @@ def test_worker_main_routes_through_steady_state_measurement(
         return "IMG"
 
     class _FakeWatchdog:
+        policy: ClassVar[dict[str, object]] = {"cache_limit_bytes": 0, "interval_s": 0.05}
+        observed: ClassVar[dict[str, object]] = {}
+
         def stop(self) -> None:
             pass
 
@@ -463,6 +470,9 @@ def test_worker_main_installs_watchdog_with_condition_scoped_wall_budget(
     )
 
     class _FakeWatchdog:
+        policy: ClassVar[dict[str, object]] = {"cache_limit_bytes": 0, "interval_s": 0.05}
+        observed: ClassVar[dict[str, object]] = {}
+
         def stop(self) -> None:
             pass
 
@@ -488,7 +498,7 @@ def test_worker_main_installs_watchdog_with_condition_scoped_wall_budget(
     )
 
     assert bench._worker_main(args) == 0
-    assert install_calls == [{"wall_budget_s": bench._worker_wall_budget_s("taef1")}]
+    assert [c["wall_budget_s"] for c in install_calls] == [bench._worker_wall_budget_s("taef1")]
 
 
 def test_prep_taef2_decodes_the_normalized_latent(monkeypatch) -> None:
@@ -518,3 +528,186 @@ def test_prep_taef2_decodes_the_normalized_latent(monkeypatch) -> None:
 
     expected = unpack_flux2_latent(packed, latent_height=2, latent_width=3)
     assert np.array_equal(np.array(seen["nhwc"]), np.array(expected))
+
+
+def test_worker_main_passes_a_measurement_preserving_cache_bound_to_the_watchdog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches: the decode-rep worker inheriting the live workers' 2 GiB cache bound. The
+    full-VAE reps peak at ~3.7 GiB, so a pool smaller than that evicts buffers between the
+    warmup and the timed decode and shifts the committed steady-state timings; the bench
+    bound must cover that peak while still leaving the 28 GiB ceiling reachable."""
+    import argparse
+
+    import mlx.core as mx
+    import scripts.bench_decode as bench
+
+    latent_file = tmp_path / "latent.safetensors"
+    mx.save_safetensors(
+        str(latent_file),
+        {"latent": mx.zeros((1, 2, 2, 16)), "height": mx.array(16), "width": mx.array(16)},
+    )
+
+    class _FakeWatchdog:
+        policy: ClassVar[dict[str, object]] = {"cache_limit_bytes": 4 * 1024**3, "interval_s": 0.05}
+        observed: ClassVar[dict[str, object]] = {}
+
+        def stop(self) -> None:
+            pass
+
+    install_calls: list[dict[str, object]] = []
+
+    def _fake_install(result_path: Path, scenario: str, **kwargs: object) -> _FakeWatchdog:
+        install_calls.append(kwargs)
+        return _FakeWatchdog()
+
+    monkeypatch.setattr("scripts.run_showcase._install_live_watchdog", _fake_install)
+    monkeypatch.setattr(bench, "_install_memory_caps", lambda cap: 1)
+    monkeypatch.setattr(bench, "_prep_taef1", lambda latent, h, w: lambda: "IMG")
+    monkeypatch.setattr(bench, "_measure_steady_state", lambda decode_fn: ("IMG", 0.25, 2.0))
+    monkeypatch.setattr(bench, "_save_webp", lambda image, target: None)
+
+    args = argparse.Namespace(
+        condition="taef1",
+        rep=0,
+        latent=latent_file,
+        save_to=tmp_path / "out.webp",
+        applied_cap_gb=1,
+        flux_variant="flux1-dev",
+    )
+
+    assert bench._worker_main(args) == 0
+    assert install_calls[0]["cache_limit_bytes"] == bench._BENCH_CACHE_LIMIT_BYTES
+    # The heaviest rep in the committed report peaks at 3.7 GiB active; the pool of freed
+    # transients after its warmup cannot exceed that, so a bound at or above it keeps the pool.
+    assert bench._BENCH_CACHE_LIMIT_BYTES >= 3.7 * 1024**3
+    assert bench._BENCH_CACHE_LIMIT_BYTES <= 8 * 1024**3
+
+
+def test_worker_main_records_the_watchdog_policy_in_the_sentinel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Catches: a rep result that states the wired cap it ran under but not the cache bound
+    or the polling cadence, so the committed report cannot reproduce the run's policy."""
+    import argparse
+
+    import mlx.core as mx
+    import scripts.bench_decode as bench
+
+    latent_file = tmp_path / "latent.safetensors"
+    mx.save_safetensors(
+        str(latent_file),
+        {"latent": mx.zeros((1, 2, 2, 16)), "height": mx.array(16), "width": mx.array(16)},
+    )
+
+    class _FakeWatchdog:
+        policy: ClassVar[dict[str, object]] = {"cache_limit_bytes": 4 * 1024**3, "interval_s": 0.05}
+        observed: ClassVar[dict[str, object]] = {"peak_total_memory_bytes": 7}
+
+        def stop(self) -> None:
+            pass
+
+    monkeypatch.setattr(
+        "scripts.run_showcase._install_live_watchdog", lambda *a, **kw: _FakeWatchdog()
+    )
+    monkeypatch.setattr(bench, "_install_memory_caps", lambda cap: 1)
+    monkeypatch.setattr(bench, "_prep_taef1", lambda latent, h, w: lambda: "IMG")
+    monkeypatch.setattr(bench, "_measure_steady_state", lambda decode_fn: ("IMG", 0.25, 2.0))
+    monkeypatch.setattr(bench, "_save_webp", lambda image, target: None)
+
+    args = argparse.Namespace(
+        condition="taef1",
+        rep=0,
+        latent=latent_file,
+        save_to=tmp_path / "out.webp",
+        applied_cap_gb=1,
+        flux_variant="flux1-dev",
+    )
+    assert bench._worker_main(args) == 0
+    payload = bench._parse_worker_stdout(capsys.readouterr().out)
+    assert payload["watchdog"] == {"cache_limit_bytes": 4 * 1024**3, "interval_s": 0.05}
+    assert payload["watchdog_observed"] == {"peak_total_memory_bytes": 7}
+
+
+def test_run_orchestrator_carries_the_watchdog_policy_and_observed_peaks_into_the_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches: `_run_orchestrator` rebuilding the condition block from named keys and dropping the
+    per-rep watchdog policy and observed active+cache peak, so the committed report never
+    learns how close the reps came to the ceiling."""
+    import scripts.bench_decode as bench
+
+    reps = [
+        {
+            "status": "ok",
+            "elapsed_s": 0.1 * (i + 1),
+            "peak_memory_gb": 1.0,
+            "installed_cap_gb": 4,
+            "image_path": "x.webp",
+            "watchdog": {"cache_limit_bytes": 4 * 1024**3, "interval_s": 0.05},
+            "watchdog_observed": {"peak_total_memory_bytes": (i + 1) * 1024**3},
+        }
+        for i in range(3)
+    ]
+    monkeypatch.setattr(bench, "_run_one_rep", lambda **kw: reps[kw["rep"]])
+
+    block = bench._run_orchestrator(
+        latent_path=tmp_path / "l.safetensors", condition="taef1", reps=3, save_dir=tmp_path
+    )
+
+    assert block["watchdog"] == {"cache_limit_bytes": 4 * 1024**3, "interval_s": 0.05}
+    assert block["per_rep_peak_total_memory_gb"] == [1.0, 2.0, 3.0]
+    assert block["max_peak_total_memory_gb"] == 3.0
+
+
+def test_run_one_rep_abort_message_names_cache_total_and_error(tmp_path: Path, monkeypatch) -> None:
+    """Catches: `_run_one_rep` formatting only active and ceiling from the abort artifact, so
+    a cache-driven breach reads as a non-breach and a `sample_error` never shows its cause."""
+    import subprocess
+
+    from scripts.bench_decode import _run_one_rep, _watchdog_abort_path
+
+    save_to = tmp_path / "rep0.webp"
+    abort_path = _watchdog_abort_path(save_to)
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **kw: subprocess.CompletedProcess(args=[], returncode=70, stdout="", stderr=""),
+    )
+    abort_path.write_text(
+        json.dumps(
+            {
+                "status": "aborted",
+                "reason": "memory_ceiling",
+                "active_memory_bytes": 20,
+                "cache_memory_bytes": 9,
+                "total_memory_bytes": 29,
+                "ceiling_bytes": 28,
+                "elapsed_s": 1.5,
+            }
+        )
+    )
+    result = _run_one_rep(
+        latent_path=tmp_path / "l.safetensors",
+        condition="taef1",
+        flux_variant="flux1-dev",
+        rep=0,
+        save_to=save_to,
+        cap_gb=1,
+    )
+    assert result["status"] == "failed"
+    assert "cache=9 bytes" in result["error"]
+    assert "total=29 bytes" in result["error"]
+
+    abort_path.write_text(
+        json.dumps({"status": "aborted", "reason": "sample_error", "error": "RuntimeError: gone"})
+    )
+    result = _run_one_rep(
+        latent_path=tmp_path / "l.safetensors",
+        condition="taef1",
+        flux_variant="flux1-dev",
+        rep=0,
+        save_to=save_to,
+        cap_gb=1,
+    )
+    assert "RuntimeError: gone" in result["error"]

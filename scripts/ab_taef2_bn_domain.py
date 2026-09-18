@@ -40,8 +40,10 @@ from mlx_taef.errors import TaefError  # noqa: E402  (after sys.path tweak)
 CONDITIONS = ("vanilla_vae", "bn_inverse", "identity")
 _TAEF2_CONDITIONS = ("bn_inverse", "identity")
 _WORKER_TIMEOUT_S = {"vanilla_vae": 1500, "bn_inverse": 300, "identity": 300}
-# Every worker bounds MLX's retained-buffer pool: its default limit sits near device memory, and
-# the watchdog samples active memory only.
+# Every worker bounds MLX's retained-buffer pool through the watchdog, which counts the pool
+# toward its ceiling and records the bound. The full-VAE arm runs under a 12 GB wired cap and
+# peaks near 2.8 GiB, so 6 GiB holds that decode's freed transients with room to spare; the
+# TAEF2 arms need far less.
 _CACHE_LIMIT_BYTES = {
     "vanilla_vae": 6 * 1024**3,
     "bn_inverse": 2 * 1024**3,
@@ -65,17 +67,17 @@ def _cache_limit_bytes(condition: str) -> int:
 
 
 def _install_worker_limits(condition: str) -> int:
-    """Pin the wired/soft memory caps and bound the MLX cache pool; return the wired cap in GB."""
-    import mlx.core as mx
+    """Pin the wired/soft memory caps; return the wired cap in GB.
 
+    The cache bound is installed by the watchdog (`_worker_main` hands it the condition's
+    value), so it is recorded in the abort artifact alongside the ceiling it feeds into.
+    """
     from scripts import bench_decode
 
     bench_condition = "vanilla_vae" if condition == "vanilla_vae" else "taef2"
-    installed_cap_gb = bench_decode._install_memory_caps(
+    return bench_decode._install_memory_caps(
         bench_decode._resolve_cap_gb(condition=bench_condition)
     )
-    mx.set_cache_limit(_cache_limit_bytes(condition))
-    return installed_cap_gb
 
 
 def _sha256(path: Path) -> str:
@@ -170,7 +172,10 @@ def _worker_main(args: argparse.Namespace) -> int:
     import mlx.core as mx
 
     watchdog = _install_live_watchdog(
-        abort_path, f"ab_{condition}", wall_budget_s=_WORKER_TIMEOUT_S[condition] - 30.0
+        abort_path,
+        f"ab_{condition}",
+        wall_budget_s=_WORKER_TIMEOUT_S[condition] - 30.0,
+        cache_limit_bytes=_cache_limit_bytes(condition),
     )
     started = time.perf_counter()
     try:
@@ -211,6 +216,8 @@ def _worker_main(args: argparse.Namespace) -> int:
                 "unit_wall_s": round(time.perf_counter() - started, 3),
                 "process_peak_memory_gb": round(peak_gb, 3),
                 "installed_cap_gb": installed_cap_gb,
+                "watchdog": watchdog.policy,
+                "watchdog_observed": watchdog.observed,
             },
             indent=2,
         )

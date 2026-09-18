@@ -89,7 +89,8 @@ model load (`_install_memory_caps`, delegating to `mlx_taef._memory_caps`), and 
 watchdog (`scripts._capture_latent._install_capture_watchdog`, imported directly rather than
 re-implemented — same discipline as `scripts/run_showcase.py`'s `_install_live_watchdog`)
 aborts the run — writing `<out-dir>/<variant>.abort.json` and exiting nonzero via
-`os._exit(70)` — if active memory nears the device ceiling or the wall budget is exceeded. A
+`os._exit(70)` — if MLX's active plus retained-cache memory nears the device ceiling or the
+wall budget is exceeded (the watchdog also bounds that cache pool). A
 stale abort artifact from a prior aborted run is cleared before each new attempt.
 
 Publishing is atomic (mirrors the converted-weights cache's temp-then-rename discipline, see
@@ -134,7 +135,7 @@ in): `mflux/models/qwen/weights/qwen_weight_definition.py`
 module names `img_in`/`txt_in`/`time_text_embed`/`proj_out`/`norm_out`). Pass
 `--qwen-uniform-q4` for the plain uniform-q4 build instead. The paper reports about 1.9 GiB of
 extra peak MLX allocation for the mixed build (27.6 -> 29.5 GiB at 512x512, 50-step CFG); this
-script's 20-step, no-CFG run should sit lower, but if the active-memory watchdog aborts a
+script's 20-step, no-CFG run should sit lower, but if the memory watchdog aborts a
 mixed-precision capture, that is an honest signal to report, not a reason to raise the memory
 ceiling.
 

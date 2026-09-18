@@ -128,6 +128,14 @@ def _parse_worker_stdout(stdout: str) -> dict[str, Any]:
     return payload
 
 
+# The decode-rep worker's cache bound. After the untimed warmup the pool holds that decode's
+# freed transients, and the timed decode reuses them; the pool cannot exceed the rep's peak
+# active (the heaviest, the FLUX.1 VAE at 512x512, reaches 3.7 GiB including its resident
+# weights), so a bound at 4 GiB keeps the warm pool intact and the committed steady-state
+# timings comparable. Every rep sits far below the 28 GiB memory arm either way.
+_BENCH_CACHE_LIMIT_BYTES = 4 * 1024**3
+
+
 def _watchdog_abort_path(save_to: Path) -> Path:
     """Where this rep's watchdog abort artifact would be written, if any.
 
@@ -196,16 +204,13 @@ def _run_one_rep(
             except (OSError, json.JSONDecodeError):
                 abort_payload = None
             if isinstance(abort_payload, dict) and abort_payload.get("status") == "aborted":
+                from scripts.run_showcase import _describe_watchdog_abort
+
                 return {
                     "condition": condition,
                     "rep": rep,
                     "status": "failed",
-                    "error": (
-                        f"watchdog aborted: {abort_payload.get('reason', 'unknown')} "
-                        f"(active={abort_payload.get('active_memory_bytes')} bytes, "
-                        f"ceiling={abort_payload.get('ceiling_bytes')} bytes, "
-                        f"elapsed={abort_payload.get('elapsed_s')}s)"
-                    ),
+                    "error": f"watchdog aborted: {_describe_watchdog_abort(abort_payload)}",
                 }
         # Cap rejected at startup, OOM, jetsam, etc. Parse stderr for hints.
         return {
@@ -275,10 +280,21 @@ def _run_orchestrator(
     installed_caps = sorted(
         {r.get("installed_cap_gb") for r in successes if r.get("installed_cap_gb") is not None}
     )
+    # The watchdog policy is identical across reps of one condition (same worker code path);
+    # the observed active+cache peak is per rep, like peak_memory_gb.
+    watchdog_policies = [r["watchdog"] for r in successes if r.get("watchdog") is not None]
+    per_rep_peak_total = [
+        r["watchdog_observed"]["peak_total_memory_bytes"] / 1024**3
+        for r in successes
+        if r.get("watchdog_observed") is not None
+    ]
     return {
         "condition": condition,
         "applied_cap_gb": cap_gb,
         "installed_cap_gb": installed_caps[0] if len(installed_caps) == 1 else installed_caps,
+        "watchdog": watchdog_policies[0] if watchdog_policies else None,
+        "per_rep_peak_total_memory_gb": per_rep_peak_total,
+        "max_peak_total_memory_gb": max(per_rep_peak_total) if per_rep_peak_total else None,
         "reps": len(successes),
         "per_rep_seconds": per_rep_seconds,
         "median_seconds": statistics.median(per_rep_seconds),
@@ -457,7 +473,7 @@ def _save_webp(image_uint8_nhwc: Any, target: Path) -> None:
 def _worker_main(args: argparse.Namespace) -> int:
     """Run one (condition, rep) inside this subprocess. Emit sentinel.
 
-    Installs the same active-memory watchdog the live-scenario worker path uses
+    Installs the same active-plus-cache memory watchdog the live-scenario worker path uses
     (scripts.run_showcase._install_live_watchdog) around model construction + decode, so
     a rep that would otherwise page-storm the machine aborts with an honest artifact
     (see _watchdog_abort_path) and a nonzero exit instead of risking a kernel panic.
@@ -476,6 +492,7 @@ def _worker_main(args: argparse.Namespace) -> int:
         _watchdog_abort_path(args.save_to),
         f"{args.condition}_rep{args.rep}",
         wall_budget_s=_worker_wall_budget_s(args.condition),
+        cache_limit_bytes=_BENCH_CACHE_LIMIT_BYTES,
     )
     try:
         import mlx.core as mx
@@ -521,6 +538,8 @@ def _worker_main(args: argparse.Namespace) -> int:
                 "image_path": _repo_relative(args.save_to),
                 "requested_cap_gb": args.applied_cap_gb,
                 "installed_cap_gb": installed_cap_gb,
+                "watchdog": watchdog.policy,
+                "watchdog_observed": watchdog.observed,
             }
         )
     )
