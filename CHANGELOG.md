@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - The showcase, benchmark, latent-capture and A/B harness workers now count MLX's retained
-  buffer cache toward their memory ceiling instead of active memory alone, which is the number
-  MLX itself reports as resident. Each watchdog bounds the cache pool when it starts and states
+  buffer cache toward their memory ceiling instead of active memory alone; together those are
+  the bytes the MLX allocator holds. Each watchdog bounds the cache pool when it starts and states
   that bound, its polling cadence (now 50 ms), the ceiling and the wall budget in its abort
   artifact and in each worker's result, together with the highest active-plus-cache reading it
   saw, so a report row can say how close a run came to the ceiling rather than only its active
@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so the timed decode still runs from a warm pool) and the A/B script's existing per-condition
   values. A memory sample that raises now aborts the worker with reason `sample_error` and the
   error text rather than ending the watchdog thread in silence, and the orchestrators print
-  every term the watchdog compared. Harness only: the library and its decode path are
+  every term the abort artifact carries. Harness only: the library and its decode path are
   unchanged, and the committed showcase numbers were not re-measured.
 
 ## [0.8.2] - 2026-09-17

@@ -674,18 +674,24 @@ def _live_watchdog_breach_reason(
 def _describe_watchdog_abort(payload: dict[str, Any]) -> str:
     """Describe a watchdog abort payload in one operator-facing line.
 
-    Names the reason, every memory term the watchdog compared, and the error text when the
-    abort came from a failed sample.
+    Names the reason, every term the watchdog compared that the payload carries (memory
+    terms, ceiling, elapsed time, wall budget), and the error text when the abort came from
+    a failed sample. Terms absent from the payload are left out rather than printed as None.
     """
+    fields = (
+        ("active", "active_memory_bytes", " bytes"),
+        ("cache", "cache_memory_bytes", " bytes"),
+        ("total", "total_memory_bytes", " bytes"),
+        ("ceiling", "ceiling_bytes", " bytes"),
+        ("elapsed", "elapsed_s", "s"),
+        ("wall_budget", "wall_budget_s", "s"),
+        ("error", "error", ""),
+    )
     parts = [
-        f"active={payload.get('active_memory_bytes')} bytes",
-        f"cache={payload.get('cache_memory_bytes')} bytes",
-        f"total={payload.get('total_memory_bytes')} bytes",
-        f"ceiling={payload.get('ceiling_bytes')} bytes",
-        f"elapsed={payload.get('elapsed_s')}s",
+        f"{label}={payload[key]}{unit}"
+        for label, key, unit in fields
+        if payload.get(key) is not None
     ]
-    if payload.get("error") is not None:
-        parts.append(f"error={payload['error']}")
     return f"{payload.get('reason', 'unknown')} ({', '.join(parts)})"
 
 

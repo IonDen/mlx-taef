@@ -217,6 +217,15 @@ def test_live_watchdog_breach_reason_counts_retained_cache_toward_the_ceiling() 
     )
 
 
+def _wait_for_samples(watchdog: object, n: int, *, deadline_s: float = 5.0) -> None:
+    """Block until the watchdog thread has taken `n` samples (deterministic, no fixed sleep)."""
+    end = time.monotonic() + deadline_s
+    while watchdog.observed["samples"] < n:  # type: ignore[attr-defined]
+        if time.monotonic() > end:
+            raise AssertionError(f"watchdog took fewer than {n} samples in {deadline_s}s")
+        time.sleep(0.001)
+
+
 def _install_live_watchdog_with_fake_mlx(
     monkeypatch,
     tmp_path: Path,
@@ -323,7 +332,7 @@ def test_live_watchdog_bounds_the_cache_pool_before_polling_and_records_its_poli
     watchdog = rs._install_live_watchdog(
         tmp_path / "r.json", "scn", cache_limit_bytes=3 * 1024**3, interval_s=0.005
     )
-    time.sleep(0.05)
+    _wait_for_samples(watchdog, 1)
     watchdog.stop()
 
     assert events[0] == f"cache:{3 * 1024**3}"
@@ -353,7 +362,7 @@ def test_live_watchdog_reports_the_observed_active_plus_cache_peak(
     monkeypatch.setattr(mx, "get_cache_memory", lambda: next(cache, 1))
 
     watchdog = rs._install_live_watchdog(tmp_path / "r.json", "scn", interval_s=0.002)
-    time.sleep(0.1)
+    _wait_for_samples(watchdog, 3)
     watchdog.stop()
 
     assert watchdog.observed == {
@@ -1319,6 +1328,18 @@ def test_live_scenario_abort_message_names_cache_total_and_error(
         rs._run_live_scenario_subprocess("live_preview", args)
     assert "total=29 bytes" in str(excinfo.value)
 
-    payload = {"status": "aborted", "reason": "sample_error", "error": "RuntimeError: gone"}
-    with pytest.raises(TaefError, match="RuntimeError: gone"):
+    payload = {
+        "status": "aborted",
+        "reason": "wall_budget",
+        "elapsed_s": 61.0,
+        "wall_budget_s": 60.0,
+    }
+    with pytest.raises(TaefError, match="wall_budget") as excinfo:
         rs._run_live_scenario_subprocess("live_preview", args)
+    assert "wall_budget=60.0s" in str(excinfo.value)
+    assert "None" not in str(excinfo.value)
+
+    payload = {"status": "aborted", "reason": "sample_error", "error": "RuntimeError: gone"}
+    with pytest.raises(TaefError, match="RuntimeError: gone") as excinfo:
+        rs._run_live_scenario_subprocess("live_preview", args)
+    assert "None" not in str(excinfo.value)

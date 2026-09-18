@@ -384,7 +384,10 @@ def test_capture_watchdog_reports_the_observed_active_plus_cache_peak(
     monkeypatch.setattr(cl.mx, "get_cache_memory", lambda: next(cache, 1))
 
     watchdog = cl._install_capture_watchdog("flux1-dev", tmp_path, interval_s=0.002)
-    time.sleep(0.1)
+    end = time.monotonic() + 5.0
+    while int(watchdog.observed["samples"]) < 3:  # type: ignore[call-overload]
+        assert time.monotonic() < end, "watchdog took fewer than 3 samples in 5s"
+        time.sleep(0.001)
     watchdog.stop()
 
     assert watchdog.observed["peak_total_memory_bytes"] == 8
