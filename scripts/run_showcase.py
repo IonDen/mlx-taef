@@ -445,12 +445,18 @@ _SCENARIO_DISPATCH = {
 _LIVE_SCENARIOS = frozenset({"live_preview", "zimage_live_preview", "combined"})
 _LIVE_WALL_BUDGET_S = 3300.0
 _MEMORY_HEADROOM_BYTES = 4 * 1024**3
-# Every model-loading worker bounds MLX's retained-buffer pool. Freed buffers sit in that pool,
-# resident but not "active", and its default limit is near device memory; the watchdog counts
-# the pool toward the ceiling, so the bound is what makes the arithmetic close on 32 GB:
-# the heaviest live scenario (Z-Image) peaks near 25.9 GiB active, and 25.9 + 2 stays under
-# the 28 GiB ceiling. The decode-rep worker uses a larger bound (see scripts/bench_decode.py).
-_LIVE_CACHE_LIMIT_BYTES = 2 * 1024**3
+# Every model-loading worker bounds MLX's retained-buffer pool and the watchdog counts that
+# pool toward the ceiling. Under the harness caps the memory limit (22 GiB, or cap + 2) already
+# drains the pool whenever an allocation would cross it (mlx 0.32.2: cached buffers are
+# released before a miss that would exceed the limit), so the resident footprint never exceeds
+# max(memory limit, peak active); the explicit bound is what the report can state, and it caps
+# the pool during the low-active phases (model load, decode) where the memory limit is far
+# away. Measured 2026-09-18 (mlx 0.32.2, M1 Max, live_preview at 512x512, three interleaved
+# reps each): with the bound at 4 GiB the pool tops out at ~4.1 GiB and the loop takes a
+# median 10.76 s; with it at 20 GiB the pool grows to ~17 GiB and the loop takes 11.07 s, so
+# the bound is neutral for the committed live wall clocks. `combined` behaved the same
+# (8.45 s vs 8.84 s, single runs). The decode-rep worker uses its own bound (bench_decode.py).
+_LIVE_CACHE_LIMIT_BYTES = 4 * 1024**3
 _WATCHDOG_INTERVAL_S = 0.05
 
 
@@ -654,13 +660,33 @@ def _live_watchdog_breach_reason(
 
     The memory arm compares the MLX allocator's resident footprint, active plus retained
     cache, against the ceiling: cached buffers are freed from the graph's point of view but
-    still occupy unified memory until MLX releases them (`mx.clear_cache` or the cache limit).
+    still occupy unified memory until MLX releases them (`mx.clear_cache`, the cache limit, or
+    a memory-limit reclaim). Non-MLX process memory (torch for LPIPS, numpy, the Python heap)
+    is outside both counters and covered only by the 4 GiB headroom under the ceiling.
     """
     if active_bytes + cache_bytes >= ceiling_bytes:
         return "memory_ceiling"
     if elapsed_s > wall_budget_s:
         return "wall_budget"
     return None
+
+
+def _describe_watchdog_abort(payload: dict[str, Any]) -> str:
+    """Describe a watchdog abort payload in one operator-facing line.
+
+    Names the reason, every memory term the watchdog compared, and the error text when the
+    abort came from a failed sample.
+    """
+    parts = [
+        f"active={payload.get('active_memory_bytes')} bytes",
+        f"cache={payload.get('cache_memory_bytes')} bytes",
+        f"total={payload.get('total_memory_bytes')} bytes",
+        f"ceiling={payload.get('ceiling_bytes')} bytes",
+        f"elapsed={payload.get('elapsed_s')}s",
+    ]
+    if payload.get("error") is not None:
+        parts.append(f"error={payload['error']}")
+    return f"{payload.get('reason', 'unknown')} ({', '.join(parts)})"
 
 
 def _commit_watchdog_abort(
@@ -696,15 +722,22 @@ class _LiveWatchdog:
     """Cooperatively stop a live-worker watchdog thread after generation.
 
     `policy` states the limits the thread enforced (ceiling, cache bound, polling cadence,
-    wall budget) so a worker can record them next to its result.
+    wall budget); `observed` holds the high-water marks the thread saw (active plus cache,
+    and the cache term alone) plus the sample count, so a worker can record how close it
+    came next to its result.
     """
 
     def __init__(
-        self, stop_event: threading.Event, thread: threading.Thread, policy: dict[str, Any]
+        self,
+        stop_event: threading.Event,
+        thread: threading.Thread,
+        policy: dict[str, Any],
+        observed: dict[str, Any],
     ) -> None:
         self._stop_event = stop_event
         self._thread = thread
         self.policy = policy
+        self.observed = observed
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -739,6 +772,11 @@ def _install_live_watchdog(
         "interval_s": interval_s,
         "wall_budget_s": wall_budget_s,
     }
+    observed: dict[str, Any] = {
+        "peak_total_memory_bytes": 0,
+        "peak_cache_memory_bytes": 0,
+        "samples": 0,
+    }
     stop_event = threading.Event()
     started = time.monotonic()
 
@@ -762,6 +800,13 @@ def _install_live_watchdog(
                     stop_event=stop_event,
                 )
                 continue
+            observed["samples"] += 1
+            observed["peak_total_memory_bytes"] = max(
+                observed["peak_total_memory_bytes"], active_bytes + cache_bytes
+            )
+            observed["peak_cache_memory_bytes"] = max(
+                observed["peak_cache_memory_bytes"], cache_bytes
+            )
             reason = _live_watchdog_breach_reason(
                 active_bytes=active_bytes,
                 cache_bytes=cache_bytes,
@@ -788,7 +833,7 @@ def _install_live_watchdog(
 
     thread = threading.Thread(target=_watch, name=f"{scenario}-watchdog", daemon=True)
     thread.start()
-    return _LiveWatchdog(stop_event, thread, policy)
+    return _LiveWatchdog(stop_event, thread, policy, observed)
 
 
 # ---------------------------------------------------------------------------
@@ -972,10 +1017,7 @@ def _run_live_scenario_subprocess(scenario: str, args: argparse.Namespace) -> di
             partial = None
         if isinstance(partial, dict) and partial.get("status") == "aborted":
             raise TaefError(
-                f"live scenario worker {scenario!r} aborted: {partial.get('reason', 'unknown')} "
-                f"(active={partial.get('active_memory_bytes')} bytes, "
-                f"ceiling={partial.get('ceiling_bytes')} bytes, "
-                f"elapsed={partial.get('elapsed_s')}s)"
+                f"live scenario worker {scenario!r} aborted: {_describe_watchdog_abort(partial)}"
             )
         raise TaefError(
             f"live scenario worker {scenario!r} failed with exit {completed.returncode}: "
@@ -1096,6 +1138,7 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             watchdog.stop()
         result["watchdog"] = watchdog.policy
+        result["watchdog_observed"] = watchdog.observed
         _write_report(args.live_result, result)
         return 0
 

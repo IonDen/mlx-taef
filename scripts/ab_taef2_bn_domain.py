@@ -40,9 +40,10 @@ from mlx_taef.errors import TaefError  # noqa: E402  (after sys.path tweak)
 CONDITIONS = ("vanilla_vae", "bn_inverse", "identity")
 _TAEF2_CONDITIONS = ("bn_inverse", "identity")
 _WORKER_TIMEOUT_S = {"vanilla_vae": 1500, "bn_inverse": 300, "identity": 300}
-# Every worker bounds MLX's retained-buffer pool (its default limit sits near device memory);
-# the watchdog counts the pool toward its ceiling, so the full-VAE arm's 6 GiB is what keeps
-# 28 GiB reachable on 32 GB while still holding that decode's transient buffers.
+# Every worker bounds MLX's retained-buffer pool through the watchdog, which counts the pool
+# toward its ceiling and records the bound. The full-VAE arm runs under a 12 GB wired cap and
+# peaks near 2.8 GiB, so 6 GiB holds that decode's freed transients with room to spare; the
+# TAEF2 arms need far less.
 _CACHE_LIMIT_BYTES = {
     "vanilla_vae": 6 * 1024**3,
     "bn_inverse": 2 * 1024**3,
@@ -215,6 +216,8 @@ def _worker_main(args: argparse.Namespace) -> int:
                 "unit_wall_s": round(time.perf_counter() - started, 3),
                 "process_peak_memory_gb": round(peak_gb, 3),
                 "installed_cap_gb": installed_cap_gb,
+                "watchdog": watchdog.policy,
+                "watchdog_observed": watchdog.observed,
             },
             indent=2,
         )

@@ -1,6 +1,7 @@
 """Plumbing tests for scripts/run_showcase.py."""
 
 import json
+import time
 from pathlib import Path
 from typing import ClassVar
 
@@ -106,6 +107,7 @@ def test_live_worker_mode_runs_one_raw_scenario(tmp_path: Path, monkeypatch) -> 
 
     class _FakeWatchdog:
         policy: ClassVar[dict[str, object]] = {"cache_limit_bytes": 1, "interval_s": 0.05}
+        observed: ClassVar[dict[str, object]] = {"peak_total_memory_bytes": 9}
 
         def stop(self) -> None:
             watchdog_events.append("stopped")
@@ -142,6 +144,7 @@ def test_live_worker_mode_runs_one_raw_scenario(tmp_path: Path, monkeypatch) -> 
     assert json.loads(result_path.read_text()) == {
         "status": "ok",
         "watchdog": {"cache_limit_bytes": 1, "interval_s": 0.05},
+        "watchdog_observed": {"peak_total_memory_bytes": 9},
     }
 
 
@@ -304,36 +307,71 @@ def test_live_watchdog_aborts_explicitly_when_a_memory_sample_fails(
 def test_live_watchdog_bounds_the_cache_pool_before_polling_and_records_its_policy(
     monkeypatch, tmp_path: Path
 ) -> None:
-    """Catches: a live worker running with MLX's near-device-size default cache limit (the
-    accounting can then never close on 32 GB), and a policy the report cannot reproduce.
-    The bound is installed by the watchdog so every model-loading harness path gets it."""
+    """Catches: a live worker running with MLX's default cache limit (the policy the report
+    states would then be a fiction), the bound installed after the first sample, and a
+    policy the report cannot reproduce. The bound is installed by the watchdog so every
+    model-loading harness path gets it from one place."""
     import mlx.core as mx
     import scripts.run_showcase as rs
 
-    limits: list[int] = []
+    events: list[str] = []
     monkeypatch.setattr(mx, "device_info", lambda: {"memory_size": 32 * 1024**3})
-    monkeypatch.setattr(mx, "set_cache_limit", lambda n: limits.append(n) or 0)
-    monkeypatch.setattr(mx, "get_active_memory", lambda: 0)
+    monkeypatch.setattr(mx, "set_cache_limit", lambda n: events.append(f"cache:{n}") or 0)
+    monkeypatch.setattr(mx, "get_active_memory", lambda: events.append("sample") or 0)
     monkeypatch.setattr(mx, "get_cache_memory", lambda: 0)
 
-    watchdog = rs._install_live_watchdog(tmp_path / "r.json", "scn", cache_limit_bytes=3 * 1024**3)
+    watchdog = rs._install_live_watchdog(
+        tmp_path / "r.json", "scn", cache_limit_bytes=3 * 1024**3, interval_s=0.005
+    )
+    time.sleep(0.05)
     watchdog.stop()
 
-    assert limits == [3 * 1024**3]
+    assert events[0] == f"cache:{3 * 1024**3}"
+    assert "sample" in events[1:]
     assert watchdog.policy == {
         "ceiling_bytes": 28 * 1024**3,
         "cache_limit_bytes": 3 * 1024**3,
-        "interval_s": 0.05,
+        "interval_s": 0.005,
         "wall_budget_s": rs._LIVE_WALL_BUDGET_S,
     }
 
 
-def test_live_watchdog_default_cache_bound_closes_the_ceiling_arithmetic() -> None:
-    """Catches: a default cache bound so large that a live worker's measured peak plus a
-    full cache pool overshoots the 28 GiB ceiling on 32 GB (Z-Image peaks at ~25.9 GiB)."""
+def test_live_watchdog_reports_the_observed_active_plus_cache_peak(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Catches: a result whose `peak_memory_gb` (active only) says 2 GiB of headroom while the
+    watchdog's own reading, active plus cache, came within a few MiB of firing. The watchdog
+    keeps a high-water mark of the sum it compares, and of the cache term alone."""
+    import mlx.core as mx
     import scripts.run_showcase as rs
 
-    assert 0 < rs._LIVE_CACHE_LIMIT_BYTES <= 2 * 1024**3
+    active = iter([1, 5, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2])
+    cache = iter([1, 3, 6, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
+    monkeypatch.setattr(mx, "device_info", lambda: {"memory_size": 32 * 1024**3})
+    monkeypatch.setattr(mx, "set_cache_limit", lambda n: 0)
+    monkeypatch.setattr(mx, "get_active_memory", lambda: next(active, 2))
+    monkeypatch.setattr(mx, "get_cache_memory", lambda: next(cache, 1))
+
+    watchdog = rs._install_live_watchdog(tmp_path / "r.json", "scn", interval_s=0.002)
+    time.sleep(0.1)
+    watchdog.stop()
+
+    assert watchdog.observed == {
+        "peak_total_memory_bytes": 8,
+        "peak_cache_memory_bytes": 6,
+        "samples": watchdog.observed["samples"],
+    }
+    assert watchdog.observed["samples"] >= 3
+
+
+def test_live_cache_bound_is_not_below_the_value_the_timing_check_found_neutral() -> None:
+    """Catches: the live bound shrinking below 4 GiB, the only value the 2026-09-18 timing
+    check compared against an unbounded pool (live_preview 10.76 s vs 11.07 s, three reps
+    each); a smaller pool is unmeasured and could move the committed live wall clocks. This
+    pins the constant to the measured floor; it cannot verify the measurement itself."""
+    import scripts.run_showcase as rs
+
+    assert rs._LIVE_CACHE_LIMIT_BYTES >= 4 * 1024**3
 
 
 def test_json_schema_rejects_unknown_version(tmp_path: Path) -> None:
@@ -758,6 +796,7 @@ def test_vs_vae_worker_installs_active_memory_watchdog(
 
     class _FakeWatchdog:
         policy: ClassVar[dict[str, object]] = {"cache_limit_bytes": 0, "interval_s": 0.05}
+        observed: ClassVar[dict[str, object]] = {}
 
         def stop(self) -> None:
             watchdog_events.append("stopped")
@@ -1243,3 +1282,43 @@ def test_source_version_dirtiness_follows_real_git_state(
 
     (tmp_path / "src" / "a.py").write_text("x = 2\n")
     assert rs._detect_source_version().endswith("-dirty")
+
+
+def test_live_scenario_abort_message_names_cache_total_and_error(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Catches: the orchestrator's abort message formatting only active and ceiling, so a
+    cache-driven breach reads as a non-breach and a `sample_error` never shows its cause."""
+    import argparse
+    import subprocess
+
+    import scripts.run_showcase as rs
+
+    from mlx_taef.errors import TaefError
+
+    report = tmp_path / "report.json"
+    args = argparse.Namespace(report=report, cap_gb=None)
+    result_path = tmp_path / ".report-partials" / "live_preview.json"
+
+    def _fake_run(*a: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        result_path.write_text(json.dumps(payload))
+        return subprocess.CompletedProcess(args=[], returncode=70, stdout="", stderr="")
+
+    monkeypatch.setattr(rs.subprocess, "run", _fake_run)
+
+    payload = {
+        "status": "aborted",
+        "reason": "memory_ceiling",
+        "active_memory_bytes": 20,
+        "cache_memory_bytes": 9,
+        "total_memory_bytes": 29,
+        "ceiling_bytes": 28,
+        "elapsed_s": 1.5,
+    }
+    with pytest.raises(TaefError, match="cache=9 bytes") as excinfo:
+        rs._run_live_scenario_subprocess("live_preview", args)
+    assert "total=29 bytes" in str(excinfo.value)
+
+    payload = {"status": "aborted", "reason": "sample_error", "error": "RuntimeError: gone"}
+    with pytest.raises(TaefError, match="RuntimeError: gone"):
+        rs._run_live_scenario_subprocess("live_preview", args)

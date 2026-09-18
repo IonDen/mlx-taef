@@ -9,16 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - The showcase, benchmark, latent-capture and A/B harness workers now count MLX's retained
-  buffer cache toward their memory ceiling instead of active memory alone. Buffers MLX has
-  freed stay resident in that cache until it is trimmed, and its default limit sits near device
-  memory, so a worker could hold gigabytes the watchdog never saw. Each watchdog now bounds the
-  cache pool when it starts (2 GiB for generation workers; 4 GiB for decode reps, which covers
-  their peak so the timed decode still runs from a warm pool; the A/B script keeps its own
-  per-condition bounds), polls every 50 ms, and records the ceiling, cache bound, cadence and
-  wall budget in its abort artifact and in each worker's result. A memory sample that raises
-  now aborts the worker with reason `sample_error` rather than ending the watchdog thread in
-  silence. Harness only: the library and its decode path are unchanged, and the committed
-  showcase numbers were not re-measured.
+  buffer cache toward their memory ceiling instead of active memory alone, which is the number
+  MLX itself reports as resident. Each watchdog bounds the cache pool when it starts and states
+  that bound, its polling cadence (now 50 ms), the ceiling and the wall budget in its abort
+  artifact and in each worker's result, together with the highest active-plus-cache reading it
+  saw, so a report row can say how close a run came to the ceiling rather than only its active
+  peak. The bounds are 4 GiB for generation workers and decode reps (the reps peak at 3.7 GiB,
+  so the timed decode still runs from a warm pool) and the A/B script's existing per-condition
+  values. A memory sample that raises now aborts the worker with reason `sample_error` and the
+  error text rather than ending the watchdog thread in silence, and the orchestrators print
+  every term the watchdog compared. Harness only: the library and its decode path are
+  unchanged, and the committed showcase numbers were not re-measured.
 
 ## [0.8.2] - 2026-09-17
 

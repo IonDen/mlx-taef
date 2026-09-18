@@ -6,6 +6,7 @@ silent mistake would corrupt the A/B itself: the domain switch, the resume logic
 
 import json
 from pathlib import Path
+from typing import ClassVar
 
 import mlx.core as mx
 import numpy as np
@@ -93,6 +94,23 @@ def test_pending_units_reruns_results_that_belong_to_a_different_latent(tmp_path
     assert ab._pending_units(tmp_path, "lat", latent_sha256="bbbb") == list(ab.CONDITIONS)
 
 
+def test_install_worker_limits_maps_each_condition_to_its_wired_cap(monkeypatch) -> None:
+    """Catches: the full-VAE arm (the heaviest decode) running under TAEF2's ~1-2 GB wired cap
+    because the condition -> bench-condition mapping collapsed to "taef2"."""
+    import scripts.ab_taef2_bn_domain as ab
+    import scripts.bench_decode as bench
+
+    caps: list[int] = []
+    monkeypatch.setattr(bench, "_install_memory_caps", lambda cap: caps.append(cap) or cap)
+
+    assert ab._install_worker_limits("vanilla_vae") == bench._resolve_cap_gb(
+        condition="vanilla_vae"
+    )
+    for condition in ab._TAEF2_CONDITIONS:
+        assert ab._install_worker_limits(condition) == bench._resolve_cap_gb(condition="taef2")
+    assert caps[0] > caps[1] == caps[2]
+
+
 def test_every_worker_hands_its_cache_bound_to_the_watchdog(monkeypatch, tmp_path) -> None:
     """Catches: a worker (the full-VAE arm is the heaviest) running with MLX's near-device-size
     default cache limit, or with the watchdog's generic bound instead of the condition's own
@@ -129,6 +147,43 @@ def test_every_worker_hands_its_cache_bound_to_the_watchdog(monkeypatch, tmp_pat
             ab._worker_main(args)
         assert install_calls[0]["cache_limit_bytes"] == ab._cache_limit_bytes(condition)
         assert 0 < ab._cache_limit_bytes(condition) <= 8 * 1024**3
+
+
+def test_unit_result_records_the_watchdog_policy_and_observed_peak(monkeypatch, tmp_path) -> None:
+    """Catches: an A/B unit result that states the wired cap it ran under but not the cache
+    bound or the observed active+cache peak, so the report cannot say how close it came."""
+    import argparse
+
+    import scripts.ab_taef2_bn_domain as ab
+    import scripts.run_showcase as rs
+
+    class _FakeWatchdog:
+        policy: ClassVar[dict[str, object]] = {"cache_limit_bytes": 2 * 1024**3, "interval_s": 0.05}
+        observed: ClassVar[dict[str, object]] = {
+            "peak_total_memory_bytes": 5,
+            "peak_cache_memory_bytes": 3,
+        }
+
+        def stop(self) -> None:
+            pass
+
+    monkeypatch.setattr(rs, "_install_live_watchdog", lambda *a, **kw: _FakeWatchdog())
+    monkeypatch.setattr(ab, "_install_worker_limits", lambda condition: 7)
+    monkeypatch.setattr(
+        "scripts.bench_decode._prep_full_vae_flux2",
+        lambda latent, h, w: lambda: mx.zeros((1, 2, 2, 3), dtype=mx.uint8),
+    )
+    monkeypatch.setattr(ab, "_save_png", lambda image, target: target.write_bytes(b"png"))
+    latent = tmp_path / "lat.safetensors"
+    mx.save_safetensors(
+        str(latent), {"latent": mx.zeros((1, 4, 16)), "height": mx.array(16), "width": mx.array(16)}
+    )
+    args = argparse.Namespace(worker="vanilla_vae", latent=latent, out_dir=tmp_path)
+
+    assert ab._worker_main(args) == 0
+    result = json.loads(ab._unit_result_path(tmp_path, "lat", "vanilla_vae").read_text())
+    assert result["watchdog"] == _FakeWatchdog.policy
+    assert result["watchdog_observed"] == _FakeWatchdog.observed
 
 
 def test_score_keeps_a_computed_lpips_when_the_other_arm_fails(tmp_path: Path, monkeypatch) -> None:

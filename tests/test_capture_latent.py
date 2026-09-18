@@ -354,10 +354,39 @@ def test_capture_watchdog_bounds_the_cache_pool_and_records_its_policy(
     watchdog.stop()
 
     assert limits == [cl._CAPTURE_CACHE_LIMIT_BYTES]
-    assert 0 < cl._CAPTURE_CACHE_LIMIT_BYTES <= 2 * 1024**3
+    # Captures run the live generation recipes, so they share the live bound's floor.
+    from scripts.run_showcase import _LIVE_CACHE_LIMIT_BYTES
+
+    assert cl._CAPTURE_CACHE_LIMIT_BYTES == _LIVE_CACHE_LIMIT_BYTES
     assert watchdog.policy == {
         "ceiling_bytes": 28 * 1024**3,
         "cache_limit_bytes": cl._CAPTURE_CACHE_LIMIT_BYTES,
         "interval_s": 0.05,
         "wall_budget_s": cl._WALL_BUDGET_S,
     }
+
+
+def test_capture_watchdog_reports_the_observed_active_plus_cache_peak(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Catches: a capture run that prints its active peak only while the watchdog's own
+    reading, active plus cache, came within a few MiB of firing; the high-water marks of the
+    sum and of the cache term must both track the samples."""
+    import time
+
+    import scripts._capture_latent as cl
+
+    active = iter([1, 5, 2])
+    cache = iter([1, 3, 6])
+    monkeypatch.setattr(cl.mx, "device_info", lambda: {"memory_size": 32 * 1024**3})
+    monkeypatch.setattr(cl.mx, "set_cache_limit", lambda n: 0)
+    monkeypatch.setattr(cl.mx, "get_active_memory", lambda: next(active, 2))
+    monkeypatch.setattr(cl.mx, "get_cache_memory", lambda: next(cache, 1))
+
+    watchdog = cl._install_capture_watchdog("flux1-dev", tmp_path, interval_s=0.002)
+    time.sleep(0.1)
+    watchdog.stop()
+
+    assert watchdog.observed["peak_total_memory_bytes"] == 8
+    assert watchdog.observed["peak_cache_memory_bytes"] == 6
+    assert watchdog.observed["samples"] >= 3
