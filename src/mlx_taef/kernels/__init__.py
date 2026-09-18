@@ -39,12 +39,13 @@ def _claimants_by_prefix(kernels: Sequence[ModelKernel], name: str) -> list[Mode
 def _claimants_by_alias(
     kernels: Sequence[ModelKernel], aliases: Sequence[str]
 ) -> list[ModelKernel]:
+    # Registered aliases are lowercase (pinned by the registry tests); fold the model's side.
     wanted = {a.lower() for a in aliases}
     return [
         k
         for k in kernels
         if k.integration is not None
-        and any(alias.lower() in wanted for alias in k.integration.mflux_models)
+        and any(alias in wanted for alias in k.integration.mflux_models)
     ]
 
 

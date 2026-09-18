@@ -146,8 +146,8 @@ def test_a_bare_string_of_aliases_is_not_split_into_characters() -> None:
     """Catches: `aliases="dev"` (a str satisfies Sequence[str]) being iterated into
     `d`, `e`, `v` and a valid FLUX.1 model rejected."""
     assert (
-        resolve_kernel_for_mflux(model_name="local/checkout", aliases="dev")  # type: ignore[arg-type]
-        is KERNELS["taef1"]
+        # a str satisfies Sequence[str] structurally, so no type checker objects to this call
+        resolve_kernel_for_mflux(model_name="local/checkout", aliases="dev") is KERNELS["taef1"]
     )
 
 
@@ -258,10 +258,16 @@ _EXPECTED_BY_REGISTRY_KEY: dict[str, str | None] = {
 }
 
 
+# Alias strings kept from releases before mflux registered its own; not in AVAILABLE_MODELS.
+_LEGACY_ALIASES = {"flux1", "flux-dev", "flux-schnell", "flux2"}
+
+
 def test_every_installed_mflux_registry_entry_is_classified() -> None:
     """Catches: drift between this library and the installed mflux registry in either
     direction: a model mflux added that a broad family prefix now claims (or rejects) without
-    anyone deciding, a renamed alias, or a model mflux dropped that the map still lists."""
+    anyone deciding, or a model mflux dropped that the map still lists. mflux-built configs
+    carry an owner-qualified name, so this walks the prefix arms; the alias arm is covered by
+    the two alias tests below."""
     mflux_config = pytest.importorskip("mflux.models.common.config.model_config")
     available = mflux_config.AVAILABLE_MODELS
 
@@ -275,13 +281,38 @@ def test_every_installed_mflux_registry_entry_is_classified() -> None:
                 resolve_kernel_from_model_config(config)
         else:
             assert resolve_kernel_from_model_config(config) is KERNELS[expected], key
+
+
+def test_every_registered_alias_of_a_supported_model_resolves_on_its_own() -> None:
+    """Catches: a kernel dropping one of its aliases (`qwen-2512`), which nothing else sees:
+    mflux-built configs resolve through the prefix arms, and a config carrying the full alias
+    list still matches on the others. Each alias is resolved alone, with a name no prefix
+    claims, so the alias arm has to carry it."""
+    mflux_config = pytest.importorskip("mflux.models.common.config.model_config")
+
+    for key, config in mflux_config.AVAILABLE_MODELS.items():
+        expected = _EXPECTED_BY_REGISTRY_KEY[key]
         for alias in config.aliases:
-            aliased = mflux_config.ModelConfig.from_name(model_name=alias, base_model=None)
+            local = _FakeModelConfig(model_name=f"/Users/me/models/{key}", aliases=[alias])
             if expected is None:
                 with pytest.raises(UnsupportedMfluxModelError):
-                    resolve_kernel_from_model_config(aliased)
+                    resolve_kernel_from_model_config(local)
             else:
-                assert resolve_kernel_from_model_config(aliased) is KERNELS[expected], alias
+                assert resolve_kernel_from_model_config(local) is KERNELS[expected], alias
+
+
+def test_every_kernel_alias_is_one_mflux_registers() -> None:
+    """Catches: a kernel alias list going stale (mflux renames `zimage-turbo`); the registry
+    walk cannot see it because prefixes decide first, and a dead alias is a silent lie about
+    what the library supports."""
+    mflux_config = pytest.importorskip("mflux.models.common.config.model_config")
+    registered = {a.lower() for c in mflux_config.AVAILABLE_MODELS.values() for a in c.aliases}
+
+    for kernel in KERNELS.values():
+        if kernel.integration is None:
+            continue
+        stale = set(kernel.integration.mflux_models) - registered - _LEGACY_ALIASES
+        assert not stale, (kernel.name, sorted(stale))
 
 
 def test_real_mflux_model_configs_resolve() -> None:

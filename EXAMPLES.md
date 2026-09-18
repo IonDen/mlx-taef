@@ -153,7 +153,7 @@ captured on this reference machine, for the same reason Qwen-Image's is.
 ## FLUX.2 Klein live preview
 
 A live preview of FLUX.2 Klein. TAEF2 decodes the latent as mflux produces it, so the callback
-needs nothing model-specific beyond the model (`flux=model` picks TAEF2 from it). The same wiring runs against FLUX.2 Klein
+needs nothing model-specific beyond the model itself: `flux=model` picks TAEF2 from it. The same wiring runs against FLUX.2 Klein
 base 4B in [`examples/mflux_live_preview.py`](examples/mflux_live_preview.py); the frames pictured
 below are from the distilled 4B Klein instead (its own native 4-step schedule, no separate `--steps` flag to
 set).
