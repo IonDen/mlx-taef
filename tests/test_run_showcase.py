@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -104,6 +105,8 @@ def test_live_worker_mode_runs_one_raw_scenario(tmp_path: Path, monkeypatch) -> 
     watchdog_events: list[str] = []
 
     class _FakeWatchdog:
+        policy: ClassVar[dict[str, object]] = {"cache_limit_bytes": 1, "interval_s": 0.05}
+
         def stop(self) -> None:
             watchdog_events.append("stopped")
 
@@ -134,7 +137,12 @@ def test_live_worker_mode_runs_one_raw_scenario(tmp_path: Path, monkeypatch) -> 
     )
     assert calls == ["live_preview"]
     assert watchdog_events == ["installed:live_preview", "stopped"]
-    assert json.loads(result_path.read_text()) == {"status": "ok"}
+    # The worker result carries the watchdog policy it ran under, so the committed report
+    # states the cache bound and polling cadence next to the wired cap.
+    assert json.loads(result_path.read_text()) == {
+        "status": "ok",
+        "watchdog": {"cache_limit_bytes": 1, "interval_s": 0.05},
+    }
 
 
 def test_hardware_metadata_names_generation_and_decode_dtypes() -> None:
@@ -168,22 +176,164 @@ def test_live_watchdog_breach_reason_checks_memory_before_wall() -> None:
 
     assert (
         _live_watchdog_breach_reason(
-            active_bytes=28, ceiling_bytes=28, elapsed_s=10, wall_budget_s=5
+            active_bytes=28, cache_bytes=0, ceiling_bytes=28, elapsed_s=10, wall_budget_s=5
         )
         == "memory_ceiling"
     )
     assert (
         _live_watchdog_breach_reason(
-            active_bytes=20, ceiling_bytes=28, elapsed_s=6, wall_budget_s=5
+            active_bytes=20, cache_bytes=0, ceiling_bytes=28, elapsed_s=6, wall_budget_s=5
         )
         == "wall_budget"
     )
     assert (
         _live_watchdog_breach_reason(
-            active_bytes=20, ceiling_bytes=28, elapsed_s=4, wall_budget_s=5
+            active_bytes=20, cache_bytes=0, ceiling_bytes=28, elapsed_s=4, wall_budget_s=5
         )
         is None
     )
+
+
+def test_live_watchdog_breach_reason_counts_retained_cache_toward_the_ceiling() -> None:
+    """Catches: the ceiling compared against active memory alone. MLX keeps freed buffers in
+    a retained pool that is resident but not "active"; 20 GiB active + 8 GiB cache is a
+    28 GiB footprint and must trip a 28 GiB ceiling."""
+    from scripts.run_showcase import _live_watchdog_breach_reason
+
+    assert (
+        _live_watchdog_breach_reason(
+            active_bytes=20, cache_bytes=8, ceiling_bytes=28, elapsed_s=0, wall_budget_s=5
+        )
+        == "memory_ceiling"
+    )
+    assert (
+        _live_watchdog_breach_reason(
+            active_bytes=20, cache_bytes=7, ceiling_bytes=28, elapsed_s=0, wall_budget_s=5
+        )
+        is None
+    )
+
+
+def _install_live_watchdog_with_fake_mlx(
+    monkeypatch,
+    tmp_path: Path,
+    *,
+    active_bytes: object,
+    cache_bytes: int,
+    **install_kwargs: object,
+) -> tuple[object, list[dict[str, object]]]:
+    """Run the real watchdog thread against a fake MLX memory API (memory_size 32 GiB).
+
+    `active_bytes` may be an exception instance, in which case the active-memory sample
+    raises it. The abort commit is replaced by a recorder that also stops the thread, so
+    the test observes exactly one payload and the process is never exited.
+    """
+    import threading
+
+    import mlx.core as mx
+    import scripts.run_showcase as rs
+
+    monkeypatch.setattr(mx, "device_info", lambda: {"memory_size": 32 * 1024**3})
+    monkeypatch.setattr(mx, "set_cache_limit", lambda n: 0)
+
+    def _active() -> int:
+        if isinstance(active_bytes, BaseException):
+            raise active_bytes
+        return int(active_bytes)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(mx, "get_active_memory", _active)
+    monkeypatch.setattr(mx, "get_cache_memory", lambda: cache_bytes)
+
+    payloads: list[dict[str, object]] = []
+
+    def _record_abort(
+        result_path: Path, payload: dict[str, object], *, stop_event: threading.Event
+    ) -> None:
+        payloads.append(payload)
+        stop_event.set()
+
+    monkeypatch.setattr(rs, "_commit_watchdog_abort", _record_abort)
+    watchdog = rs._install_live_watchdog(
+        tmp_path / "r.json", "scn", interval_s=0.005, **install_kwargs
+    )
+    watchdog._thread.join(timeout=5)
+    assert not watchdog._thread.is_alive(), "watchdog thread never reached the abort path"
+    return watchdog, payloads
+
+
+def test_live_watchdog_aborts_on_active_plus_cache_and_records_both(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Catches: `_watch` sampling `mx.get_active_memory()` only. 20 GiB active is under a
+    28 GiB ceiling; with 9 GiB retained cache the footprint is 29 GiB and the worker must
+    abort with the two components and their sum recorded separately."""
+    active = 20 * 1024**3
+    cache = 9 * 1024**3
+    _, payloads = _install_live_watchdog_with_fake_mlx(
+        monkeypatch, tmp_path, active_bytes=active, cache_bytes=cache
+    )
+
+    assert len(payloads) == 1
+    payload = payloads[0]
+    assert payload["reason"] == "memory_ceiling"
+    assert payload["active_memory_bytes"] == active
+    assert payload["cache_memory_bytes"] == cache
+    assert payload["total_memory_bytes"] == active + cache
+    assert payload["ceiling_bytes"] == 28 * 1024**3
+
+
+def test_live_watchdog_aborts_explicitly_when_a_memory_sample_fails(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Catches: an exception in the sampling call killing the daemon thread silently, which
+    leaves the worker running with no memory backstop at all. A failed observation must
+    be an explicit abort that names the error, never a zero sample and never silence."""
+    _, payloads = _install_live_watchdog_with_fake_mlx(
+        monkeypatch,
+        tmp_path,
+        active_bytes=RuntimeError("metal device gone"),
+        cache_bytes=0,
+    )
+
+    assert len(payloads) == 1
+    assert payloads[0]["reason"] == "sample_error"
+    assert "metal device gone" in str(payloads[0]["error"])
+    assert "active_memory_bytes" not in payloads[0]
+
+
+def test_live_watchdog_bounds_the_cache_pool_before_polling_and_records_its_policy(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Catches: a live worker running with MLX's near-device-size default cache limit (the
+    accounting can then never close on 32 GB), and a policy the report cannot reproduce.
+    The bound is installed by the watchdog so every model-loading harness path gets it."""
+    import mlx.core as mx
+    import scripts.run_showcase as rs
+
+    limits: list[int] = []
+    monkeypatch.setattr(mx, "device_info", lambda: {"memory_size": 32 * 1024**3})
+    monkeypatch.setattr(mx, "set_cache_limit", lambda n: limits.append(n) or 0)
+    monkeypatch.setattr(mx, "get_active_memory", lambda: 0)
+    monkeypatch.setattr(mx, "get_cache_memory", lambda: 0)
+
+    watchdog = rs._install_live_watchdog(tmp_path / "r.json", "scn", cache_limit_bytes=3 * 1024**3)
+    watchdog.stop()
+
+    assert limits == [3 * 1024**3]
+    assert watchdog.policy == {
+        "ceiling_bytes": 28 * 1024**3,
+        "cache_limit_bytes": 3 * 1024**3,
+        "interval_s": 0.05,
+        "wall_budget_s": rs._LIVE_WALL_BUDGET_S,
+    }
+
+
+def test_live_watchdog_default_cache_bound_closes_the_ceiling_arithmetic() -> None:
+    """Catches: a default cache bound so large that a live worker's measured peak plus a
+    full cache pool overshoots the 28 GiB ceiling on 32 GB (Z-Image peaks at ~25.9 GiB)."""
+    import scripts.run_showcase as rs
+
+    assert 0 < rs._LIVE_CACHE_LIMIT_BYTES <= 2 * 1024**3
 
 
 def test_json_schema_rejects_unknown_version(tmp_path: Path) -> None:
@@ -607,6 +757,8 @@ def test_vs_vae_worker_installs_active_memory_watchdog(
     watchdog_events: list[str] = []
 
     class _FakeWatchdog:
+        policy: ClassVar[dict[str, object]] = {"cache_limit_bytes": 0, "interval_s": 0.05}
+
         def stop(self) -> None:
             watchdog_events.append("stopped")
 

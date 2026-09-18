@@ -44,6 +44,10 @@ _DEFAULT_OUT_DIR = Path(__file__).parent.parent / "tests" / "fixtures" / "showca
 # run_showcase.py's _MEMORY_HEADROOM_BYTES (abort at memory_size - 4 GiB).
 _WALL_BUDGET_S = 3600.0
 _MEMORY_HEADROOM_BYTES = 4 * 1024**3
+# Same accounting as run_showcase.py's live workers: the watchdog counts MLX's retained cache
+# toward the ceiling, and bounds that pool so the sum can close on a 32 GB machine.
+_CAPTURE_CACHE_LIMIT_BYTES = 2 * 1024**3
+_WATCHDOG_INTERVAL_S = 0.05
 
 
 def _build_argparser() -> argparse.ArgumentParser:
@@ -103,10 +107,19 @@ def _abort_artifact_path(variant: str, out_dir: Path) -> Path:
 
 
 def _watchdog_breach_reason(
-    *, active_bytes: int, ceiling_bytes: int, elapsed_s: float, wall_budget_s: float
+    *,
+    active_bytes: int,
+    cache_bytes: int,
+    ceiling_bytes: int,
+    elapsed_s: float,
+    wall_budget_s: float,
 ) -> str | None:
-    """Return the first capture-run safety limit that has been breached."""
-    if active_bytes >= ceiling_bytes:
+    """Return the first capture-run safety limit that has been breached.
+
+    Memory is the allocator's resident footprint, active plus retained cache, as in
+    scripts/run_showcase.py's `_live_watchdog_breach_reason`.
+    """
+    if active_bytes + cache_bytes >= ceiling_bytes:
         return "memory_ceiling"
     if elapsed_s > wall_budget_s:
         return "wall_budget"
@@ -114,11 +127,18 @@ def _watchdog_breach_reason(
 
 
 class _CaptureWatchdog:
-    """Cooperatively stop a capture-run watchdog thread once generation finishes."""
+    """Cooperatively stop a capture-run watchdog thread once generation finishes.
 
-    def __init__(self, stop_event: threading.Event, thread: threading.Thread) -> None:
+    `policy` states the limits the thread enforced (ceiling, cache bound, polling cadence,
+    wall budget).
+    """
+
+    def __init__(
+        self, stop_event: threading.Event, thread: threading.Thread, policy: dict[str, object]
+    ) -> None:
         self._stop_event = stop_event
         self._thread = thread
+        self.policy = policy
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -149,20 +169,35 @@ def _install_capture_watchdog(
     variant: str,
     out_dir: Path,
     *,
-    interval_s: float = 0.5,
+    interval_s: float = _WATCHDOG_INTERVAL_S,
     wall_budget_s: float = _WALL_BUDGET_S,
+    cache_limit_bytes: int = _CAPTURE_CACHE_LIMIT_BYTES,
 ) -> _CaptureWatchdog:
     """Abort a heavy capture run before it exhausts unified memory or its wall budget.
 
-    Modeled on scripts/run_showcase.py's `_install_live_watchdog`: a daemon thread polls
-    `mx.get_active_memory()` and elapsed wall time, and on breach writes an honest abort
+    Modeled on scripts/run_showcase.py's `_install_live_watchdog`: bounds MLX's retained
+    cache at `cache_limit_bytes`, then a daemon thread polls active plus cached allocator
+    bytes and elapsed wall time every `interval_s`, and on breach writes an honest abort
     artifact (`<out-dir>/<variant>.abort.json`) before killing the process with a nonzero
-    exit — no partial/misleading latent fixture is ever written.
+    exit — no partial/misleading latent fixture is ever written. A sample that raises aborts
+    too (reason `sample_error`) instead of leaving the run with a dead backstop.
     """
     memory_size = int(mx.device_info().get("memory_size", 0))
     if memory_size <= _MEMORY_HEADROOM_BYTES:
         raise RuntimeError(f"could not establish a safe memory ceiling from {memory_size} bytes")
     ceiling_bytes = memory_size - _MEMORY_HEADROOM_BYTES
+    mx.set_cache_limit(cache_limit_bytes)
+    policy: dict[str, object] = {
+        "ceiling_bytes": ceiling_bytes,
+        "cache_limit_bytes": cache_limit_bytes,
+        "interval_s": interval_s,
+        "wall_budget_s": wall_budget_s,
+    }
+    print(
+        f"watchdog[{variant}]: ceiling {ceiling_bytes / 1024**3:.1f} GiB on active+cache, "
+        f"cache bound {cache_limit_bytes / 1024**3:.1f} GiB, poll {interval_s} s, "
+        f"wall {wall_budget_s:.0f} s"
+    )
     stop_event = threading.Event()
     started = time.monotonic()
     abort_path = _abort_artifact_path(variant, out_dir)
@@ -170,9 +205,26 @@ def _install_capture_watchdog(
     def _watch() -> None:
         while not stop_event.wait(interval_s):
             elapsed_s = time.monotonic() - started
-            active_bytes = int(mx.get_active_memory())
+            try:
+                active_bytes = int(mx.get_active_memory())
+                cache_bytes = int(mx.get_cache_memory())
+            except Exception as exc:
+                _commit_capture_watchdog_abort(
+                    abort_path,
+                    {
+                        "status": "aborted",
+                        "variant": variant,
+                        "reason": "sample_error",
+                        "error": f"{type(exc).__name__}: {exc}",
+                        "elapsed_s": elapsed_s,
+                        **policy,
+                    },
+                    stop_event=stop_event,
+                )
+                continue
             reason = _watchdog_breach_reason(
                 active_bytes=active_bytes,
+                cache_bytes=cache_bytes,
                 ceiling_bytes=ceiling_bytes,
                 elapsed_s=elapsed_s,
                 wall_budget_s=wall_budget_s,
@@ -186,16 +238,17 @@ def _install_capture_watchdog(
                     "variant": variant,
                     "reason": reason,
                     "active_memory_bytes": active_bytes,
-                    "ceiling_bytes": ceiling_bytes,
+                    "cache_memory_bytes": cache_bytes,
+                    "total_memory_bytes": active_bytes + cache_bytes,
                     "elapsed_s": elapsed_s,
-                    "wall_budget_s": wall_budget_s,
+                    **policy,
                 },
                 stop_event=stop_event,
             )
 
     thread = threading.Thread(target=_watch, name=f"{variant}-capture-watchdog", daemon=True)
     thread.start()
-    return _CaptureWatchdog(stop_event, thread)
+    return _CaptureWatchdog(stop_event, thread, policy)
 
 
 def _install_memory_caps() -> None:

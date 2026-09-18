@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- The showcase, benchmark, latent-capture and A/B harness workers now count MLX's retained
+  buffer cache toward their memory ceiling instead of active memory alone. Buffers MLX has
+  freed stay resident in that cache until it is trimmed, and its default limit sits near device
+  memory, so a worker could hold gigabytes the watchdog never saw. Each watchdog now bounds the
+  cache pool when it starts (2 GiB for generation workers; 4 GiB for decode reps, which covers
+  their peak so the timed decode still runs from a warm pool; the A/B script keeps its own
+  per-condition bounds), polls every 50 ms, and records the ceiling, cache bound, cadence and
+  wall budget in its abort artifact and in each worker's result. A memory sample that raises
+  now aborts the worker with reason `sample_error` rather than ending the watchdog thread in
+  silence. Harness only: the library and its decode path are unchanged, and the committed
+  showcase numbers were not re-measured.
+
 ## [0.8.2] - 2026-09-17
 
 TAEF2 previews now track the full FLUX.2 VAE closely.

@@ -128,6 +128,13 @@ def _parse_worker_stdout(stdout: str) -> dict[str, Any]:
     return payload
 
 
+# The decode-rep worker's cache bound. It must cover the heaviest rep's peak (the FLUX.1 VAE
+# at 512x512 reaches ~3.7 GiB) so nothing is evicted between the warmup and the timed decode,
+# or the committed steady-state timings would move; 28 GiB ceiling - 4 GiB pool still leaves
+# every rep far below the memory arm.
+_BENCH_CACHE_LIMIT_BYTES = 4 * 1024**3
+
+
 def _watchdog_abort_path(save_to: Path) -> Path:
     """Where this rep's watchdog abort artifact would be written, if any.
 
@@ -457,7 +464,7 @@ def _save_webp(image_uint8_nhwc: Any, target: Path) -> None:
 def _worker_main(args: argparse.Namespace) -> int:
     """Run one (condition, rep) inside this subprocess. Emit sentinel.
 
-    Installs the same active-memory watchdog the live-scenario worker path uses
+    Installs the same active-plus-cache memory watchdog the live-scenario worker path uses
     (scripts.run_showcase._install_live_watchdog) around model construction + decode, so
     a rep that would otherwise page-storm the machine aborts with an honest artifact
     (see _watchdog_abort_path) and a nonzero exit instead of risking a kernel panic.
@@ -476,6 +483,7 @@ def _worker_main(args: argparse.Namespace) -> int:
         _watchdog_abort_path(args.save_to),
         f"{args.condition}_rep{args.rep}",
         wall_budget_s=_worker_wall_budget_s(args.condition),
+        cache_limit_bytes=_BENCH_CACHE_LIMIT_BYTES,
     )
     try:
         import mlx.core as mx
@@ -521,6 +529,7 @@ def _worker_main(args: argparse.Namespace) -> int:
                 "image_path": _repo_relative(args.save_to),
                 "requested_cap_gb": args.applied_cap_gb,
                 "installed_cap_gb": installed_cap_gb,
+                "watchdog": watchdog.policy,
             }
         )
     )

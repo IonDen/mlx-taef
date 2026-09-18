@@ -445,6 +445,13 @@ _SCENARIO_DISPATCH = {
 _LIVE_SCENARIOS = frozenset({"live_preview", "zimage_live_preview", "combined"})
 _LIVE_WALL_BUDGET_S = 3300.0
 _MEMORY_HEADROOM_BYTES = 4 * 1024**3
+# Every model-loading worker bounds MLX's retained-buffer pool. Freed buffers sit in that pool,
+# resident but not "active", and its default limit is near device memory; the watchdog counts
+# the pool toward the ceiling, so the bound is what makes the arithmetic close on 32 GB:
+# the heaviest live scenario (Z-Image) peaks near 25.9 GiB active, and 25.9 + 2 stays under
+# the 28 GiB ceiling. The decode-rep worker uses a larger bound (see scripts/bench_decode.py).
+_LIVE_CACHE_LIMIT_BYTES = 2 * 1024**3
+_WATCHDOG_INTERVAL_S = 0.05
 
 
 def _all_scenario_order() -> list[str]:
@@ -638,12 +645,18 @@ def _write_report(path: Path, report: dict[str, Any]) -> None:
 def _live_watchdog_breach_reason(
     *,
     active_bytes: int,
+    cache_bytes: int,
     ceiling_bytes: int,
     elapsed_s: float,
     wall_budget_s: float,
 ) -> str | None:
-    """Return the first live-worker safety limit that has been breached."""
-    if active_bytes >= ceiling_bytes:
+    """Return the first live-worker safety limit that has been breached.
+
+    The memory arm compares the MLX allocator's resident footprint, active plus retained
+    cache, against the ceiling: cached buffers are freed from the graph's point of view but
+    still occupy unified memory until MLX releases them (`mx.clear_cache` or the cache limit).
+    """
+    if active_bytes + cache_bytes >= ceiling_bytes:
         return "memory_ceiling"
     if elapsed_s > wall_budget_s:
         return "wall_budget"
@@ -680,11 +693,18 @@ def _resolve_override_wired_gb(cap_gb: int, device_wired_gb: int) -> int | None:
 
 
 class _LiveWatchdog:
-    """Cooperatively stop a live-worker watchdog thread after generation."""
+    """Cooperatively stop a live-worker watchdog thread after generation.
 
-    def __init__(self, stop_event: threading.Event, thread: threading.Thread) -> None:
+    `policy` states the limits the thread enforced (ceiling, cache bound, polling cadence,
+    wall budget) so a worker can record them next to its result.
+    """
+
+    def __init__(
+        self, stop_event: threading.Event, thread: threading.Thread, policy: dict[str, Any]
+    ) -> None:
         self._stop_event = stop_event
         self._thread = thread
+        self.policy = policy
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -695,25 +715,56 @@ def _install_live_watchdog(
     result_path: Path,
     scenario: str,
     *,
-    interval_s: float = 0.5,
+    interval_s: float = _WATCHDOG_INTERVAL_S,
     wall_budget_s: float = _LIVE_WALL_BUDGET_S,
+    cache_limit_bytes: int = _LIVE_CACHE_LIMIT_BYTES,
 ) -> _LiveWatchdog:
-    """Abort a live worker before it exhausts unified memory or its wall budget."""
+    """Abort a live worker before it exhausts unified memory or its wall budget.
+
+    Bounds MLX's retained-buffer pool at `cache_limit_bytes` first, then polls active plus
+    cached allocator bytes every `interval_s` (the poll runs while `mx.eval` holds no GIL, so
+    a fast cadence is cheap). A sample that raises is itself a breach: the worker aborts
+    with reason `sample_error` rather than running on with a dead backstop.
+    """
     import mlx.core as mx
 
     memory_size = int(mx.device_info().get("memory_size", 0))
     if memory_size <= _MEMORY_HEADROOM_BYTES:
         raise TaefError(f"could not establish a safe memory ceiling from {memory_size} bytes")
     ceiling_bytes = memory_size - _MEMORY_HEADROOM_BYTES
+    mx.set_cache_limit(cache_limit_bytes)
+    policy: dict[str, Any] = {
+        "ceiling_bytes": ceiling_bytes,
+        "cache_limit_bytes": cache_limit_bytes,
+        "interval_s": interval_s,
+        "wall_budget_s": wall_budget_s,
+    }
     stop_event = threading.Event()
     started = time.monotonic()
 
     def _watch() -> None:
         while not stop_event.wait(interval_s):
             elapsed_s = time.monotonic() - started
-            active_bytes = int(mx.get_active_memory())
+            try:
+                active_bytes = int(mx.get_active_memory())
+                cache_bytes = int(mx.get_cache_memory())
+            except Exception as exc:
+                _commit_watchdog_abort(
+                    result_path,
+                    {
+                        "status": "aborted",
+                        "scenario": scenario,
+                        "reason": "sample_error",
+                        "error": f"{type(exc).__name__}: {exc}",
+                        "elapsed_s": elapsed_s,
+                        **policy,
+                    },
+                    stop_event=stop_event,
+                )
+                continue
             reason = _live_watchdog_breach_reason(
                 active_bytes=active_bytes,
+                cache_bytes=cache_bytes,
                 ceiling_bytes=ceiling_bytes,
                 elapsed_s=elapsed_s,
                 wall_budget_s=wall_budget_s,
@@ -727,16 +778,17 @@ def _install_live_watchdog(
                     "scenario": scenario,
                     "reason": reason,
                     "active_memory_bytes": active_bytes,
-                    "ceiling_bytes": ceiling_bytes,
+                    "cache_memory_bytes": cache_bytes,
+                    "total_memory_bytes": active_bytes + cache_bytes,
                     "elapsed_s": elapsed_s,
-                    "wall_budget_s": wall_budget_s,
+                    **policy,
                 },
                 stop_event=stop_event,
             )
 
     thread = threading.Thread(target=_watch, name=f"{scenario}-watchdog", daemon=True)
     thread.start()
-    return _LiveWatchdog(stop_event, thread)
+    return _LiveWatchdog(stop_event, thread, policy)
 
 
 # ---------------------------------------------------------------------------
@@ -1043,6 +1095,7 @@ def main(argv: list[str] | None = None) -> int:
             result = _SCENARIO_DISPATCH[args.live_worker](args)
         finally:
             watchdog.stop()
+        result["watchdog"] = watchdog.policy
         _write_report(args.live_result, result)
         return 0
 

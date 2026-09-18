@@ -93,21 +93,42 @@ def test_pending_units_reruns_results_that_belong_to_a_different_latent(tmp_path
     assert ab._pending_units(tmp_path, "lat", latent_sha256="bbbb") == list(ab.CONDITIONS)
 
 
-def test_every_worker_installs_a_cache_limit_before_loading_anything(monkeypatch) -> None:
+def test_every_worker_hands_its_cache_bound_to_the_watchdog(monkeypatch, tmp_path) -> None:
     """Catches: a worker (the full-VAE arm is the heaviest) running with MLX's near-device-size
-    default cache limit, where retained buffers sit far above the active-memory watchdog's view."""
-    import scripts.ab_taef2_bn_domain as ab
-    import scripts.bench_decode as bench
+    default cache limit, or with the watchdog's generic bound instead of the condition's own
+    (6 GiB for the full VAE, 2 GiB for the TAEF2 arms). The watchdog installs the bound, so
+    the worker must pass it; a second bare `mx.set_cache_limit` call would be overridden."""
+    import argparse
 
-    calls: list[tuple[str, int]] = []
-    monkeypatch.setattr(bench, "_install_memory_caps", lambda cap: calls.append(("caps", cap)) or 7)
-    monkeypatch.setattr(mx, "set_cache_limit", lambda n: calls.append(("cache", n)))
+    import scripts.ab_taef2_bn_domain as ab
+    import scripts.run_showcase as rs
+
+    class _StopError(Exception):
+        pass
+
+    class _FakeWatchdog:
+        def stop(self) -> None:
+            pass
+
+    install_calls: list[dict[str, object]] = []
+
+    def _fake_install(result_path, scenario: str, **kwargs: object) -> _FakeWatchdog:
+        install_calls.append(kwargs)
+        return _FakeWatchdog()
+
+    monkeypatch.setattr(rs, "_install_live_watchdog", _fake_install)
+    monkeypatch.setattr(ab, "_install_worker_limits", lambda condition: 7)
+    monkeypatch.setattr(mx, "load", lambda path: (_ for _ in ()).throw(_StopError()))
 
     for condition in ab.CONDITIONS:
-        calls.clear()
-        assert ab._install_worker_limits(condition) == 7
-        assert [name for name, _ in calls] == ["caps", "cache"]
-        assert 0 < calls[1][1] <= 8 * 1024**3
+        install_calls.clear()
+        args = argparse.Namespace(
+            worker=condition, latent=tmp_path / "lat.safetensors", out_dir=tmp_path
+        )
+        with pytest.raises(_StopError):
+            ab._worker_main(args)
+        assert install_calls[0]["cache_limit_bytes"] == ab._cache_limit_bytes(condition)
+        assert 0 < ab._cache_limit_bytes(condition) <= 8 * 1024**3
 
 
 def test_score_keeps_a_computed_lpips_when_the_other_arm_fails(tmp_path: Path, monkeypatch) -> None:
