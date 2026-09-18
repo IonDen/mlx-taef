@@ -97,6 +97,7 @@ TAEF1 = ModelKernel(
             "dev-fill-catvton",
             "krea-dev",
             "dev-krea",
+            # kept from earlier releases; not mflux registry aliases
             "flux1",
             "flux-dev",
             "flux-schnell",
@@ -122,7 +123,7 @@ TAEF2 = ModelKernel(
     integration=MfluxBinding(
         # mflux 0.19.1 aliases of the FLUX.2 Klein family (4B, 9B, 9b-kv, base-4B, base-9B).
         mflux_models=(
-            "flux2",
+            "flux2",  # kept from earlier releases; not an mflux registry alias
             "flux2-klein",
             "flux2-klein-4b",
             "klein-4b",

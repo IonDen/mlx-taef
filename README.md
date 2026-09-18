@@ -134,7 +134,7 @@ The same capture as a compact, single-panel loop: the previews play through, the
 final frame.
 
 Wiring the callback into a generation looks like this (FLUX.2 Klein shown; the GIFs above use
-FLUX.1-dev / `variant="taef1"` with the parameters noted):
+FLUX.1-dev, which resolves to TAEF1, with the parameters noted):
 
 ```python
 from mflux.models.common.config.model_config import ModelConfig
@@ -159,7 +159,7 @@ model.generate_image(
 )
 ```
 
-TAEF2 decodes the latent exactly as mflux hands it to the callback, so the model and a save path are all the configuration it needs: `flux=model` picks the matching tiny decoder from the model's mflux config (FLUX.1, FLUX.2 Klein, Z-Image, Qwen-Image and Krea 2 families), and `variant=` overrides it. A model outside those families raises at construction and names the override. Releases before 0.8.2 also read the Flux2VAE batch-norm statistics from `flux=model` and applied the VAE's inverse normalization before decoding. Measured against the full VAE that made previews worse (SSIM 0.59 against 0.92 on the same latent, with crushed shadows and oversaturated color), so it is off by default now. `auto_bn=True` with `flux=model`, or explicit `bn_mean=` / `bn_var=`, still turn it on and log a warning. `callback.resolved_bn` reports which path is active: `"none"`, `"auto"` or `"explicit"`.
+TAEF2 decodes the latent exactly as mflux hands it to the callback, so the model and a save path are all the configuration it needs. `flux=model` picks the matching tiny decoder from the model's mflux config (the FLUX.1, FLUX.2 Klein, Z-Image, Qwen-Image and Krea 2 families), and `variant=` overrides it. A model outside those families raises at construction and names the override. Releases before 0.8.2 also read the Flux2VAE batch-norm statistics from `flux=model` and applied the VAE's inverse normalization before decoding. Measured against the full VAE that made previews worse (SSIM 0.59 against 0.92 on the same latent, with crushed shadows and oversaturated color), so it is off by default now. `auto_bn=True` with `flux=model`, or explicit `bn_mean=` / `bn_var=`, still turn it on and log a warning. `callback.resolved_bn` reports which path is active: `"none"`, `"auto"` or `"explicit"`.
 
 Preview failures default to `on_error="disable"`: the callback logs one warning, stops previewing for the rest of that generation, and lets mflux finish the image. Use `on_error="raise"` when an integration or test needs fail-fast behavior. Calling the same callback in a later generation resets the disabled state.
 

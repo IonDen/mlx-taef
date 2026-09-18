@@ -16,9 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   copies resolve through `base_model`. `variant=` still overrides. A model outside those families
   raises `UnsupportedMfluxModelError` at construction, before any weights load, naming the model
   and the override; `LivePreviewCallback()` with no model keeps the `taef2` default. The
-  callback exposes the resolved choice as `callback.variant`.
+  callback exposes the resolved choice as `callback.variant`. Krea 2 Raw resolves to the same
+  `krea2` decoder as Krea 2 Turbo: mflux runs both through one initializer, VAE and latent
+  creator.
 
 ### Changed
+- `LivePreviewCallback(flux=model)` without `variant=` used to run TAEF2 whatever the model
+  was; for a FLUX.2 Klein model nothing changes, while a Z-Image, Qwen-Image, Krea 2 or FLUX.1
+  model now gets its own decoder instead of a wrong-channel error at the first preview step.
+  An object without a usable `model_config`, or a model outside the supported families, now
+  raises `UnsupportedMfluxModelError` at construction instead of running TAEF2; pass `variant=`
+  to keep the old choice.
 - The showcase, benchmark, latent-capture and A/B harness workers now count MLX's retained
   buffer cache toward their memory ceiling instead of active memory alone; together those are
   the bytes the MLX allocator holds. Each watchdog bounds the cache pool when it starts and states

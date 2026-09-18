@@ -27,15 +27,25 @@ MIDBLOCK_GN: MappingProxyType[str, bool] = MappingProxyType(
 """Compatibility view; architecture construction reads `ModelKernel.midblock_gn`."""
 
 
-def _binding_claims(kernel: ModelKernel, *, names: Sequence[str], aliases: Sequence[str]) -> bool:
-    binding = kernel.integration
-    if binding is None:
-        return False
-    prefixes = tuple(p.lower() for p in binding.mflux_model_name_prefixes)
-    if any(name.startswith(prefix) for name in names for prefix in prefixes):
-        return True
-    known = {alias.lower() for alias in binding.mflux_models}
-    return any(alias in known for alias in aliases)
+def _claimants_by_prefix(kernels: Sequence[ModelKernel], name: str) -> list[ModelKernel]:
+    return [
+        k
+        for k in kernels
+        if k.integration is not None
+        and any(name.startswith(p.lower()) for p in k.integration.mflux_model_name_prefixes)
+    ]
+
+
+def _claimants_by_alias(
+    kernels: Sequence[ModelKernel], aliases: Sequence[str]
+) -> list[ModelKernel]:
+    wanted = {a.lower() for a in aliases}
+    return [
+        k
+        for k in kernels
+        if k.integration is not None
+        and any(alias.lower() in wanted for alias in k.integration.mflux_models)
+    ]
 
 
 def resolve_kernel_for_mflux(
@@ -47,36 +57,41 @@ def resolve_kernel_for_mflux(
 ) -> ModelKernel:
     """Return the kernel that previews the mflux model named by these `ModelConfig` fields.
 
-    `base_model` (the canonical name behind a pinned mirror or a pre-quantized copy) and
-    `model_name` are matched, case-insensitively, against each binding's owner-qualified name
-    prefixes; when neither matches, `aliases` are matched against each binding's mflux alias
-    list. Exactly one kernel must claim the model: none raises
-    `UnsupportedMfluxModelError` (naming the model and the supported families), more than
-    one raises `TaefError` (a registry bug, since two tiny decoders cannot share a family).
-    `kernels` defaults to the shipped registry.
+    Three arms are tried in order and the first that claims the model decides: `base_model`
+    (the canonical name behind a pinned mirror or a pre-quantized copy) against each binding's
+    owner-qualified name prefixes, then `model_name` against the same prefixes, then `aliases`
+    against each binding's mflux alias list. Every comparison is case-insensitive. Within an
+    arm exactly one kernel may claim the model: more than one raises `TaefError` (a registry
+    bug, since two tiny decoders cannot share a family). No arm claiming it raises
+    `UnsupportedMfluxModelError`, naming the model and the supported families. `kernels`
+    defaults to the shipped registry.
     """
     candidates = tuple(KERNELS.values() if kernels is None else kernels)
-    names = tuple(n.lower() for n in (base_model, model_name) if n)
-    lowered_aliases = tuple(a.lower() for a in aliases)
-    claimants = [k for k in candidates if _binding_claims(k, names=names, aliases=lowered_aliases)]
-    if len(claimants) == 1:
-        return claimants[0]
+    if isinstance(aliases, str):
+        aliases = (aliases,)
     described = base_model or model_name or "<unnamed>"
-    if not claimants:
-        families = ", ".join(
-            prefix.rstrip("-")
-            for k in candidates
-            if k.integration is not None
-            for prefix in k.integration.mflux_model_name_prefixes
-        )
-        raise UnsupportedMfluxModelError(
-            f"no preview kernel for mflux model {described!r} (aliases {list(aliases)!r}). "
-            f"Supported families: {families}. Pass variant= explicitly to choose a decoder "
-            "for a model outside these families."
-        )
-    raise TaefError(
-        f"mflux model {described!r} is claimed by more than one kernel: "
-        f"{', '.join(k.name for k in claimants)}"
+    arms: list[list[ModelKernel]] = [
+        _claimants_by_prefix(candidates, n.lower()) for n in (base_model, model_name) if n
+    ]
+    arms.append(_claimants_by_alias(candidates, aliases))
+    for claimants in arms:
+        if len(claimants) == 1:
+            return claimants[0]
+        if claimants:
+            raise TaefError(
+                f"mflux model {described!r} is claimed by more than one kernel: "
+                f"{', '.join(k.name for k in claimants)}"
+            )
+    families = ", ".join(
+        prefix.rstrip("-")
+        for k in candidates
+        if k.integration is not None
+        for prefix in k.integration.mflux_model_name_prefixes
+    )
+    raise UnsupportedMfluxModelError(
+        f"no preview kernel for mflux model {described!r} (aliases {list(aliases)!r}). "
+        f"Supported families: {families}. Pass variant= explicitly to choose a decoder for a "
+        "model outside these families."
     )
 
 

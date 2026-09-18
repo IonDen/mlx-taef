@@ -6,6 +6,7 @@ Hierarchy:
     ├── MfluxNotInstalledError             (+ ImportError) mflux integration dep missing
     ├── MlxTeacacheNotInstalledError       (+ ImportError) showcase teacache dep missing
     ├── UnknownKernelError                 (+ KeyError) name not in the kernel registry
+    ├── UnsupportedMfluxModelError         (+ LookupError) mflux model has no preview kernel here
     ├── UnknownArchitectureError           (+ KeyError) arch/role has no registered builder
     ├── SchemaVersionError                 raised by the bundled showcase tooling
     ├── FixtureLatentMissingError          (+ FileNotFoundError) bundled showcase tooling

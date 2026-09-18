@@ -145,8 +145,9 @@ def _infer_variant(flux: object | None) -> str:
     model_config = getattr(flux, "model_config", None)
     if model_config is None:
         raise UnsupportedMfluxModelError(
-            f"cannot infer the preview variant: {type(flux).__name__!r} has no model_config "
-            "attribute (every mflux model sets one). Pass variant= explicitly."
+            f"cannot infer the preview variant: {type(flux).__name__!r} has no usable "
+            "model_config (every mflux model sets one before generating). Pass variant= "
+            "explicitly."
         )
     return resolve_kernel_from_model_config(model_config).name
 
@@ -162,9 +163,10 @@ class LivePreviewCallback:
 
     Args:
         flux: optional reference to the mflux model instance the callback will be
-            registered on. Only read when `auto_bn=True` (the mflux callback contract does
-            not pass the model at fire time); previews do not need it otherwise. Typed as
-            `object` to keep this module import-clean of mflux.
+            registered on. Read at construction to infer `variant` from the model's
+            `model_config` (when `variant` is not given) and, with `auto_bn=True`, to extract
+            the Flux2VAE batch-norm statistics; the mflux callback contract does not pass the
+            model at fire time. Typed as `object` to keep this module import-clean of mflux.
         auto_bn: TAEF2-only, default False. TAEF2 decodes the normalized latent mflux hands
             the callback, so by default no batch-norm statistics are applied. Setting it to
             True (with a `flux` instance, `variant='taef2'`) extracts the VAE BN running stats
@@ -173,10 +175,15 @@ class LivePreviewCallback:
             a 512x512 FLUX.2 Klein base 4B latent) and logs a warning; it remains for callers who
             relied on it. For other variants it is a no-op and logs an info line. Explicit
             `bn_mean`/`bn_var` take precedence and carry the same warning.
-        variant: 'taef1' (FLUX.1), 'taef2' (FLUX.2 Klein), 'zimage' (Z-Image /
-            Z-Image-Turbo, which reuses TAEF1's weights), 'qwen-image'
-            (Qwen-Image / Qwen-Image-Edit, via taew2.1), or 'krea2' (Krea 2,
-            which shares the qwen-image taew2.1 weights).
+        variant: which tiny decoder to run. Default None: with `flux` given, it is inferred
+            from the model's `model_config` (FLUX.1 family -> 'taef1', FLUX.2 Klein ->
+            'taef2', Z-Image -> 'zimage', Qwen-Image / Qwen-Image-Edit -> 'qwen-image',
+            Krea 2 -> 'krea2'); a model outside those families raises
+            `UnsupportedMfluxModelError` before any weights load. With no `flux`, None means
+            'taef2'. An explicit value always wins: 'taef1' (FLUX.1), 'taef2' (FLUX.2 Klein),
+            'zimage' (Z-Image / Z-Image-Turbo, which reuses TAEF1's weights), 'qwen-image'
+            (via taew2.1), or 'krea2' (which shares the qwen-image taew2.1 weights). The
+            resolved choice is readable as `callback.variant`.
         every: emit a preview every Nth iteration. Default 5. When
             `numbered_frames=True` this is forced to 1 so the gallery
             captures every step.
@@ -246,7 +253,7 @@ class LivePreviewCallback:
             model_cls = _VARIANT_CLASSES[resolved_variant]
         except KeyError:
             raise ValueError(
-                f"variant must be one of {sorted(_VARIANT_CLASSES)}, got {variant!r}"
+                f"variant must be one of {sorted(_VARIANT_CLASSES)}, got {resolved_variant!r}"
             ) from None
         self.model: Taef = model_cls.from_pretrained(include_encoder=False)
         _binding = self.model._kernel.integration

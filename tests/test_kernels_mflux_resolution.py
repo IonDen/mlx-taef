@@ -1,15 +1,17 @@
 """Resolving the preview kernel from an mflux model's ModelConfig.
 
-Every case here is offline: the fake configs carry the exact strings mflux 0.19.1's registry
-pins (verified 2026-09-18 against the installed `model_config.py`), and the one test that uses
-mflux's real `ModelConfig` objects imports them without loading weights.
+Every case here is offline. The hand-written table carries model names and a sample of the
+aliases mflux 0.19.1 registers (read 2026-09-18 from the installed `model_config.py`) so the
+resolver is pinned even without mflux; the exhaustive test at the bottom walks the installed
+registry itself, so a renamed, added or dropped model in a future mflux turns CI red.
 """
 
 from dataclasses import dataclass, field
 
 import pytest
 
-from mlx_taef.errors import TaefError, UnsupportedMfluxModelError
+from mlx_taef import UnsupportedMfluxModelError
+from mlx_taef.errors import TaefError
 from mlx_taef.kernels import (
     KERNELS,
     resolve_kernel_for_mflux,
@@ -26,9 +28,9 @@ class _FakeModelConfig:
     base_model: str | None = None
 
 
-# (model_name, aliases) exactly as mflux 0.19.1 registers them -> expected kernel name, or None
-# when the model has no preview kernel here (Lens is the Klein contract but is tracked separately;
-# FIBO, ERNIE, Ideogram, Boogu, SeedVR2 have no tiny decoder in this library).
+# (model_name, a sample of its mflux 0.19.1 aliases) -> expected kernel name, or None when the
+# model has no preview kernel here (Lens is the Klein contract but is tracked separately; FIBO,
+# ERNIE, Ideogram, Boogu, SeedVR2 have no tiny decoder in this library).
 _REGISTRY_CASES: list[tuple[str, list[str], str | None]] = [
     ("black-forest-labs/FLUX.1-dev", ["dev"], "taef1"),
     ("black-forest-labs/FLUX.1-schnell", ["schnell"], "taef1"),
@@ -52,7 +54,7 @@ _REGISTRY_CASES: list[tuple[str, list[str], str | None]] = [
     ("Tongyi-MAI/Z-Image-Turbo", ["z-image-turbo", "zimage-turbo"], "zimage"),
     ("Tongyi-MAI/Z-Image-Turbo", ["z-image-turbo-controlnet", "z-image-controlnet"], "zimage"),
     ("krea/Krea-2-Turbo", ["krea-2", "krea2"], "krea2"),
-    ("krea/Krea-2-Raw", ["krea-2-raw", "krea2-raw"], None),
+    ("krea/Krea-2-Raw", ["krea-2-raw", "krea2-raw"], "krea2"),
     ("Comfy-Org/Lens", ["lens-turbo", "lens"], None),
     ("briaai/FIBO", ["fibo"], None),
     ("baidu/ERNIE-Image", ["ernie-image"], None),
@@ -95,6 +97,60 @@ def test_aliases_resolve_a_local_path_model_name() -> None:
     assert resolve_kernel_from_model_config(config) is KERNELS["zimage"]
 
 
+def test_alias_matching_is_case_insensitive() -> None:
+    """Catches: the alias arm comparing raw strings; mflux's own alias lists mix case
+    (`flux2-klein-4B`, `klein-9B-kv`), and the alias arm is the one a local checkout with an
+    unrecognised name relies on."""
+    config = _FakeModelConfig(model_name="/Users/me/models/klein", aliases=["Klein-9B-KV"])
+    assert resolve_kernel_from_model_config(config) is KERNELS["taef2"]
+
+
+def test_krea_2_raw_resolves_by_name_alone() -> None:
+    """Catches: the Krea prefix narrowed back to Turbo, so a Krea-2-Raw checkpoint whose
+    config carries no aliases (a local path) is rejected although mflux runs it through the
+    same VAE and latent creator as Turbo."""
+    config = _FakeModelConfig(model_name="krea/Krea-2-Raw")
+    assert resolve_kernel_from_model_config(config) is KERNELS["krea2"]
+
+
+def test_error_class_is_part_of_the_package_root_api() -> None:
+    """Catches: `UnsupportedMfluxModelError` importable from the root by accident (imported for
+    another reason) but missing from `__all__`, so a star-import or the API docs lose it."""
+    import mlx_taef
+
+    assert "UnsupportedMfluxModelError" in mlx_taef.__all__
+
+
+def test_a_family_prefix_inside_the_name_is_not_a_match() -> None:
+    """Catches: `prefix in name` standing in for `name.startswith(prefix)`; a mirror named
+    `archive/old-black-forest-labs/FLUX.1-dev-2024` would resolve to taef1 instead of being
+    rejected."""
+    config = _FakeModelConfig(model_name="archive/old-black-forest-labs/FLUX.1-dev-2024")
+    with pytest.raises(UnsupportedMfluxModelError):
+        resolve_kernel_from_model_config(config)
+
+
+def test_base_model_is_consulted_before_model_name_when_they_disagree() -> None:
+    """Catches: the prefix arms being ORed across kernels, so a custom checkpoint whose name
+    carries one family's prefix while its explicit base model names another dies with a
+    "claimed by more than one kernel" error instead of following the base model."""
+    config = _FakeModelConfig(
+        model_name="black-forest-labs/FLUX.1-dev-klein-merge",
+        aliases=["flux2-klein-4b"],
+        base_model="black-forest-labs/FLUX.2-klein-4B",
+    )
+    assert resolve_kernel_from_model_config(config) is KERNELS["taef2"]
+
+
+def test_a_bare_string_of_aliases_is_not_split_into_characters() -> None:
+    """Catches: `aliases="dev"` (a str satisfies Sequence[str]) being iterated into
+    `d`, `e`, `v` and a valid FLUX.1 model rejected."""
+    assert (
+        resolve_kernel_for_mflux(model_name="local/checkout", aliases="dev")  # type: ignore[arg-type]
+        is KERNELS["taef1"]
+    )
+
+
 def test_matching_is_case_insensitive_on_the_name() -> None:
     """Catches: `Tongyi-MAI/z-image-turbo` (a lowercase mirror) failing a case-sensitive prefix."""
     config = _FakeModelConfig(model_name="tongyi-mai/z-image-turbo")
@@ -109,7 +165,7 @@ def test_unknown_model_error_names_the_model_and_every_supported_family() -> Non
         resolve_kernel_from_model_config(config)
     message = str(excinfo.value)
     assert "acme/NewModel-1" in message
-    for family in ("FLUX.1", "FLUX.2-klein", "Z-Image", "Qwen-Image", "Krea-2-Turbo"):
+    for family in ("FLUX.1", "FLUX.2-klein", "Z-Image", "Qwen-Image", "Krea-2"):
         assert family in message
     assert "variant=" in message
 
@@ -148,7 +204,9 @@ def test_registry_prefixes_and_aliases_are_disjoint_across_kernels() -> None:
         if kernel.integration is None:
             continue
         for alias in kernel.integration.mflux_models:
-            assert alias.lower() not in seen_aliases, (alias, kernel.name, seen_aliases.get(alias))
+            # Registered aliases are lowercase; the resolver folds the model's side.
+            assert alias == alias.lower(), (alias, kernel.name)
+            assert alias not in seen_aliases, (alias, kernel.name, seen_aliases.get(alias))
             seen_aliases[alias.lower()] = kernel.name
         prefixes.extend(
             (p.lower(), kernel.name) for p in kernel.integration.mflux_model_name_prefixes
@@ -157,6 +215,73 @@ def test_registry_prefixes_and_aliases_are_disjoint_across_kernels() -> None:
         for p2, k2 in prefixes:
             if k1 != k2:
                 assert not p1.startswith(p2), (p1, k1, p2, k2)
+
+
+# Every key of mflux 0.19.1's AVAILABLE_MODELS -> the kernel that previews it, or None. A key
+# missing from this map (a model mflux added) fails the exhaustive test with its name, so it has
+# to be classified here on purpose rather than claimed or rejected by accident.
+_EXPECTED_BY_REGISTRY_KEY: dict[str, str | None] = {
+    "dev": "taef1",
+    "schnell": "taef1",
+    "dev-kontext": "taef1",
+    "dev-fill": "taef1",
+    "dev-redux": "taef1",
+    "dev-depth": "taef1",
+    "dev-controlnet-canny": "taef1",
+    "schnell-controlnet-canny": "taef1",
+    "dev-controlnet-upscaler": "taef1",
+    "dev-fill-catvton": "taef1",
+    "krea-dev": "taef1",
+    "flux2-klein-4b": "taef2",
+    "flux2-klein-9b": "taef2",
+    "flux2-klein-9b-kv": "taef2",
+    "flux2-klein-base-4b": "taef2",
+    "flux2-klein-base-9b": "taef2",
+    "qwen-image": "qwen-image",
+    "qwen-image-edit": "qwen-image",
+    "z-image": "zimage",
+    "z-image-turbo": "zimage",
+    "z-image-turbo-controlnet-union-2.1": "zimage",
+    "krea-2": "krea2",
+    "krea-2-raw": "krea2",
+    "lens-turbo": None,
+    "fibo": None,
+    "fibo-lite": None,
+    "fibo-edit": None,
+    "fibo-edit-rmbg": None,
+    "ernie-image": None,
+    "ernie-image-turbo": None,
+    "seedvr2-3b": None,
+    "seedvr2-7b": None,
+    "ideogram-4-fp8": None,
+    "boogu-image-turbo": None,
+}
+
+
+def test_every_installed_mflux_registry_entry_is_classified() -> None:
+    """Catches: drift between this library and the installed mflux registry in either
+    direction: a model mflux added that a broad family prefix now claims (or rejects) without
+    anyone deciding, a renamed alias, or a model mflux dropped that the map still lists."""
+    mflux_config = pytest.importorskip("mflux.models.common.config.model_config")
+    available = mflux_config.AVAILABLE_MODELS
+
+    assert set(available) == set(_EXPECTED_BY_REGISTRY_KEY), (
+        "classify every new mflux registry key in _EXPECTED_BY_REGISTRY_KEY, and drop removed ones"
+    )
+    for key, config in available.items():
+        expected = _EXPECTED_BY_REGISTRY_KEY[key]
+        if expected is None:
+            with pytest.raises(UnsupportedMfluxModelError):
+                resolve_kernel_from_model_config(config)
+        else:
+            assert resolve_kernel_from_model_config(config) is KERNELS[expected], key
+        for alias in config.aliases:
+            aliased = mflux_config.ModelConfig.from_name(model_name=alias, base_model=None)
+            if expected is None:
+                with pytest.raises(UnsupportedMfluxModelError):
+                    resolve_kernel_from_model_config(aliased)
+            else:
+                assert resolve_kernel_from_model_config(aliased) is KERNELS[expected], alias
 
 
 def test_real_mflux_model_configs_resolve() -> None:

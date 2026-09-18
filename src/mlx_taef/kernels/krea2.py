@@ -42,14 +42,18 @@ KREA2 = ModelKernel(
     latent=LatentSpec(channels=16),
     source=QWEN_IMAGE.source,  # shared converted-cache entry, like ZIMAGE reuses TAEF1.source
     integration=MfluxBinding(
+        # mflux 0.19.1 aliases of Krea-2-Turbo and Krea-2-Raw: both run through the same
+        # initializer, VAE and latent creator (the Krea 2 weight definition shares the VAE
+        # between the two variants), so one preview kernel serves both.
         mflux_models=(
             "krea-2",
             "krea2",
-        ),  # verified aliases, mflux 0.18.1 AVAILABLE_MODELS["krea-2"]
+            "krea-2-raw",
+            "krea2-raw",
+        ),
         unpack=unpack_krea2_latent,
         packed_latent_downscale=None,  # 4-D unpacked latent, like zimage — not packed like qwen
-        # Krea-2-Raw is deliberately absent: its latent contract is unverified here.
-        mflux_model_name_prefixes=("krea/Krea-2-Turbo",),
+        mflux_model_name_prefixes=("krea/Krea-2-",),
     ),
     memory_cap_hint_gb=1,
 )

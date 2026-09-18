@@ -9,6 +9,7 @@ from mlx_taef.errors import (
     TaefError,
     UnknownArchitectureError,
     UnknownKernelError,
+    UnsupportedMfluxModelError,
 )
 from mlx_taef.variants import get_memory_cap_hint
 
@@ -25,6 +26,7 @@ __all__ = [
     "TaefError",
     "UnknownArchitectureError",
     "UnknownKernelError",
+    "UnsupportedMfluxModelError",
     "ZImage",
     "get_memory_cap_hint",
 ]

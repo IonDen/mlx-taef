@@ -1267,3 +1267,16 @@ def test_inferred_variant_survives_the_real_mflux_model_config(offline_taef2: ob
     callback = LivePreviewCallback(flux=flux)
 
     assert callback.variant == "taef2"
+
+
+def test_bad_variant_message_names_the_resolved_value_not_the_argument(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches: a kernel that ships an mflux binding without a `_VARIANT_CLASSES` entry making
+    the callback report "got None" (the argument the user never passed) instead of the
+    inferred name that has no class."""
+    import mlx_taef.integrations.mflux as m
+
+    monkeypatch.setattr(m, "_infer_variant", lambda flux: "some-new-kernel")
+    with pytest.raises(ValueError, match="some-new-kernel"):
+        m.LivePreviewCallback(flux=object())

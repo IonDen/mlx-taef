@@ -65,10 +65,13 @@ generation the same way the other variants do (the variant is inferred from the 
 `variant="qwen-image"` spells it out):
 
 ```python
+from mflux.models.common.config.model_config import ModelConfig
+from mflux.models.qwen.variants.txt2img.qwen_image import QwenImage
 from mlx_taef.integrations.mflux import LivePreviewCallback
 
+model = QwenImage(quantize=4, model_config=ModelConfig.qwen_image())
 callback = LivePreviewCallback(flux=model, save_to="preview.png", every=5)
-# register `callback` on your mflux Qwen-Image model before generating
+model.callbacks.register(callback)
 ```
 
 Correctness is gated by committed parity fixtures: the decode and encode paths match the upstream
@@ -114,10 +117,13 @@ preview = taef.decode_image(unpacked_latent)  # uint8 NHWC
 ```
 
 ```python
+from mflux.models.common.config.model_config import ModelConfig
+from mflux.models.krea2 import Krea2 as MfluxKrea2
 from mlx_taef.integrations.mflux import LivePreviewCallback
 
+model = MfluxKrea2(quantize=4, model_config=ModelConfig.krea2())
 callback = LivePreviewCallback(flux=model, save_to="preview.png", every=5)  # infers krea2
-# register `callback` on your mflux Krea 2 model before generating
+model.callbacks.register(callback)
 ```
 
 Correctness is gated the same way as Qwen-Image: decoding the committed (red apple, seed 42) Krea 2
@@ -147,7 +153,7 @@ captured on this reference machine, for the same reason Qwen-Image's is.
 ## FLUX.2 Klein live preview
 
 A live preview of FLUX.2 Klein. TAEF2 decodes the latent as mflux produces it, so the callback
-needs nothing model-specific beyond `variant="taef2"`. The same wiring runs against FLUX.2 Klein
+needs nothing model-specific beyond the model (`flux=model` picks TAEF2 from it). The same wiring runs against FLUX.2 Klein
 base 4B in [`examples/mflux_live_preview.py`](examples/mflux_live_preview.py); the frames pictured
 below are from the distilled 4B Klein instead (its own native 4-step schedule, no separate `--steps` flag to
 set).
