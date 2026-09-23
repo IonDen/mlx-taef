@@ -8,16 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.8.3] - 2026-09-23
 
 Works with mflux 0.20, picks the right preview decoder from the model, and shows Krea 2 previews
-you can recognise from the first step.
+that are recognizable from the first step.
 
 ### Added
 - mflux 0.20 support. The `mflux` extra now installs against mflux 0.19.x and 0.20.x
   (`>=0.17,<0.21`); the previous `<0.20` bound stopped `pip install mlx-taef[mflux]` from
   resolving next to a fresh mflux.
 - Previews decode the model's prediction of the finished image when mflux offers one. mflux 0.20
-  hands in-loop callbacks that prediction on request, and for Krea 2 it shows a recognisable
-  picture from the first step, while the in-loop latent stays mostly noise until well past
-  halfway. Every other model still passes nothing, so their previews are unchanged, and older
+  hands in-loop callbacks that prediction on request, and for Krea 2 it shows a recognizable
+  picture from the first step, while the in-loop latent stays noise for the first three of eight
+  steps. Every other model still passes nothing, so their previews are unchanged, and older
   mflux never passes it. `LivePreviewCallback(preview_source="latents")` keeps decoding the
   in-loop latent, for example to inspect a sampler, and `callback.last_preview_source` says which
   one the latest preview used. A subclass that overrides `call_in_loop` has to declare
@@ -37,6 +37,9 @@ you can recognise from the first step.
   and no tiny decoder exists for it yet.
 
 ### Changed
+- On mflux 0.20, Krea 2 previews show the model's prediction by default instead of the in-loop
+  latent; the final preview is the same either way. `preview_source="latents"` restores the
+  earlier frames.
 - `LivePreviewCallback(flux=model)` without `variant=` used to run TAEF2 whatever the model
   was; for a FLUX.2 Klein model nothing changes, while a Z-Image, Qwen-Image, Krea 2 or FLUX.1
   model now gets its own decoder instead of a wrong-channel error at the first preview step.

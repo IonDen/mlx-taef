@@ -1453,3 +1453,95 @@ def test_shipped_example_subclass_keeps_the_prediction_opt_in() -> None:
         inspect.Parameter.POSITIONAL_OR_KEYWORD,
         inspect.Parameter.KEYWORD_ONLY,
     )
+
+
+def test_last_preview_source_reports_only_a_preview_that_was_written(
+    offline_taef2: object, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches: `last_preview_source` stamped before the write, so after a failed emission it
+    names a source whose preview never reached disk (the file still holds the earlier one)."""
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    cb = LivePreviewCallback(variant="taef2", every=1, save_to=tmp_path / "p.png")
+    cb.call_in_loop(
+        t=0,
+        seed=0,
+        prompt="p",
+        latents=_packed_klein_latent(0),
+        config=_FakeConfig(64, 64),
+        time_steps=None,
+        denoised=None,
+    )
+    assert cb.last_preview_source == "latents"
+
+    def _fail_save(image: mx.array, target: Path) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(cb, "_save_image", _fail_save)
+    cb.call_in_loop(
+        t=1,
+        seed=0,
+        prompt="p",
+        latents=_packed_klein_latent(0),
+        config=_FakeConfig(64, 64),
+        time_steps=None,
+        denoised=_packed_klein_latent(1),
+    )
+
+    assert cb._disabled is True
+    assert cb.last_preview_source == "latents"
+
+
+def test_last_preview_source_resets_at_each_generation(
+    offline_taef2: object, tmp_path: Path
+) -> None:
+    """Catches: a callback reused across generations reporting the previous run's source
+    before the new run has written anything."""
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    cb = LivePreviewCallback(variant="taef2", every=1, save_to=tmp_path / "p.png")
+    cb.call_in_loop(
+        t=0,
+        seed=0,
+        prompt="p",
+        latents=_packed_klein_latent(0),
+        config=_FakeConfig(64, 64),
+        time_steps=None,
+        denoised=_packed_klein_latent(1),
+    )
+    assert cb.last_preview_source == "prediction"
+
+    cb.call_before_loop(
+        seed=0, prompt="p", latents=_packed_klein_latent(0), config=_FakeConfig(64, 64)
+    )
+
+    assert cb.last_preview_source is None
+
+
+def test_a_prediction_in_another_layout_falls_back_to_the_latents(
+    offline_taef2: object, tmp_path: Path
+) -> None:
+    """Catches: a future mflux model passing its prediction in a different layout from the
+    in-loop latent; decoding it would raise and switch previews off for the whole generation,
+    while the latent is still decodable."""
+    from PIL import Image
+
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    cb = LivePreviewCallback(variant="taef2", every=1, save_to=tmp_path / "p.png")
+    latents = _packed_klein_latent(0)
+    cb.call_in_loop(
+        t=0,
+        seed=0,
+        prompt="p",
+        latents=latents,
+        config=_FakeConfig(64, 64),
+        time_steps=None,
+        denoised=mx.zeros((1, 32, 8, 8)),
+    )
+
+    assert cb._disabled is False
+    assert cb.last_preview_source == "latents"
+    assert np.array_equal(
+        np.array(Image.open(tmp_path / "p.png")), _decode_as_callback_would(cb, latents)
+    )

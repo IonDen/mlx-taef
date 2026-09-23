@@ -212,9 +212,10 @@ class LivePreviewCallback:
             validation always raises regardless of this setting.
         preview_source: what a preview decodes. ``"auto"`` (default) decodes the model's
             per-step prediction of the finished image when mflux offers one (mflux 0.20+, Krea 2
-            today), which is recognisable from the first steps, and the in-loop latent otherwise.
+            today), which is recognizable from the first steps, and the in-loop latent otherwise.
             ``"latents"`` always decodes the in-loop latent, e.g. to inspect a sampler. The
-            source of the latest preview is readable as `last_preview_source`.
+            source of the latest preview written is readable as `last_preview_source` (None
+            until the first preview of a generation is saved).
     """
 
     def __init__(
@@ -382,6 +383,7 @@ class LivePreviewCallback:
         self._iter = 0
         self.saved_paths = []
         self._disabled = False
+        self.last_preview_source = None
 
     def call_in_loop(
         self,
@@ -397,7 +399,8 @@ class LivePreviewCallback:
 
         mflux 0.20+ passes `denoised`, the model's prediction of the finished image, only to a
         callback that declares a parameter by that name, and only for models that compute one
-        (Krea 2 today); it has the same layout as `latents`. Older mflux never passes it.
+        (Krea 2 today), in the same layout as `latents`; a prediction in any other layout is
+        ignored and the latent decoded instead. Older mflux never passes it.
         mflux reads the signature of the method it calls, so a subclass that overrides this
         method must declare `denoised` too and pass it on, or the prediction never arrives.
         """
@@ -408,15 +411,22 @@ class LivePreviewCallback:
         if idx % self.every != 0:
             return  # pragma: no cover
 
-        if denoised is not None and self.preview_source == "auto":
-            source, self.last_preview_source = denoised, "prediction"
-        else:
-            source, self.last_preview_source = latents, "latents"
+        # A prediction in another layout than the latent (no mflux model does this today) would
+        # fail to unpack and switch previews off; the latent is always decodable, so use it.
+        use_prediction = (
+            denoised is not None
+            and self.preview_source == "auto"
+            and denoised.shape == latents.shape
+        )
+        source = denoised if use_prediction and denoised is not None else latents
+        label: Literal["latents", "prediction"] = "prediction" if use_prediction else "latents"
         if self.on_error == "raise":
             self._emit_preview(idx, source, config)
+            self.last_preview_source = label
             return
         try:
             self._emit_preview(idx, source, config)
+            self.last_preview_source = label
         except Exception as e:
             self._disabled = True
             logger.warning(

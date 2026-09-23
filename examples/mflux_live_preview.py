@@ -44,6 +44,9 @@ class _TimedPreviewCallback(LivePreviewCallback):
     ) -> None:
         # Keep `denoised` in an override: mflux reads this signature to decide whether to pass
         # the model's per-step prediction, and drops it for a callback that does not name it.
+        # mflux hands the latent over before evaluating it; evaluate first so the timer below
+        # measures the TAEF2 decode, not the transformer step.
+        mx.eval(latents if denoised is None else [latents, denoised])
         t0 = time.perf_counter()
         super().call_in_loop(t, seed, prompt, latents, config, time_steps, denoised=denoised)
         # saved_paths is appended by the parent; its length tells us the step index.

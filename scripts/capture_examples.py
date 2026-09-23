@@ -656,6 +656,9 @@ def _run_generation(variant: str, args: argparse.Namespace) -> Path:
             numbered_frames=True,
             save_to=tmp_dir / f"{variant}.webp",
             on_error="raise",
+            # The committed galleries show the in-loop latent at every step; keep them
+            # reproducible on mflux 0.20, where Krea 2 would otherwise hand over its prediction.
+            preview_source="latents",
         )
         flux.callbacks.register(callback)  # type: ignore[attr-defined]
 
