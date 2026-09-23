@@ -5,9 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.8.3] - 2026-09-23
+
+Works with mflux 0.20, picks the right preview decoder from the model, and shows Krea 2 previews
+you can recognise from the first step.
 
 ### Added
+- mflux 0.20 support. The `mflux` extra now installs against mflux 0.19.x and 0.20.x
+  (`>=0.17,<0.21`); the previous `<0.20` bound stopped `pip install mlx-taef[mflux]` from
+  resolving next to a fresh mflux.
+- Previews decode the model's prediction of the finished image when mflux offers one. mflux 0.20
+  hands in-loop callbacks that prediction on request, and for Krea 2 it shows a recognisable
+  picture from the first step, while the in-loop latent stays mostly noise until well past
+  halfway. Every other model still passes nothing, so their previews are unchanged, and older
+  mflux never passes it. `LivePreviewCallback(preview_source="latents")` keeps decoding the
+  in-loop latent, for example to inspect a sampler, and `callback.last_preview_source` says which
+  one the latest preview used. A subclass that overrides `call_in_loop` has to declare
+  `denoised` as well and pass it on: mflux reads the overriding method's signature to decide
+  whether to hand the prediction over.
 - `LivePreviewCallback(flux=model)` now picks the tiny decoder from the model itself. The
   callback reads the mflux model's config (`model_name`, `base_model` and the CLI aliases) and
   resolves it to `taef1` for the FLUX.1 family (dev, schnell, Kontext, Fill, Depth, Redux,
@@ -18,7 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the override; `LivePreviewCallback()` with no model keeps the `taef2` default. The
   callback exposes the resolved choice as `callback.variant`. Krea 2 Raw resolves to the same
   `krea2` decoder as Krea 2 Turbo: mflux runs both through one initializer, VAE and latent
-  creator.
+  creator. Qwen-Image 2.1, new in mflux 0.20, is not mapped: it uses its own 64-channel VAE,
+  and no tiny decoder exists for it yet.
 
 ### Changed
 - `LivePreviewCallback(flux=model)` without `variant=` used to run TAEF2 whatever the model

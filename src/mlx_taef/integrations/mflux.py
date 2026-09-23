@@ -210,6 +210,11 @@ class LivePreviewCallback:
         on_error: runtime emission policy. ``"disable"`` logs the first failure and disables
             previews for the current generation; ``"raise"`` propagates it. Constructor
             validation always raises regardless of this setting.
+        preview_source: what a preview decodes. ``"auto"`` (default) decodes the model's
+            per-step prediction of the finished image when mflux offers one (mflux 0.20+, Krea 2
+            today), which is recognisable from the first steps, and the in-loop latent otherwise.
+            ``"latents"`` always decodes the in-loop latent, e.g. to inspect a sampler. The
+            source of the latest preview is readable as `last_preview_source`.
     """
 
     def __init__(
@@ -227,6 +232,7 @@ class LivePreviewCallback:
         bn_var: mx.array | None = None,
         bn_eps: float = 1e-4,
         on_error: Literal["disable", "raise"] = "disable",
+        preview_source: Literal["auto", "latents"] = "auto",
     ) -> None:
         """Initialise LivePreviewCallback. See class docstring for argument descriptions."""
         if (latent_height is None) != (latent_width is None):
@@ -248,6 +254,8 @@ class LivePreviewCallback:
             raise ValueError(f"bn_eps must be positive, got {bn_eps!r}.")
         if on_error not in ("disable", "raise"):
             raise ValueError(f"on_error must be 'disable' or 'raise', got {on_error!r}.")
+        if preview_source not in ("auto", "latents"):
+            raise ValueError(f"preview_source must be 'auto' or 'latents', got {preview_source!r}.")
         resolved_variant: str = _infer_variant(flux) if variant is None else variant
         try:
             model_cls = _VARIANT_CLASSES[resolved_variant]
@@ -263,6 +271,8 @@ class LivePreviewCallback:
         self.auto_bn = auto_bn
         self._variant: str = resolved_variant
         self.on_error = on_error
+        self.preview_source = preview_source
+        self.last_preview_source: Literal["latents", "prediction"] | None = None
         # Numbered-frame mode emits every step (galleries capture progression);
         # caller's `every` is honored only in single-frame mode.
         self.numbered_frames = numbered_frames
@@ -381,8 +391,16 @@ class LivePreviewCallback:
         latents: mx.array,
         config: object,
         time_steps: object,
+        denoised: mx.array | None = None,
     ) -> None:
-        """Decode latent + save image every Nth iteration (counted by our own iter, not `t`)."""
+        """Decode + save a preview every Nth iteration (counted by our own iter, not `t`).
+
+        mflux 0.20+ passes `denoised`, the model's prediction of the finished image, only to a
+        callback that declares a parameter by that name, and only for models that compute one
+        (Krea 2 today); it has the same layout as `latents`. Older mflux never passes it.
+        mflux reads the signature of the method it calls, so a subclass that overrides this
+        method must declare `denoised` too and pass it on, or the prediction never arrives.
+        """
         idx = self._iter
         self._iter += 1
         if self._disabled:
@@ -390,11 +408,15 @@ class LivePreviewCallback:
         if idx % self.every != 0:
             return  # pragma: no cover
 
+        if denoised is not None and self.preview_source == "auto":
+            source, self.last_preview_source = denoised, "prediction"
+        else:
+            source, self.last_preview_source = latents, "latents"
         if self.on_error == "raise":
-            self._emit_preview(idx, latents, config)
+            self._emit_preview(idx, source, config)
             return
         try:
-            self._emit_preview(idx, latents, config)
+            self._emit_preview(idx, source, config)
         except Exception as e:
             self._disabled = True
             logger.warning(

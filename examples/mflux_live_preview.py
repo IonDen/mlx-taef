@@ -40,9 +40,12 @@ class _TimedPreviewCallback(LivePreviewCallback):
         latents: mx.array,
         config: object,
         time_steps: object,
+        denoised: mx.array | None = None,
     ) -> None:
+        # Keep `denoised` in an override: mflux reads this signature to decide whether to pass
+        # the model's per-step prediction, and drops it for a callback that does not name it.
         t0 = time.perf_counter()
-        super().call_in_loop(t, seed, prompt, latents, config, time_steps)
+        super().call_in_loop(t, seed, prompt, latents, config, time_steps, denoised=denoised)
         # saved_paths is appended by the parent; its length tells us the step index.
         elapsed_ms = (time.perf_counter() - t0) * 1000
         step = len(self.saved_paths) - 1

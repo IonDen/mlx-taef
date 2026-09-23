@@ -1366,36 +1366,89 @@ wheels = [
 name = "mflux"
 version = "0.19.1"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.15' and sys_platform == 'linux'",
+    "python_full_version >= '3.13' and python_full_version < '3.15' and sys_platform == 'linux'",
+    "python_full_version == '3.12.*' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+]
 dependencies = [
-    { name = "filelock" },
-    { name = "fonttools" },
-    { name = "hf-transfer" },
-    { name = "huggingface-hub" },
-    { name = "matplotlib" },
+    { name = "filelock", marker = "sys_platform == 'linux'" },
+    { name = "fonttools", marker = "sys_platform == 'linux'" },
+    { name = "hf-transfer", marker = "sys_platform == 'linux'" },
+    { name = "huggingface-hub", marker = "sys_platform == 'linux'" },
+    { name = "matplotlib", marker = "sys_platform == 'linux'" },
     { name = "mlx", version = "0.31.1", source = { registry = "https://pypi.org/simple" }, extra = ["cuda13"], marker = "sys_platform == 'linux'" },
-    { name = "mlx", version = "0.32.2", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "opencv-python" },
-    { name = "piexif" },
-    { name = "pillow" },
-    { name = "platformdirs" },
-    { name = "protobuf" },
-    { name = "pyyaml" },
-    { name = "regex" },
-    { name = "requests" },
-    { name = "safetensors" },
-    { name = "sentencepiece" },
-    { name = "tokenizers", marker = "python_full_version >= '3.13'" },
-    { name = "toml" },
-    { name = "torch" },
-    { name = "tqdm" },
-    { name = "transformers" },
-    { name = "urllib3" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' and sys_platform == 'linux'" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' and sys_platform == 'linux'" },
+    { name = "opencv-python", marker = "sys_platform == 'linux'" },
+    { name = "piexif", marker = "sys_platform == 'linux'" },
+    { name = "pillow", marker = "sys_platform == 'linux'" },
+    { name = "platformdirs", marker = "sys_platform == 'linux'" },
+    { name = "protobuf", marker = "sys_platform == 'linux'" },
+    { name = "pyyaml", marker = "sys_platform == 'linux'" },
+    { name = "regex", marker = "sys_platform == 'linux'" },
+    { name = "requests", marker = "sys_platform == 'linux'" },
+    { name = "safetensors", marker = "sys_platform == 'linux'" },
+    { name = "sentencepiece", marker = "sys_platform == 'linux'" },
+    { name = "tokenizers", marker = "python_full_version >= '3.13' and sys_platform == 'linux'" },
+    { name = "toml", marker = "sys_platform == 'linux'" },
+    { name = "torch", marker = "sys_platform == 'linux'" },
+    { name = "tqdm", marker = "sys_platform == 'linux'" },
+    { name = "transformers", marker = "sys_platform == 'linux'" },
+    { name = "urllib3", marker = "sys_platform == 'linux'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/5e/95/b4944c86a0e255ea292ce8172bbb5bd1a4e66a60d12a194ec553607a5408/mflux-0.19.1.tar.gz", hash = "sha256:f44577d4be2ec385c28f2107c41662eefc100f1c74df34e53f87fcd3dc217281", size = 969307, upload-time = "2026-08-26T01:54:06.018Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ef/0e/b0c08a5867e744317cfa400d336f02f6b2b7e32031288994384c2cbca583/mflux-0.19.1-py3-none-any.whl", hash = "sha256:e56f1e28e2cbad1153272ad87d3077f82442015f60214cdbc9b322c6003db513", size = 1304907, upload-time = "2026-08-26T01:54:04.269Z" },
+]
+
+[[package]]
+name = "mflux"
+version = "0.20.0"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.15' and sys_platform == 'darwin'",
+    "python_full_version >= '3.13' and python_full_version < '3.15' and sys_platform == 'darwin'",
+    "python_full_version >= '3.15' and sys_platform != 'darwin' and sys_platform != 'linux'",
+    "python_full_version >= '3.13' and python_full_version < '3.15' and sys_platform != 'darwin' and sys_platform != 'linux'",
+    "python_full_version == '3.12.*' and sys_platform == 'darwin'",
+    "python_full_version == '3.11.*' and sys_platform == 'darwin'",
+    "python_full_version == '3.12.*' and sys_platform != 'darwin' and sys_platform != 'linux'",
+    "python_full_version == '3.11.*' and sys_platform != 'darwin' and sys_platform != 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'darwin'",
+    "python_full_version < '3.11' and sys_platform != 'darwin' and sys_platform != 'linux'",
+]
+dependencies = [
+    { name = "filelock", marker = "sys_platform != 'linux'" },
+    { name = "fonttools", marker = "sys_platform != 'linux'" },
+    { name = "hf-transfer", marker = "sys_platform != 'linux'" },
+    { name = "huggingface-hub", marker = "sys_platform != 'linux'" },
+    { name = "matplotlib", marker = "sys_platform != 'linux'" },
+    { name = "mlx", version = "0.32.2", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' and sys_platform != 'linux'" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' and sys_platform != 'linux'" },
+    { name = "opencv-python", marker = "sys_platform != 'linux'" },
+    { name = "piexif", marker = "sys_platform != 'linux'" },
+    { name = "pillow", marker = "sys_platform != 'linux'" },
+    { name = "platformdirs", marker = "sys_platform != 'linux'" },
+    { name = "protobuf", marker = "sys_platform != 'linux'" },
+    { name = "pyyaml", marker = "sys_platform != 'linux'" },
+    { name = "regex", marker = "sys_platform != 'linux'" },
+    { name = "requests", marker = "sys_platform != 'linux'" },
+    { name = "safetensors", marker = "sys_platform != 'linux'" },
+    { name = "sentencepiece", marker = "sys_platform != 'linux'" },
+    { name = "tokenizers", marker = "python_full_version >= '3.13' and sys_platform != 'linux'" },
+    { name = "toml", marker = "sys_platform != 'linux'" },
+    { name = "torch", marker = "sys_platform != 'linux'" },
+    { name = "tqdm", marker = "sys_platform != 'linux'" },
+    { name = "transformers", marker = "sys_platform != 'linux'" },
+    { name = "urllib3", marker = "sys_platform != 'linux'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/7f/08/33ff2acce0f84e51f6c86b6a8d33b4e6703ef485a5d9c40a9e1ebe9af797/mflux-0.20.0.tar.gz", hash = "sha256:8fec3407bbc821cfba9cebd8ae55e35450b9429ec9b5445c9557aaeb78087de0", size = 998374, upload-time = "2026-09-21T17:32:05.081Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c4/a8/c281e949682c317e6c551931bd536c495e2ac88d7b7eae2c306f9de45821/mflux-0.20.0-py3-none-any.whl", hash = "sha256:5d60a278d67289be0da2e4ba0e8dcf938dd3c676a01c9064f64e3fb10e30767d", size = 1351276, upload-time = "2026-09-21T17:32:03.425Z" },
 ]
 
 [[package]]
@@ -1646,10 +1699,12 @@ image = [
     { name = "pillow" },
 ]
 mflux = [
-    { name = "mflux" },
+    { name = "mflux", version = "0.19.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'linux'" },
+    { name = "mflux", version = "0.20.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
 ]
 showcase = [
-    { name = "mflux" },
+    { name = "mflux", version = "0.19.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'linux'" },
+    { name = "mflux", version = "0.20.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
     { name = "mlx-teacache" },
     { name = "pillow" },
     { name = "scikit-image", version = "0.25.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -1660,7 +1715,8 @@ showcase = [
 dev = [
     { name = "hypothesis" },
     { name = "lpips" },
-    { name = "mflux" },
+    { name = "mflux", version = "0.19.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'linux'" },
+    { name = "mflux", version = "0.20.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
     { name = "mkdocs-material" },
     { name = "mkdocstrings", extra = ["python"] },
     { name = "mlx-teacache" },
@@ -1691,7 +1747,8 @@ lint = [
 ]
 test = [
     { name = "hypothesis" },
-    { name = "mflux" },
+    { name = "mflux", version = "0.19.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'linux'" },
+    { name = "mflux", version = "0.20.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
     { name = "mlx-teacache" },
     { name = "pillow" },
     { name = "pytest" },
@@ -1710,8 +1767,8 @@ typecheck = [
 [package.metadata]
 requires-dist = [
     { name = "huggingface-hub", specifier = ">=0.24" },
-    { name = "mflux", marker = "extra == 'mflux'", specifier = ">=0.17,<0.20" },
-    { name = "mflux", marker = "extra == 'showcase'", specifier = ">=0.17,<0.20" },
+    { name = "mflux", marker = "extra == 'mflux'", specifier = ">=0.17,<0.21" },
+    { name = "mflux", marker = "extra == 'showcase'", specifier = ">=0.17,<0.21" },
     { name = "mlx", specifier = ">=0.20" },
     { name = "mlx-teacache", marker = "extra == 'showcase'", specifier = ">=0.9.3,<0.10" },
     { name = "numpy", specifier = ">=1.26" },
@@ -1727,7 +1784,7 @@ provides-extras = ["image", "mflux", "showcase"]
 dev = [
     { name = "hypothesis", specifier = ">=6.130" },
     { name = "lpips", specifier = ">=0.1.4" },
-    { name = "mflux", specifier = ">=0.17,<0.20" },
+    { name = "mflux", specifier = ">=0.17,<0.21" },
     { name = "mkdocs-material", specifier = ">=9.5" },
     { name = "mkdocstrings", extras = ["python"], specifier = ">=0.27" },
     { name = "mlx-teacache", specifier = ">=0.9.3,<0.10" },
@@ -1755,7 +1812,7 @@ fixtures = [
 lint = [{ name = "ruff", specifier = ">=0.7" }]
 test = [
     { name = "hypothesis", specifier = ">=6.130" },
-    { name = "mflux", specifier = ">=0.17,<0.20" },
+    { name = "mflux", specifier = ">=0.17,<0.21" },
     { name = "mlx-teacache", specifier = ">=0.9.3,<0.10" },
     { name = "pillow", specifier = ">=10.0" },
     { name = "pytest", specifier = ">=8.3" },
