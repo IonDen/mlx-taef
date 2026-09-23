@@ -71,7 +71,10 @@ QWEN_IMAGE = ModelKernel(
         ),
         unpack=unpack_qwen_latent,
         packed_latent_downscale=16,
-        mflux_model_name_prefixes=("Qwen/Qwen-Image",),
+        # Not the bare `Qwen/Qwen-Image`: mflux 0.20's Qwen-Image 2.1 (`Qwen/Qwen-Image-2.1`) has
+        # its own 64-channel VAE that taew2.1 cannot decode. The original `Qwen/Qwen-Image` repo
+        # still resolves through its `qwen-image` alias.
+        mflux_model_name_prefixes=("Qwen/Qwen-Image-2512", "Qwen/Qwen-Image-Edit"),
     ),
     memory_cap_hint_gb=1,
 )

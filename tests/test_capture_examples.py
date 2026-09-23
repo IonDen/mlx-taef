@@ -761,6 +761,9 @@ def test_run_generation_forwards_the_recipe_bn_choice_to_the_callback(
     assert kwargs["auto_bn"] is False
     assert kwargs["variant"] == "taef2"
     assert kwargs["numbered_frames"] is True
+    # The committed galleries show the in-loop latent; on mflux 0.20 the callback's default
+    # would decode Krea 2's prediction instead and the reproduce command would not match.
+    assert kwargs["preview_source"] == "latents"
 
 
 def test_run_generation_raises_when_preview_gallery_incomplete(tmp_path: Path, monkeypatch) -> None:

@@ -54,6 +54,7 @@ _REGISTRY_CASES: list[tuple[str, list[str], str | None]] = [
     ("Tongyi-MAI/Z-Image-Turbo", ["z-image-turbo", "zimage-turbo"], "zimage"),
     ("Tongyi-MAI/Z-Image-Turbo", ["z-image-turbo-controlnet", "z-image-controlnet"], "zimage"),
     ("krea/Krea-2-Turbo", ["krea-2", "krea2"], "krea2"),
+    ("Qwen/Qwen-Image-2.1", ["qwen-image-2.1", "qwen-2.1", "qwen-image-21"], None),
     ("krea/Krea-2-Raw", ["krea-2-raw", "krea2-raw"], "krea2"),
     ("Comfy-Org/Lens", ["lens-turbo", "lens"], None),
     ("briaai/FIBO", ["fibo"], None),
@@ -88,6 +89,20 @@ def test_base_model_wins_over_a_mirror_model_name() -> None:
         base_model="black-forest-labs/FLUX.2-klein-4B",
     )
     assert resolve_kernel_from_model_config(config) is KERNELS["taef2"]
+
+
+def test_a_mirror_of_qwen_image_2_1_is_rejected_not_claimed_by_qwen_image() -> None:
+    """Catches: the `qwen-image` name prefix claiming Qwen-Image 2.1 (mflux 0.20), whose
+    64-channel VAE is not the Wan 2.1 latent taew2.1 decodes. Nothing downstream would catch it:
+    2.1's in-loop latent has the same (1, N, 64) shape as Qwen-Image's packed latent, so the
+    preview would silently decode garbage."""
+    config = _FakeModelConfig(
+        model_name="someone/Qwen-Image-2.1-mflux-4bit",
+        aliases=["qwen-image-2.1", "qwen-2.1", "qwen-image-21"],
+        base_model="Qwen/Qwen-Image-2.1",
+    )
+    with pytest.raises(UnsupportedMfluxModelError, match=r"Qwen-Image-2\.1"):
+        resolve_kernel_from_model_config(config)
 
 
 def test_aliases_resolve_a_local_path_model_name() -> None:
@@ -255,7 +270,40 @@ _EXPECTED_BY_REGISTRY_KEY: dict[str, str | None] = {
     "seedvr2-7b": None,
     "ideogram-4-fp8": None,
     "boogu-image-turbo": None,
+    # mflux 0.20: new 64-channel VAE, no tiny decoder exists for it.
+    "qwen-image-2.1": None,
 }
+# Registry keys that only exist from a given mflux release on; a key newer than the installed
+# mflux is expected to be absent. The walk covers 0.19.x and 0.20.x. Older mflux (0.17/0.18,
+# still installable) resolves through aliases, but its registry is not walked.
+_REGISTRY_KEY_INTRODUCED_IN: dict[str, tuple[int, int]] = {"qwen-image-2.1": (0, 20)}
+
+
+def _installed_mflux_minor() -> tuple[int, int]:
+    from importlib.metadata import version
+
+    major, minor = version("mflux").split(".")[:2]
+    return int(major), int(minor)
+
+
+def _expected_registry_keys() -> set[str]:
+    installed = _installed_mflux_minor()
+    return {
+        key
+        for key in _EXPECTED_BY_REGISTRY_KEY
+        if _REGISTRY_KEY_INTRODUCED_IN.get(key, (0, 0)) <= installed
+    }
+
+
+def test_expected_registry_keys_follow_the_installed_mflux_version(monkeypatch) -> None:
+    """Catches: the version table being ignored, so the walk demands `qwen-image-2.1` from an
+    mflux 0.19.x install (which never had it) or tolerates its absence on 0.20."""
+    import importlib.metadata
+
+    monkeypatch.setattr(importlib.metadata, "version", lambda name: "0.19.2")
+    assert "qwen-image-2.1" not in _expected_registry_keys()
+    monkeypatch.setattr(importlib.metadata, "version", lambda name: "0.20.0")
+    assert "qwen-image-2.1" in _expected_registry_keys()
 
 
 # Alias strings kept from releases before mflux registered its own; not in AVAILABLE_MODELS.
@@ -269,9 +317,11 @@ def test_every_installed_mflux_registry_entry_is_classified() -> None:
     carry an owner-qualified name, so this walks the prefix arms; the alias arm is covered by
     the two alias tests below."""
     mflux_config = pytest.importorskip("mflux.models.common.config.model_config")
+    if _installed_mflux_minor() < (0, 19):
+        pytest.skip("the registry walk covers mflux 0.19.x and 0.20.x")
     available = mflux_config.AVAILABLE_MODELS
 
-    assert set(available) == set(_EXPECTED_BY_REGISTRY_KEY), (
+    assert set(available) == _expected_registry_keys(), (
         "classify every new mflux registry key in _EXPECTED_BY_REGISTRY_KEY, and drop removed ones"
     )
     for key, config in available.items():
@@ -289,6 +339,8 @@ def test_every_registered_alias_of_a_supported_model_resolves_on_its_own() -> No
     list still matches on the others. Each alias is resolved alone, with a name no prefix
     claims, so the alias arm has to carry it."""
     mflux_config = pytest.importorskip("mflux.models.common.config.model_config")
+    if _installed_mflux_minor() < (0, 19):
+        pytest.skip("the registry walk covers mflux 0.19.x and 0.20.x")
 
     for key, config in mflux_config.AVAILABLE_MODELS.items():
         expected = _EXPECTED_BY_REGISTRY_KEY[key]

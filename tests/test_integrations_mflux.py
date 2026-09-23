@@ -1280,3 +1280,324 @@ def test_bad_variant_message_names_the_resolved_value_not_the_argument(
     monkeypatch.setattr(m, "_infer_variant", lambda flux: "some-new-kernel")
     with pytest.raises(ValueError, match="some-new-kernel"):
         m.LivePreviewCallback(flux=object())
+
+
+# ---------------------------------------------------------------------------
+# Per-step predicted image (mflux 0.20 `denoised`)
+# ---------------------------------------------------------------------------
+
+
+def _packed_klein_latent(seed: int) -> mx.array:
+    """A packed FLUX.2 Klein in-loop latent for a 64x64 image: (1, 16, 128)."""
+    return mx.random.normal((1, 16, 128), key=mx.random.key(seed))
+
+
+def _decode_as_callback_would(cb: object, latent: mx.array) -> np.ndarray:
+    from mlx_taef.kernels import UnpackContext
+
+    binding = cb.model._kernel.integration  # type: ignore[attr-defined]
+    ctx = UnpackContext(latent_height=4, latent_width=4)
+    return np.array(cb.model.decode_image(binding.unpack(latent, ctx))[0])  # type: ignore[attr-defined]
+
+
+def test_preview_decodes_the_predicted_image_when_mflux_offers_it(
+    offline_taef2: object, tmp_path: Path
+) -> None:
+    """Catches: `denoised` accepted but ignored, so previews keep showing the noisy latent that
+    is unrecognisable for most of the run."""
+    from PIL import Image
+
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    cb = LivePreviewCallback(variant="taef2", every=1, save_to=tmp_path / "p.png")
+    latents, denoised = _packed_klein_latent(0), _packed_klein_latent(1)
+    cb.call_in_loop(
+        t=0,
+        seed=0,
+        prompt="p",
+        latents=latents,
+        config=_FakeConfig(64, 64),
+        time_steps=None,
+        denoised=denoised,
+    )
+
+    saved = np.array(Image.open(tmp_path / "p.png"))
+    assert np.array_equal(saved, _decode_as_callback_would(cb, denoised))
+    assert not np.array_equal(saved, _decode_as_callback_would(cb, latents))
+    assert cb.last_preview_source == "prediction"
+
+
+def test_preview_falls_back_to_the_latents_when_no_prediction_is_offered(
+    offline_taef2: object, tmp_path: Path
+) -> None:
+    """Catches: the new path breaking today's behaviour; older mflux never passes `denoised`,
+    and 0.20 passes None for every model except Krea 2."""
+    from PIL import Image
+
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    cb = LivePreviewCallback(variant="taef2", every=1, save_to=tmp_path / "p.png")
+    latents = _packed_klein_latent(0)
+    cb.call_in_loop(
+        t=0,
+        seed=0,
+        prompt="p",
+        latents=latents,
+        config=_FakeConfig(64, 64),
+        time_steps=None,
+        denoised=None,
+    )
+
+    assert np.array_equal(
+        np.array(Image.open(tmp_path / "p.png")), _decode_as_callback_would(cb, latents)
+    )
+    assert cb.last_preview_source == "latents"
+
+
+def test_source_latents_keeps_decoding_the_noisy_latent(
+    offline_taef2: object, tmp_path: Path
+) -> None:
+    """Catches: `preview_source="latents"` (for someone debugging a sampler) being overridden
+    by the prediction."""
+    from PIL import Image
+
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    cb = LivePreviewCallback(
+        variant="taef2", every=1, save_to=tmp_path / "p.png", preview_source="latents"
+    )
+    latents, denoised = _packed_klein_latent(0), _packed_klein_latent(1)
+    cb.call_in_loop(
+        t=0,
+        seed=0,
+        prompt="p",
+        latents=latents,
+        config=_FakeConfig(64, 64),
+        time_steps=None,
+        denoised=denoised,
+    )
+
+    assert np.array_equal(
+        np.array(Image.open(tmp_path / "p.png")), _decode_as_callback_would(cb, latents)
+    )
+    assert cb.last_preview_source == "latents"
+
+
+def test_unknown_preview_source_is_rejected_before_weights_load(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches: a typo such as `preview_source="predicted"` silently behaving like "auto"."""
+    from mlx_taef import TAEF2
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    monkeypatch.setattr(
+        TAEF2, "from_pretrained", classmethod(lambda cls, **kw: pytest.fail("loaded weights"))
+    )
+    with pytest.raises(ValueError, match="preview_source"):
+        LivePreviewCallback(variant="taef2", preview_source="predicted")  # type: ignore[arg-type]
+
+
+def test_real_mflux_in_loop_dispatch_hands_over_the_prediction(
+    offline_taef2: object, tmp_path: Path
+) -> None:
+    """Catches: the opt-in not firing against the REAL dispatcher (mflux passes `denoised` only
+    to a `call_in_loop` that declares a keyword-capable parameter named exactly `denoised`), and
+    any in-loop keyword this mflux passes that the callback does not accept. On mflux 0.19.x
+    the dispatcher has no `denoised`, so only the plain dispatch is exercised."""
+    import inspect
+
+    from mflux.callbacks.callback_registry import CallbackRegistry
+    from mflux.callbacks.generation_context import GenerationContext
+    from mflux.models.common.config.config import Config
+    from mflux.models.common.config.model_config import ModelConfig
+    from PIL import Image
+
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    cb = LivePreviewCallback(variant="taef2", every=1, save_to=tmp_path / "p.png")
+    registry = CallbackRegistry()
+    registry.register(cb)
+    cfg = Config(model_config=ModelConfig.flux2_klein_base_4b(), height=64, width=64)
+    ctx = GenerationContext(registry, 42, "p", cfg)
+    latents, denoised = _packed_klein_latent(0), _packed_klein_latent(1)
+
+    ctx.in_loop(0, latents)
+    assert cb.last_preview_source == "latents"
+
+    if "denoised" not in inspect.signature(GenerationContext.in_loop).parameters:
+        return  # mflux 0.19.x: no prediction to hand over
+    ctx.in_loop(1, latents, denoised=denoised)
+    assert cb.last_preview_source == "prediction"
+    assert np.array_equal(
+        np.array(Image.open(tmp_path / "p.png")), _decode_as_callback_would(cb, denoised)
+    )
+
+
+def _load_live_preview_example() -> object:
+    import importlib.util
+
+    path = Path(__file__).resolve().parent.parent / "examples" / "mflux_live_preview.py"
+    spec = importlib.util.spec_from_file_location("_example_live_preview", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_shipped_example_subclass_keeps_the_prediction_opt_in() -> None:
+    """Catches: `examples/mflux_live_preview.py` overriding `call_in_loop` without a `denoised`
+    parameter. mflux decides whether to pass the prediction from the subclass's own signature,
+    so the example would silently switch prediction previews off for anyone who copies it."""
+    import inspect
+
+    module = _load_live_preview_example()
+    params = inspect.signature(module._TimedPreviewCallback.call_in_loop).parameters  # type: ignore[attr-defined]
+    assert "denoised" in params
+    assert params["denoised"].kind in (
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        inspect.Parameter.KEYWORD_ONLY,
+    )
+
+
+def test_shipped_example_subclass_forwards_the_prediction_to_the_preview(
+    offline_taef2: object, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Catches: the example keeping `denoised` in its signature but not passing it on to
+    `super().call_in_loop`, so its preview still shows the noisy latent."""
+    from PIL import Image
+
+    module = _load_live_preview_example()
+    cb = module._TimedPreviewCallback(  # type: ignore[attr-defined]
+        variant="taef2", every=1, save_to=tmp_path / "p.png"
+    )
+    latents, denoised = _packed_klein_latent(0), _packed_klein_latent(1)
+    cb.call_in_loop(0, 0, "p", latents, _FakeConfig(64, 64), None, denoised=denoised)
+
+    assert cb.last_preview_source == "prediction"
+    assert np.array_equal(
+        np.array(Image.open(tmp_path / "p.png")), _decode_as_callback_would(cb, denoised)
+    )
+    assert "TAEF2 decode + save" in capsys.readouterr().out
+
+
+def test_last_preview_source_reports_only_a_preview_that_was_written(
+    offline_taef2: object, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches: `last_preview_source` stamped before the write, so after a failed emission it
+    names a source whose preview never reached disk (the file still holds the earlier one)."""
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    cb = LivePreviewCallback(variant="taef2", every=1, save_to=tmp_path / "p.png")
+    cb.call_in_loop(
+        t=0,
+        seed=0,
+        prompt="p",
+        latents=_packed_klein_latent(0),
+        config=_FakeConfig(64, 64),
+        time_steps=None,
+        denoised=None,
+    )
+    assert cb.last_preview_source == "latents"
+
+    def _fail_save(image: mx.array, target: Path) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(cb, "_save_image", _fail_save)
+    cb.call_in_loop(
+        t=1,
+        seed=0,
+        prompt="p",
+        latents=_packed_klein_latent(0),
+        config=_FakeConfig(64, 64),
+        time_steps=None,
+        denoised=_packed_klein_latent(1),
+    )
+
+    assert cb._disabled is True
+    assert cb.last_preview_source == "latents"
+
+
+def test_last_preview_source_resets_at_each_generation(
+    offline_taef2: object, tmp_path: Path
+) -> None:
+    """Catches: a callback reused across generations reporting the previous run's source
+    before the new run has written anything."""
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    cb = LivePreviewCallback(variant="taef2", every=1, save_to=tmp_path / "p.png")
+    cb.call_in_loop(
+        t=0,
+        seed=0,
+        prompt="p",
+        latents=_packed_klein_latent(0),
+        config=_FakeConfig(64, 64),
+        time_steps=None,
+        denoised=_packed_klein_latent(1),
+    )
+    assert cb.last_preview_source == "prediction"
+
+    cb.call_before_loop(
+        seed=0, prompt="p", latents=_packed_klein_latent(0), config=_FakeConfig(64, 64)
+    )
+
+    assert cb.last_preview_source is None
+
+
+def test_a_prediction_in_another_layout_falls_back_to_the_latents(
+    offline_taef2: object, tmp_path: Path
+) -> None:
+    """Catches: a future mflux model passing its prediction in a different layout from the
+    in-loop latent; decoding it would raise and switch previews off for the whole generation,
+    while the latent is still decodable."""
+    from PIL import Image
+
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    cb = LivePreviewCallback(variant="taef2", every=1, save_to=tmp_path / "p.png")
+    latents = _packed_klein_latent(0)
+    cb.call_in_loop(
+        t=0,
+        seed=0,
+        prompt="p",
+        latents=latents,
+        config=_FakeConfig(64, 64),
+        time_steps=None,
+        denoised=mx.zeros((1, 32, 8, 8)),
+    )
+
+    assert cb._disabled is False
+    assert cb.last_preview_source == "latents"
+    assert np.array_equal(
+        np.array(Image.open(tmp_path / "p.png")), _decode_as_callback_would(cb, latents)
+    )
+
+
+def test_krea2_prediction_is_decoded_through_the_krea2_kernel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches: the prediction path working only for the packed FLUX.2 layout the other tests
+    use. Krea 2 is the one family mflux hands a prediction to, and its latent is a 4-D NCHW
+    (1, 16, h, w) tensor that the `krea2` unpack transposes."""
+    from PIL import Image
+
+    from mlx_taef import Krea2
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    converted = Path(__file__).parent / "converted" / "qwen-image_decoder.safetensors"
+    real = Krea2.from_pretrained_local(converted)
+    monkeypatch.setattr(Krea2, "from_pretrained", classmethod(lambda cls, **kw: real))
+
+    cb = LivePreviewCallback(variant="krea2", every=1, save_to=tmp_path / "k.png")
+    latents = mx.random.normal((1, 16, 8, 8), key=mx.random.key(0))
+    denoised = mx.random.normal((1, 16, 8, 8), key=mx.random.key(1))
+    cb.call_in_loop(0, 0, "p", latents, _FakeConfig(64, 64), None, denoised=denoised)
+
+    binding = cb.model._kernel.integration
+    assert binding is not None
+    ctx = __import__("mlx_taef.kernels", fromlist=["UnpackContext"]).UnpackContext(
+        latent_height=0, latent_width=0
+    )
+    expected = np.array(cb.model.decode_image(binding.unpack(denoised, ctx))[0])
+    assert cb.last_preview_source == "prediction"
+    assert np.array_equal(np.array(Image.open(tmp_path / "k.png")), expected)

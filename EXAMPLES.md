@@ -144,6 +144,12 @@ uv run python scripts/capture_examples.py --variant krea-2-turbo
 Krea 2's 8-step schedule stays noise through step 3 with this decoder, then resolves fast: step 4
 is the first frame with a recognizable apple, and step 6 is already close to the final image.
 
+These frames decode the in-loop latent and come from the 2026-08-09 capture under mflux 0.18.1.
+mflux 0.19 changed the Krea 2 sigma schedule, so re-running the capture on 0.19 or 0.20 gives
+different intermediate frames until the next imagery refresh. On mflux 0.20 the callback decodes
+Krea 2's prediction of the finished image by default, which is recognizable from step 1; the
+capture script passes `preview_source="latents"` so a re-capture keeps showing the in-loop latent.
+
 A note on scope: this page doesn't carry a separate Krea 2 decode-timing benchmark. `Krea2` and
 `QwenImage` share byte-identical taew2.1 weights — one converted-cache entry, keyed by role rather
 than model name — so a Krea 2 decode timing would just be Qwen-Image's decode timing measured a
