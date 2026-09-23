@@ -38,8 +38,8 @@ that are recognizable from the first step.
 
 ### Changed
 - On mflux 0.20, Krea 2 previews show the model's prediction by default instead of the in-loop
-  latent; the final preview is the same either way. `preview_source="latents"` restores the
-  earlier frames.
+  latent. The last denoising step decodes to the same image either way, so a preview taken on
+  that step does not change. `preview_source="latents"` restores the earlier frames.
 - `LivePreviewCallback(flux=model)` without `variant=` used to run TAEF2 whatever the model
   was; for a FLUX.2 Klein model nothing changes, while a Z-Image, Qwen-Image, Krea 2 or FLUX.1
   model now gets its own decoder instead of a wrong-channel error at the first preview step.

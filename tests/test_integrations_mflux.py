@@ -1433,12 +1433,8 @@ def test_real_mflux_in_loop_dispatch_hands_over_the_prediction(
     )
 
 
-def test_shipped_example_subclass_keeps_the_prediction_opt_in() -> None:
-    """Catches: `examples/mflux_live_preview.py` overriding `call_in_loop` without a `denoised`
-    parameter. mflux decides whether to pass the prediction from the subclass's own signature,
-    so the example would silently switch prediction previews off for anyone who copies it."""
+def _load_live_preview_example() -> object:
     import importlib.util
-    import inspect
 
     path = Path(__file__).resolve().parent.parent / "examples" / "mflux_live_preview.py"
     spec = importlib.util.spec_from_file_location("_example_live_preview", path)
@@ -1446,13 +1442,43 @@ def test_shipped_example_subclass_keeps_the_prediction_opt_in() -> None:
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
 
-    params = inspect.signature(module._TimedPreviewCallback.call_in_loop).parameters
+
+def test_shipped_example_subclass_keeps_the_prediction_opt_in() -> None:
+    """Catches: `examples/mflux_live_preview.py` overriding `call_in_loop` without a `denoised`
+    parameter. mflux decides whether to pass the prediction from the subclass's own signature,
+    so the example would silently switch prediction previews off for anyone who copies it."""
+    import inspect
+
+    module = _load_live_preview_example()
+    params = inspect.signature(module._TimedPreviewCallback.call_in_loop).parameters  # type: ignore[attr-defined]
     assert "denoised" in params
     assert params["denoised"].kind in (
         inspect.Parameter.POSITIONAL_OR_KEYWORD,
         inspect.Parameter.KEYWORD_ONLY,
     )
+
+
+def test_shipped_example_subclass_forwards_the_prediction_to_the_preview(
+    offline_taef2: object, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Catches: the example keeping `denoised` in its signature but not passing it on to
+    `super().call_in_loop`, so its preview still shows the noisy latent."""
+    from PIL import Image
+
+    module = _load_live_preview_example()
+    cb = module._TimedPreviewCallback(  # type: ignore[attr-defined]
+        variant="taef2", every=1, save_to=tmp_path / "p.png"
+    )
+    latents, denoised = _packed_klein_latent(0), _packed_klein_latent(1)
+    cb.call_in_loop(0, 0, "p", latents, _FakeConfig(64, 64), None, denoised=denoised)
+
+    assert cb.last_preview_source == "prediction"
+    assert np.array_equal(
+        np.array(Image.open(tmp_path / "p.png")), _decode_as_callback_would(cb, denoised)
+    )
+    assert "TAEF2 decode + save" in capsys.readouterr().out
 
 
 def test_last_preview_source_reports_only_a_preview_that_was_written(
@@ -1545,3 +1571,33 @@ def test_a_prediction_in_another_layout_falls_back_to_the_latents(
     assert np.array_equal(
         np.array(Image.open(tmp_path / "p.png")), _decode_as_callback_would(cb, latents)
     )
+
+
+def test_krea2_prediction_is_decoded_through_the_krea2_kernel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches: the prediction path working only for the packed FLUX.2 layout the other tests
+    use. Krea 2 is the one family mflux hands a prediction to, and its latent is a 4-D NCHW
+    (1, 16, h, w) tensor that the `krea2` unpack transposes."""
+    from PIL import Image
+
+    from mlx_taef import Krea2
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    converted = Path(__file__).parent / "converted" / "qwen-image_decoder.safetensors"
+    real = Krea2.from_pretrained_local(converted)
+    monkeypatch.setattr(Krea2, "from_pretrained", classmethod(lambda cls, **kw: real))
+
+    cb = LivePreviewCallback(variant="krea2", every=1, save_to=tmp_path / "k.png")
+    latents = mx.random.normal((1, 16, 8, 8), key=mx.random.key(0))
+    denoised = mx.random.normal((1, 16, 8, 8), key=mx.random.key(1))
+    cb.call_in_loop(0, 0, "p", latents, _FakeConfig(64, 64), None, denoised=denoised)
+
+    binding = cb.model._kernel.integration
+    assert binding is not None
+    ctx = __import__("mlx_taef.kernels", fromlist=["UnpackContext"]).UnpackContext(
+        latent_height=0, latent_width=0
+    )
+    expected = np.array(cb.model.decode_image(binding.unpack(denoised, ctx))[0])
+    assert cb.last_preview_source == "prediction"
+    assert np.array_equal(np.array(Image.open(tmp_path / "k.png")), expected)
