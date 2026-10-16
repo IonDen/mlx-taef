@@ -46,7 +46,7 @@ jobs:
         run: uv run mypy src/mlx_taef
 
   test:
-    runs-on: macos-14
+    runs-on: macos-15
     strategy:
       fail-fast: false
       matrix:
