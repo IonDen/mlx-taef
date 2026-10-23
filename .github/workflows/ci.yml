@@ -67,3 +67,38 @@ jobs:
             --cov-report=term-missing \
             --cov-fail-under=95 \
             -m "not benchmark and not network"
+
+  test-mflux-floor:
+    # The lockfile resolves mflux to the newest minor on macOS; this leg runs the offline
+    # suite on mflux 0.19, the oldest minor the 0.8.3 release names as supported. The
+    # extra's pin still admits 0.17 and 0.18, which CI does not run. Every `uv run` here
+    # needs `--no-sync`: a plain `uv run` re-syncs to the lockfile and silently puts the
+    # locked mflux back. The 95% coverage gate runs in the `test` matrix; this leg has none
+    # because one older mflux can cover different lines.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: pip install uv
+      - name: Sync (test group only)
+        run: uv sync --frozen --group test
+      - name: Install mflux 0.19 (no dependency changes)
+        run: uv pip install --no-deps "mflux==0.19.*"
+      - name: Check mflux 0.19 is installed and imports
+        run: |
+          uv run --no-sync python -c '
+          import importlib.metadata as md
+          import mflux
+          import mflux.callbacks.callback_registry
+          import mflux.callbacks.generation_context
+          import mflux.models.common.config.model_config
+          mflux_version, mlx_version = md.version("mflux"), md.version("mlx")
+          print(f"mflux {mflux_version}, mlx {mlx_version}")
+          if not mflux_version.startswith("0.19."):
+              raise SystemExit(f"expected mflux 0.19.x, got {mflux_version}")
+          '
+      - name: Run unit + parity tests
+        run: uv run --no-sync pytest -m "not benchmark and not network"
