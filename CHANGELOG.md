@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.4] - 2026-10-24
+
+Accepts mflux 0.19 through 0.25 (tested on 0.19.x and 0.23.0), previews Krea 2's depth ControlNet,
+and converts Z-Image and FLUX.2 Klein latents to float32 before decoding them.
+
+### Added
+- Krea 2's depth ControlNet (`krea-2-controlnet-depth`, with the aliases `krea-2-controlnet` and
+  `krea2-controlnet`) previews with the Krea 2 decoder.
+- `scripts/capture_examples.py` takes `--preview-source {auto,latents}` (default `latents`) and
+  `--model-path` (Krea 2 only), and writes a small JSON file for each generation run. A local
+  `--model-path` is recorded by its folder name only, and flag combinations that do not fit
+  together are rejected before anything loads. The script lives in the repository and is not part
+  of the installed package.
+
+### Changed
+- The `mflux`, `showcase` and `test` dependency lists accept `mflux>=0.19,<0.26`, up from
+  `>=0.17,<0.21`. The suite was run on mflux 0.19.x and 0.23.0, the newest release when this one
+  was cut; 0.24 and 0.25 are admitted ahead of their release. mflux 0.17 and 0.18 are no longer
+  accepted: they installed, but nothing in CI ever ran against them. CI now runs the suite on
+  the locked mflux 0.23.0 and on mflux 0.19.x.
+- The `mflux` and `showcase` extras, and the `test` group, require Pillow below 13. mflux 0.23.0
+  fails at `import mflux` with Pillow 13; the fix is on mflux's development branch but not in a
+  release yet. The cap goes once a release carries it.
+- The showcase and test dependency on mlx-teacache moves to `>=0.14.0,<1`. The runtime does not
+  depend on mlx-teacache, so library users see no change.
+- The preview callback ignores extra keyword arguments that a future mflux may pass to its
+  per-step hook, instead of failing the generation.
+- CI workflows use a read-only token, checkouts no longer keep credentials, and uv is pinned.
+- mflux 0.21 to 0.23 added FLUX 3 Image Klein and Ming-Image. Neither has a tiny decoder here, and
+  both were already refused as unknown models before this release; the docs now name them. Like
+  Qwen-Image 2.1 (with its Turbo and ControlNet variants), which was already refused in 0.8.3, they
+  are refused with a clear error when the preview callback is created, before the preview decoder
+  loads. Qwen-Image 2.1 uses a different VAE, and FLUX 3 Klein is not yet supported.
+
+### Fixed
+- Z-Image and FLUX.2 Klein previews decode in float32. mflux hands the callback bfloat16 latents
+  for both, and the preview now converts every latent before the tiny decoder, whose weights are
+  float32. On the committed test latents, Z-Image pixels change by about 0.1/255 on average and at
+  most 6/255 on a single pixel; FLUX.2 Klein by about 0.03/255 on average and at most 2/255.
+
 ## [0.8.3] - 2026-09-23
 
 Works with mflux 0.20, picks the right preview decoder from the model, and shows Krea 2 previews

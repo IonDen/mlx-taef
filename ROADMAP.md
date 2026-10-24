@@ -4,6 +4,7 @@ A non-binding sketch of where the library is headed. Each item lists status, eff
 
 ## Released
 
+- **v0.8.4** (2026-10-24) — wider mflux support. The `mflux` extra accepts mflux 0.19 through 0.25 (tested on 0.19.x and 0.23.0), with Pillow capped below 13 until an mflux release imports cleanly with it. Krea 2's depth ControlNet previews with the Krea 2 decoder. Qwen-Image 2.1, FLUX 3 Image Klein and Ming-Image are refused with a clear error when the preview callback is created, before the preview decoder loads. Z-Image and FLUX.2 Klein previews decode in float32, shifting pixels by about 0.1/255 on average or less. CI runs on the locked mflux 0.23.0 and on 0.19.x.
 - **v0.8.3** (2026-09-23) — mflux 0.20 support and simpler setup. The `mflux` extra accepts mflux 0.19.x and 0.20.x. `LivePreviewCallback(flux=model)` infers the tiny decoder from the model's mflux config, and a model outside the supported families raises at construction with the `variant=` override named. On mflux 0.20, Krea 2 previews decode the model's per-step prediction of the finished image, which is recognizable from the first step. The benchmark and showcase watchdogs now count MLX's retained cache toward their memory ceiling and record the policy they ran under.
 - **v0.8.2** (2026-09-17) — TAEF2 fidelity fix. `LivePreviewCallback` no longer applies the Flux2VAE batch-norm inverse before TAEF2 when `flux=model` is passed: TAEF2 wants the normalized latent as mflux produces it, and the extra step made previews dark and oversaturated. SSIM against the full VAE on the benchmark latent rises from 0.616 to 0.960 (LPIPS 0.216 to 0.057) under the webp-scored showcase protocol. `auto_bn` defaults to `False`; opting back in still works and logs a warning. The FLUX.2 rows and frames in COMPARISON and EXAMPLES are re-measured, and the FLUX.2 and Qwen-Image unpack tests now compare against mflux's own inverse element for element.
 - **v0.8.1** (2026-09-05) — mflux 0.19.x compatibility. mflux 0.19.0 added a `control_images` argument to its before-loop callback hook and passes it to every registered callback, so a generation with a `LivePreviewCallback` registered failed with a `TypeError` before its first denoise step; the hook now accepts it, and absorbs whichever conditioning keyword mflux adds next. The `mflux` extra widens to `>=0.17,<0.20`. Verified against mflux 0.19.1 (MLX 0.32.2): the in-loop callback contract, every packed-latent layout, and the committed parity fixtures are unchanged, and a live preview composes with mflux's new `--pid-decode` (NVIDIA PiD) final decode.
@@ -32,20 +33,20 @@ A non-binding sketch of where the library is headed. Each item lists status, eff
 
 ## Future improvements (no fixed release target)
 
-- **`decode_streaming()` API.** Incremental decode for very-low-memory environments. Speculative.
+- **`decode_streaming()` API.** Incremental decode for very-low-memory environments. Speculative, and built only if users ask for it.
 - **JPEG XL output** from `decode_image()` for compressed previews. Browser support is the bottleneck; revisit when Safari/Chrome both support animated JXL.
 
 ## Known-upstream variants, not yet supported
 
-These exist in upstream [`madebyollin/taesd`](https://github.com/madebyollin/taesd) but are not in mlx-taef as of v0.2.3. Each requires its own integration + calibration cycle.
+These are upstream [`madebyollin/taesd`](https://github.com/madebyollin/taesd) variants that mlx-taef does not support as of v0.8.4. Each needs its own integration and a calibration pass against the full VAE.
 
 - **TAESD3** — for Stable Diffusion 3 / 3.5.
-- **TAESANA** — for Sana.
+- **TAESANA** — for Sana. Whether upstream publishes a checkpoint for it is unconfirmed.
 - **TAESDV** — for SD video models.
-- **TAEHV** — for Hunyuan / Wan / CogVideoX. The Wan 2.1 decoder (taew2.1) ships as of v0.6.0 for Qwen-Image; the multi-frame video models on this architecture are not yet wired.
+- **TAEHV** — for Hunyuan / Wan / CogVideoX. The Wan 2.1 decoder (taew2.1) has shipped since v0.6.0 for Qwen-Image, but it decodes a single still image. Decoding video frames needs its own temporal handling and validation.
 - **TAEM1** — for Mochi 1.
 
-The mlx-taef integration cost for each is roughly: half-day of code (new variant entry, weight conversion path, smoke test) + a calibration/reference-fixture pass to verify the SSIM/parity bound holds. Not blocked by anything; awaits user/community demand.
+There are no effort estimates. The still-image variants are mostly weight conversion plus calibration, and the temporal ones are larger. None is scheduled; each waits for user demand.
 
 ## Out of scope (deliberate non-goals)
 

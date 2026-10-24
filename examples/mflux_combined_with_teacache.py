@@ -14,7 +14,7 @@ Run with:
 Generates the same 4-step Flux2Klein image as the live_preview
 example but wraps the transformer with mlx-teacache's apply_teacache
 first. The two libraries compose cleanly — neither knows about the
-other. Requires mlx-teacache >= 0.6 (installed via the [showcase]
+other. Requires mlx-teacache >= 0.14.0 (installed via the [showcase]
 extra: `pip install 'mlx-taef[showcase]'`).
 """
 

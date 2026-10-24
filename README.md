@@ -186,6 +186,7 @@ See `docs/manual-verification.md` for the full verification recipe.
 - **v0.8.1 — released on PyPI** (2026-09-05). mflux 0.19.x compatibility. mflux 0.19.0 started passing a new `control_images` argument to every before-loop callback, which made any generation with a `LivePreviewCallback` registered fail before its first step; the hook now accepts it (and whichever conditioning keyword mflux adds next), and the `mflux` extra installs against 0.19.x (`>=0.17,<0.20`). Verified against mflux 0.19.1 / MLX 0.32.2: callback contract, latent layouts, and parity fixtures unchanged; a registered preview composes with mflux's new `--pid-decode` final decode.
 - **v0.8.2 — released on PyPI** (2026-09-17). TAEF2 previews now match the full FLUX.2 VAE much more closely: SSIM against the full VAE decode rises from 0.616 to 0.960 on the benchmark latent (webp-scored, as in COMPARISON; 0.59 to 0.92 on lossless PNGs). Earlier releases applied the VAE's batch-norm inverse to the latent before TAEF2 whenever `flux=model` was passed, which is not the input TAEF2 wants, so previews came out dark and oversaturated. The default now feeds TAEF2 the latent as mflux produces it; `auto_bn=True` or explicit `bn_mean` / `bn_var` keep the old behavior and log a warning. COMPARISON and EXAMPLES carry the re-measured FLUX.2 numbers and frames.
 - **v0.8.3 — released on PyPI** (2026-09-23). Works with mflux 0.19.x and 0.20.x. `LivePreviewCallback(flux=model)` now picks the matching tiny decoder from the model, so the variant argument is optional, and an unsupported model is reported when the callback is created rather than at the first preview. On mflux 0.20, Krea 2 previews decode the model's prediction of the finished image and are recognizable from the first step; `preview_source="latents"` keeps the old view.
+- **v0.8.4 — released on PyPI** (2026-10-24). The `mflux` extra now accepts mflux 0.19 through 0.25 (tested on 0.19.x and 0.23.0; 0.17 and 0.18 are no longer accepted) and keeps Pillow below 13, since mflux 0.23.0 fails to import under Pillow 13. Previews now cover Krea 2's depth ControlNet; Qwen-Image 2.1, FLUX 3 Image Klein and Ming-Image are refused with a clear error when the preview callback is created, before the preview decoder loads. Z-Image and FLUX.2 Klein previews now decode in float32, which shifts pixels by about 0.1/255 on average or less.
 
 Track future releases via the [PyPI history](https://pypi.org/project/mlx-taef/#history) or `gh release list -R IonDen/mlx-taef`.
 
@@ -197,7 +198,7 @@ MIT. Mirrors upstream [madebyollin/taesd](https://github.com/madebyollin/taesd) 
 
 - [madebyollin](https://github.com/madebyollin) for the upstream TAESD-family models and weights.
 - [Apple ML Explore](https://github.com/ml-explore/mlx) for MLX.
-- [filipstrand/mflux](https://github.com/filipstrand/mflux) for the MLX-native FLUX runner this library integrates with.
+- [mflux-community/mflux](https://github.com/mflux-community/mflux) for the MLX-native FLUX runner this library integrates with.
 
 ## Sister projects
 
