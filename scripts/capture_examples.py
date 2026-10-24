@@ -139,8 +139,31 @@ script's 20-step, no-CFG run should sit lower, but if the memory watchdog aborts
 mixed-precision capture, that is an honest signal to report, not a reason to raise the memory
 ceiling.
 
+Preview source and run record (generation variants): `--preview-source latents` (default) decodes
+the in-loop latent at every step, which is how the committed galleries were made;
+`--preview-source auto` decodes the model's per-step prediction where mflux hands one to the
+callback (Krea 2 on mflux 0.20+) and the latent otherwise. After a successful run the script
+prints `last_preview_source=<value>` and writes `<variant>_run.json` beside the frames: the
+requested `preview_source`, the `last_preview_source` the callback reported, the frame count,
+wall and generation seconds, the `model_path` (below) with its `model_path_kind`, and the
+installed mflux and mlx versions. A repo id is recorded as given (`"repo"`); a local path only
+by its last component, e.g. the snapshot hash (`"local"`), so no home directory is published.
+`--preview-source auto` on a roundtrip variant is an argument error (it writes no previews).
+
+Checkpoint path (krea-2-turbo only): `--model-path PATH` builds
+`Krea2(quantize=4, model_path=PATH, model_config=ModelConfig.krea2())`, e.g. to load the
+pre-quantized `mflux-community/krea-2-turbo-mflux-q4` save instead of the bf16
+`krea/Krea-2-Turbo` repo. PATH is a local directory or an `org/name` repo id: mflux 0.23.0's
+`PathResolution.resolve` takes an existing local path first, then a complete cached snapshot,
+then downloads. quantize=4 does not re-quantize a pre-quantized save (the stored precision wins,
+`QuantizationResolution`), and still quantizes a bf16 checkpoint. Every other variant rejects
+the option as an argument error. Default: unset, the variant's default repo, as before.
+
 Usage:
     uv run python scripts/capture_examples.py --variant flux1-dev
+    uv run python scripts/capture_examples.py --variant krea-2-turbo --preview-source auto
+    uv run python scripts/capture_examples.py --variant krea-2-turbo \\
+        --model-path mflux-community/krea-2-turbo-mflux-q4
     uv run python scripts/capture_examples.py --variant flux2-klein-4b
     uv run python scripts/capture_examples.py --variant qwen-image
     uv run python scripts/capture_examples.py --variant qwen-image --qwen-uniform-q4
@@ -153,10 +176,13 @@ Usage:
 """
 
 import argparse
+import importlib.metadata
 import json
 import os
+import re
 import shutil
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -195,6 +221,9 @@ _DEFAULT_PROMPT = "a red apple on a wooden table"
 _WALL_BUDGET_S = 3600.0
 
 _WEBP_QUALITY = 92
+
+# Wall clock for the run record; a module attribute so tests can substitute a fake.
+_clock = time.perf_counter
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -453,6 +482,27 @@ def _build_argparser() -> argparse.ArgumentParser:
         help="Override CFG guidance for generation variants. Default: per-variant native guidance.",
     )
     parser.add_argument(
+        "--preview-source",
+        choices=("auto", "latents"),
+        default="latents",
+        help=(
+            "What each preview frame decodes: 'latents' (the in-loop latent, how the committed "
+            "galleries were made) or 'auto' (the model's per-step prediction where mflux hands "
+            "one over, e.g. Krea 2 on mflux 0.20+). The source actually used is printed and "
+            "written to '<variant>_run.json'. Default: %(default)s"
+        ),
+    )
+    parser.add_argument(
+        "--model-path",
+        default=None,
+        help=(
+            "krea-2-turbo only: load the model from this checkpoint instead of the default "
+            "repo: a local directory (e.g. a Hugging Face snapshot dir) or an 'org/name' repo "
+            "id, as mflux's own model_path takes. A pre-quantized save keeps its stored "
+            "precision. Recorded in '<variant>_run.json'. Default: the default repo."
+        ),
+    )
+    parser.add_argument(
         "--qwen-uniform-q4",
         action="store_true",
         help=(
@@ -538,14 +588,19 @@ def _build_qwen_image_model(*, uniform_q4: bool) -> object:
         QwenWeightDefinition.quantization_predicate = original_predicate
 
 
-def _build_flux_model(variant: str, *, qwen_uniform_q4: bool = False) -> object:
+def _build_flux_model(
+    variant: str, *, qwen_uniform_q4: bool = False, model_path: str | None = None
+) -> object:
     """Construct the mflux model for a generation `variant`, quantize=4.
 
     Heavy: imports mflux and downloads/converts/loads weights on first call per model. See
     the module docstring for the exact `ModelConfig` constructor cited per variant.
     `qwen_uniform_q4` is read only for `variant == "qwen-image"`; see
-    `_build_qwen_image_model`.
+    `_build_qwen_image_model`. `model_path` is accepted for `krea-2-turbo` only (passed as
+    `Krea2(model_path=...)`); any other variant raises `ValueError` rather than ignore it.
     """
+    if model_path is not None and variant != "krea-2-turbo":
+        raise ValueError(f"--model-path is supported for krea-2-turbo only, not {variant!r}")
     if variant in ("flux1-dev", "combined"):
         # combined reuses the flux1-dev build verbatim — same model, same quantization;
         # only the teacache wrapping (applied by _run_generation) differs.
@@ -563,7 +618,12 @@ def _build_flux_model(variant: str, *, qwen_uniform_q4: bool = False) -> object:
         from mflux.models.common.config.model_config import ModelConfig
         from mflux.models.krea2.variants.txt2img.krea2 import Krea2
 
-        return Krea2(quantize=4, model_config=ModelConfig.krea2())
+        if model_path is None:
+            return Krea2(quantize=4, model_config=ModelConfig.krea2())
+        # quantize=4 is safe for a pre-quantized save: mflux 0.23.0 keeps the stored precision
+        # when both are set (QuantizationResolution "conflict" -> STORED; WeightApplier then
+        # builds the quantized layers from the stored shapes and loads them, no re-quantize).
+        return Krea2(quantize=4, model_path=model_path, model_config=ModelConfig.krea2())
     raise ValueError(f"unsupported generation variant: {variant}")  # pragma: no cover
 
 
@@ -642,8 +702,11 @@ def _run_generation(variant: str, args: argparse.Namespace) -> Path:
 
     params = _resolve_generation_params(variant, args.num_steps, args.guidance)
     tmp_dir = _temp_variant_dir(args.out_dir, variant)
+    run_start = _clock()
     try:
-        flux = _build_flux_model(variant, qwen_uniform_q4=args.qwen_uniform_q4)
+        flux = _build_flux_model(
+            variant, qwen_uniform_q4=args.qwen_uniform_q4, model_path=args.model_path
+        )
         # Teacache wraps FIRST, so the LivePreviewCallback previews the same cached
         # trajectory the final image comes from (the two compose on the callback registry;
         # neither knows about the other).
@@ -656,12 +719,14 @@ def _run_generation(variant: str, args: argparse.Namespace) -> Path:
             numbered_frames=True,
             save_to=tmp_dir / f"{variant}.webp",
             on_error="raise",
-            # The committed galleries show the in-loop latent at every step; keep them
-            # reproducible on mflux 0.20, where Krea 2 would otherwise hand over its prediction.
-            preview_source="latents",
+            # Default "latents": the committed galleries show the in-loop latent at every step
+            # and stay reproducible on mflux 0.20+, where Krea 2 would otherwise hand over its
+            # prediction. "auto" lets that prediction through (the run record says which won).
+            preview_source=args.preview_source,
         )
         flux.callbacks.register(callback)  # type: ignore[attr-defined]
 
+        generation_start = _clock()
         generated = flux.generate_image(  # type: ignore[attr-defined]
             seed=args.seed,
             prompt=args.prompt,
@@ -670,6 +735,7 @@ def _run_generation(variant: str, args: argparse.Namespace) -> Path:
             width=args.width,
             guidance=params.guidance,
         )
+        run_end = _clock()
 
         tmp_final_path = tmp_dir / f"{variant}_final.webp"
         generated.image.save(tmp_final_path, "WEBP", quality=_WEBP_QUALITY)  # type: ignore[attr-defined]
@@ -687,12 +753,88 @@ def _run_generation(variant: str, args: argparse.Namespace) -> Path:
                 seed=args.seed,
                 prompt=args.prompt,
             )
+        _write_run_record(
+            tmp_dir,
+            variant=variant,
+            model_path=args.model_path,
+            preview_source=args.preview_source,
+            last_preview_source=callback.last_preview_source,
+            frame_count=len(callback.saved_paths),
+            wall_seconds=run_end - run_start,
+            generation_seconds=run_end - generation_start,
+        )
     except BaseException:
         _discard_temp_variant_dir(tmp_dir)
         raise
 
     variant_dir = _publish_variant_dir(args.out_dir, variant, tmp_dir)
     return variant_dir / f"{variant}_final.webp"
+
+
+def _installed_version(distribution: str) -> str | None:
+    """The installed version of `distribution`, or None when it is not installed."""
+    try:
+        return importlib.metadata.version(distribution)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
+_REPO_ID = re.compile(r"[A-Za-z0-9][\w.-]*/[\w.-]+")
+
+
+def _describe_model_path(model_path: str | None) -> tuple[str | None, str | None]:
+    """Return the `(model_path, model_path_kind)` the run record publishes for `--model-path`.
+
+    A Hugging Face repo id (`org/name`, naming no existing local path) is kept as given, kind
+    `"repo"`. Anything else is a local path, existing or not: it is resolved and only its last
+    component is kept (a cache snapshot dir's hash; for `.`, `""` or a relative path, the real
+    directory name), kind `"local"`: the record is published in the repo, so a home directory
+    must never reach it. None (the default repo) stays None.
+    """
+    if model_path is None:
+        return None, None
+    if not Path(model_path).expanduser().exists() and _REPO_ID.fullmatch(model_path):
+        return model_path, "repo"
+    return Path(model_path).expanduser().resolve().name, "local"
+
+
+def _write_run_record(
+    tmp_dir: Path,
+    *,
+    variant: str,
+    model_path: str | None,
+    preview_source: str,
+    last_preview_source: str | None,
+    frame_count: int,
+    wall_seconds: float,
+    generation_seconds: float,
+) -> None:
+    """Print the observed preview source and write `<variant>_run.json` beside the frames.
+
+    `model_path` is the `--model-path` the model was loaded from (None: the default repo),
+    recorded as `_describe_model_path` describes it. `last_preview_source` is what `LivePreviewCallback` reported after the run ("latents",
+    "prediction", or None when no preview was written), not what was requested.
+    `wall_seconds` spans model build plus generation; `generation_seconds` is
+    `generate_image` alone.
+    """
+    print(
+        f"{variant}: last_preview_source={last_preview_source} "
+        f"preview_source={preview_source} frames={frame_count}"
+    )
+    recorded_path, path_kind = _describe_model_path(model_path)
+    record = {
+        "variant": variant,
+        "model_path": recorded_path,
+        "model_path_kind": path_kind,
+        "preview_source": preview_source,
+        "last_preview_source": last_preview_source,
+        "frame_count": frame_count,
+        "wall_seconds": wall_seconds,
+        "generation_seconds": generation_seconds,
+        "mflux_version": _installed_version("mflux"),
+        "mlx_version": _installed_version("mlx"),
+    }
+    (tmp_dir / f"{variant}_run.json").write_text(json.dumps(record, indent=2) + "\n")
 
 
 def _load_roundtrip_model(variant: str) -> Taef:
@@ -759,6 +901,13 @@ def main(argv: list[str] | None = None) -> int:
     """CLI entry point; returns 0 on success."""
     parser = _build_argparser()
     args = parser.parse_args(argv)
+    if args.model_path is not None and args.variant != "krea-2-turbo":
+        parser.error(f"--model-path is supported for krea-2-turbo only, not {args.variant!r}")
+    if args.preview_source == "auto" and args.variant in _ROUNDTRIP_VARIANTS:
+        parser.error(
+            f"--preview-source auto has no effect for {args.variant!r}: a roundtrip writes no "
+            "preview frames"
+        )
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     _install_memory_caps()
