@@ -41,14 +41,18 @@ class _TimedPreviewCallback(LivePreviewCallback):
         config: object,
         time_steps: object,
         denoised: mx.array | None = None,
+        **kwargs: object,
     ) -> None:
         # Keep `denoised` in an override: mflux reads this signature to decide whether to pass
         # the model's per-step prediction, and drops it for a callback that does not name it.
+        # `**kwargs` takes any keyword a later mflux adds; pass it on to the parent.
         # mflux hands the latent over before evaluating it; evaluate first so the timer below
         # measures the preview (TAEF2 decode plus writing the image), not the transformer step.
         mx.eval(latents if denoised is None else [latents, denoised])
         t0 = time.perf_counter()
-        super().call_in_loop(t, seed, prompt, latents, config, time_steps, denoised=denoised)
+        super().call_in_loop(
+            t, seed, prompt, latents, config, time_steps, denoised=denoised, **kwargs
+        )
         # saved_paths is appended by the parent; its length tells us the step index.
         elapsed_ms = (time.perf_counter() - t0) * 1000
         step = len(self.saved_paths) - 1
