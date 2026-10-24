@@ -28,6 +28,17 @@ and are dated as such: the sha256 digests in section 1 were read from the Huggin
 NumPy. The figure in section 3 is a synthetic tensor pushed through two reshape orders; it needs
 no weights, and its generator script is committed beside it.
 
+Sections 1 to 7 are the original memo and hold at those two pins. Apart from three bracketed,
+dated notes that point to the update, they are unchanged, and every number in them was read at
+those pins or in a check the text dates. The update at the end, dated separately, draws on
+`mlx-taef` v0.8.2 and v0.8.3 and, for one detail about the precision of the decoder's input,
+[`v0.8.4`](https://github.com/IonDen/mlx-taef/tree/v0.8.4). Its TAEF2 scores come from the A/B
+evidence bundle committed with `mlx-taef` [`v0.8.2`](https://github.com/IonDen/mlx-taef/tree/v0.8.2). Its two mflux 0.20 cases are read
+from `mlx-taef` [`v0.8.3`](https://github.com/IonDen/mlx-taef/tree/v0.8.3) and from mflux's
+[`v.0.20.0`](https://github.com/mflux-community/mflux/tree/v.0.20.0) source. Its source links are
+pinned to those four tags, except for one mflux pull request page and the TAEF2 model page that
+section 2 already cites. Nothing was rerun for the update.
+
 ## 1. The seductive fact: same VAE, same weights
 
 Several of mflux's image models decode through one VAE class. The three families below cover all
@@ -132,6 +143,9 @@ and value domain the generator emits, and the layout and value domain the decode
 trained on. Applying the full VAE's per-channel mean and std before taew2.1 would be wrong, and
 whichever side of the TAEF2 question is wrong is wrong in the same silent way.
 
+*[Update, 2026-10-24: `mlx-taef` v0.8.2 has since scored both TAEF2 readings against the full VAE;
+the update at the end of this memo gives the result.]*
+
 None of this is documented as a contract. Each fact is read from the generator's own loop and
 latent-creator source at a pinned version, and from the tiny decoder's training convention.
 That is the method this memo argues for, and section 6 comes back to it.
@@ -224,6 +238,9 @@ ERNIE-Image pipeline
 it de-normalizing with a hard-coded epsilon of 1e-5 while the VAE's configured value was 1e-4,
 a value-space drift no shape check would report, and `mlx-taef` had to forward the VAE's actual
 epsilon into its own unpack in v0.5.0 for the same reason.
+
+*[Update, 2026-10-24: v0.8.2 measured the identity path against the batch-norm inverse and made it
+the default; the update at the end of this memo has the numbers.]*
 
 A missing unpack fails loudly, which is the useful contrast. `mlx-taef`'s first FLUX.1 preview
 [fed the packed `(1, seq, 64)` tensor straight to the decoder](https://github.com/IonDen/mlx-taef/blob/v0.8.1/CHANGELOG.md)
@@ -355,6 +372,9 @@ FLUX preview from that hook
 ([discussion 6991](https://github.com/huggingface/diffusers/discussions/6991)) had to call the
 pipeline's private unpack and re-apply the VAE's scale and shift by hand.
 
+*[Update, 2026-10-24: since mflux 0.20, an in-loop callback can also receive the model's estimate of
+the clean image; see the update at the end of this memo.]*
+
 The nearest existing answer to "what is a latent contract" is ComfyUI's
 [`latent_formats.py`](https://github.com/Comfy-Org/ComfyUI/blob/00d34d92fe0afbfbab3893ebbab2d5d70f5e9882/comfy/latent_formats.py),
 a per-model object carrying channel count, spatial divisor, scale and shift, and the name of
@@ -378,5 +398,107 @@ normalization and spatial convention, read from the generator's source at a pinn
 matched against the input domain the decoder in hand was trained on. Which VAE class the
 generator constructs settles none of that, and weight identity is a hash or it is an assumption.
 
+## Update, 2026-10-24: TAEF2 measured, and two new cases from mflux 0.20
+
+Sections 1 to 7 hold at mflux `v.0.19.1` and `mlx-taef` `v0.8.1`. Since then, `mlx-taef` v0.8.2
+has answered the practical half of the question section 2 left open, and mflux 0.20 has added two
+cases that fit the memo's argument.
+
+The open question was which input domain TAEF2 expects, and `mlx-taef` v0.8.2 measured it. Its
+script,
+[`ab_taef2_bn_domain.py`](https://github.com/IonDen/mlx-taef/blob/v0.8.2/scripts/ab_taef2_bn_domain.py),
+decodes one latent three ways. The full FLUX.2 VAE decodes it once, as the reference. TAEF2
+decodes it twice: once as mflux hands it to the callback, and once after the batch-norm inverse.
+Each TAEF2 decode is scored against the reference, with lossless PNGs between decoder and scorer.
+
+The [committed reports](https://github.com/IonDen/mlx-taef/tree/v0.8.2/_artifacts/ab_taef2_bn_domain)
+each record the SHA-256 of their input latent. They come from a pre-release revision of this
+script, eight commits after v0.8.1, with uncommitted changes in the tree. Compared with the last
+commit in that tree, the script released with v0.8.2 adds per-condition memory limits and scorer
+error handling, among other harness changes, and keeps the same scoring functions. What the
+uncommitted changes were cannot be recovered. Nothing was rerun.
+
+The runs used an M1 Max with 32 GB under macOS 27.0, mflux 0.19.1 and MLX 0.32.2. The mflux model
+was loaded at `quantize=4` and generated in bf16. The tiny decoder's weights are float32 and not
+quantized, but in these runs the latent went into it as mflux's bf16.
+[v0.8.4](https://github.com/IonDen/mlx-taef/blob/v0.8.4/CHANGELOG.md) converts the latent to
+float32 before decoding; on the committed fixture in the first row below, that changes pixels by
+at most 2/255, and by about 0.03/255 on average
+([script](https://github.com/IonDen/mlx-taef/blob/v0.8.4/scripts/measure_preview_dtype_shift.py),
+`--case flux2-klein`). Each row below is one latent, decoded once per condition, so the table
+holds two data points and no spread. SSIM (structural similarity) is higher-is-better, and LPIPS (a learned
+perceptual distance) is lower-is-better:
+
+| FLUX.2 Klein base 4B latent | TAEF2 on the latent as handed over (SSIM / LPIPS) | TAEF2 after the batch-norm inverse (SSIM / LPIPS) |
+|---|---|---|
+| 512×512, 4 steps, deliberately under-denoised (committed fixture) | 0.920 / 0.058 | 0.588 / 0.241 |
+| 768 wide by 512 tall, portrait-photo prompt, 28 steps (latent not committed; [capture recipe](https://github.com/IonDen/mlx-taef/blob/v0.8.2/_artifacts/ab_taef2_bn_domain/control_portrait_768x512/RECIPE.md)) | 0.945 / 0.022 | 0.716 / 0.150 |
+
+On both latents, the identity path (TAEF2 on the latent as handed over) scored closer to the full
+VAE than the batch-norm inverse did. Section 4 calls that path a documented, colour-shifted
+fallback. The measurement scores fidelity to the full VAE and
+does not record how TAEF2 was distilled. It does agree with the two integrations section 2 cites:
+madebyollin's [reference wrapper](https://huggingface.co/madebyollin/taef2) puts the decoder
+behind a batch norm whose inverse is the identity, and ComfyUI's TAEF2 decoder only unpatchifies.
+
+The [changelog](https://github.com/IonDen/mlx-taef/blob/v0.8.2/CHANGELOG.md) says previews made
+with the inverse came out dark and oversaturated. v0.8.2 stopped applying it by default
+(`auto_bn=False`) and kept it as an opt-in that logs a warning. The silent value-space error was
+the library's own default: from v0.2.0 through v0.8.1, passing the model made the callback apply
+the inverse, and nothing raised or logged.
+
+The first new case is about which tensor the callback receives. Section 7 says mflux's `in_loop`
+passes the still-noisy working state, and at 0.19.1 it does. Since mflux 0.20
+([PR #729](https://github.com/mflux-community/mflux/pull/729)), a callback can also receive the
+model's per-step estimate of the clean image, under the name `denoised`. In the 0.20 source only
+Krea 2's loop passes it
+([source](https://github.com/mflux-community/mflux/blob/v.0.20.0/src/mflux/models/krea2/variants/txt2img/krea2.py#L97-L101)).
+Before the step, the loop computes `latents − σ·v` from the step's input latent, where σ is the
+step's entry in the sigma schedule and v is the transformer's prediction. It hands the result
+over in the latent's own layout. Every other model's `in_loop` call leaves `denoised` at its
+default, `None`
+([source](https://github.com/mflux-community/mflux/blob/v.0.20.0/src/mflux/callbacks/generation_context.py#L49-L55)).
+
+`LivePreviewCallback` in
+[v0.8.3](https://github.com/IonDen/mlx-taef/blob/v0.8.3/src/mlx_taef/integrations/mflux.py)
+decodes that estimate by default (`preview_source="auto"`, while `"latents"` keeps the old view)
+and records the source of the latest preview in `last_preview_source`. The
+[v0.8.3 changelog](https://github.com/IonDen/mlx-taef/blob/v0.8.3/CHANGELOG.md) reports that in
+an eight-step Krea 2 run the previews are then recognizable from the first step, while the
+in-loop latent stays noise for the first three steps; it gives no other settings for that run.
+
+The handover itself is a new silent trap. mflux reads the signature of the `call_in_loop` it is
+about to call and passes `denoised` only if that method declares it by name, as a
+positional-or-keyword or keyword-only parameter; `**kwargs` alone does not opt in
+([source](https://github.com/mflux-community/mflux/blob/v.0.20.0/src/mflux/callbacks/generation_context.py#L92-L98)).
+A subclass that overrides `call_in_loop(self, *args, **kwargs)` and forwards to its parent never
+receives the estimate. Nothing raises: the preview silently decodes the noisy latent, and only
+`last_preview_source` shows it.
+
+The second case is section 2's same-shape trap with a new model. mflux 0.20's Qwen-Image 2.1 hands
+its callback a `(1, h/16 · w/16, 64)` tensor, the shape of Qwen-Image's packed tensor. Qwen-Image
+folds a 2×2 sub-pixel block of a 16-channel Wan 2.1 latent into those 64 channels; Qwen-Image 2.1
+flattens a 64-channel latent from its own VAE with no fold
+([source](https://github.com/mflux-community/mflux/blob/v.0.20.0/src/mflux/models/qwen21/latent_creator/qwen21_latent_creator.py)).
+Nothing in the shape stops taew2.1 from decoding the Qwen-Image 2.1 tensor.
+
+`mlx-taef` v0.8.3 picks the tiny decoder from the model's name by case-insensitive prefix match.
+A bare `Qwen/Qwen-Image` prefix would also claim `Qwen/Qwen-Image-2.1`, so the
+[Qwen-Image binding](https://github.com/IonDen/mlx-taef/blob/v0.8.3/src/mlx_taef/kernels/qwen.py#L77)
+lists only two name prefixes, `Qwen/Qwen-Image-2512` and `Qwen/Qwen-Image-Edit`. The
+original `Qwen/Qwen-Image` repository still resolves: mflux files it under its `qwen-image`
+entry, whose canonical name is `Qwen/Qwen-Image-2512`
+([source](https://github.com/mflux-community/mflux/blob/v.0.20.0/src/mflux/models/common/config/model_config.py)),
+and the resolver tries that base-model name against the prefixes before it consults aliases.
+Building a callback from a Qwen-Image 2.1 model without `variant=` raises
+`UnsupportedMfluxModelError`, and a
+[resolver test](https://github.com/IonDen/mlx-taef/blob/v0.8.3/tests/test_kernels_mflux_resolution.py)
+pins the rejection. Like the Z-Image rank check in section 4, this is a guard written after the
+fact, and it guards the name, not the tensor. The v0.8.3 source shows that an explicit
+`variant="qwen-image"` skips the name check and that the unpack's shape checks would pass.
+
+Neither mflux 0.20 case changes the rule in section 7: what the tensor represents and how it is
+laid out are still read from the generator's source at a pinned version, here 0.20.
+
 ---
-*Denis Ineshin · 2026-09-10 · [ineshin.space](https://ineshin.space)*
+*Denis Ineshin · 2026-09-10 · updated 2026-10-24 · [ineshin.space](https://ineshin.space)*
