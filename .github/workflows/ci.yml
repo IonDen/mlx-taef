@@ -5,16 +5,22 @@ on:
   pull_request:
     branches: [main]
 
+# Every job only reads the repository; no job overrides this.
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install uv
-        run: pip install uv
+        run: pip install uv==0.11.2
       - name: Sync
         run: uv sync --frozen --group lint
       - name: Ruff check
@@ -35,11 +41,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install uv
-        run: pip install uv
+        run: pip install uv==0.11.2
       - name: Sync
         run: uv sync --frozen --group typecheck
       - name: Mypy
@@ -53,11 +61,13 @@ jobs:
         python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
       - name: Install uv
-        run: pip install uv
+        run: pip install uv==0.11.2
       - name: Sync (test group only — keep CI light)
         run: uv sync --frozen --group test
       - name: Run unit + parity tests
@@ -70,19 +80,20 @@ jobs:
 
   test-mflux-floor:
     # The lockfile resolves mflux to the newest minor on macOS; this leg runs the offline
-    # suite on mflux 0.19, the oldest minor the 0.8.3 release names as supported. The
-    # extra's pin still admits 0.17 and 0.18, which CI does not run. Every `uv run` here
+    # suite on mflux 0.19, the oldest minor the extras admit (`>=0.19`). Every `uv run` here
     # needs `--no-sync`: a plain `uv run` re-syncs to the lockfile and silently puts the
     # locked mflux back. The 95% coverage gate runs in the `test` matrix; this leg has none
     # because one older mflux can cover different lines.
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install uv
-        run: pip install uv
+        run: pip install uv==0.11.2
       - name: Sync (test group only)
         run: uv sync --frozen --group test
       - name: Install mflux 0.19 (no dependency changes)

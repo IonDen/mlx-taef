@@ -1,11 +1,13 @@
 import builtins
 import importlib.metadata
+import re
 import sys
 import textwrap
 import types
 from pathlib import Path
 
 import pytest
+from packaging.requirements import Requirement
 
 # Version-gated import: no single CI leg runs both arms, so both are excluded
 # from coverage rather than reporting one as untested on every interpreter.
@@ -26,6 +28,10 @@ SUPPORTED_PYTHONS = ("3.10", "3.11", "3.12", "3.13", "3.14")
 # Oldest mflux minor CI exercises (the minor the latest release names as supported); bump it
 # when that moves.
 MFLUX_FLOOR_MINOR = "0.19"
+
+# The uv every CI job installs before its frozen sync; the version the lockfile was produced
+# with. Bump it together with the `pip install uv==` lines in ci.yml.
+UV_VERSION = "0.11.2"
 
 # The four mflux modules the floor guard must import, so a floor mflux that fails to import
 # turns the job red instead of letting the suite's `pytest.importorskip` skip the mflux tests.
@@ -58,6 +64,41 @@ def _job_block(job_id: str) -> list[str]:
         if len(line) - len(line.lstrip(" ")) <= 2:
             break
         block.append(line)
+    return block
+
+
+def _job_ids() -> list[str]:
+    """The ids of the ci.yml jobs: the keys indented two spaces under the top-level `jobs:`."""
+    lines = _CI_WORKFLOW.read_text().splitlines()
+    assert "jobs:" in lines, "ci.yml has no top-level `jobs:`"
+    ids: list[str] = []
+    for line in lines[lines.index("jobs:") + 1 :]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line.startswith(" "):
+            break
+        if len(line) - len(line.lstrip(" ")) == 2:
+            ids.append(line.strip().removesuffix(":"))
+    return ids
+
+
+def _top_level_block(key: str) -> list[str]:
+    """The stripped lines under every unindented `<key>:` line of ci.yml, up to the next
+    unindented line, blank and `#` lines skipped; a value on the key's own line comes first
+    (so `permissions: write-all` reads as `["write-all"]`)."""
+    block: list[str] = []
+    inside = False
+    for line in _CI_WORKFLOW.read_text().splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line.startswith(" "):
+            inside = line.split(":", 1)[0] == key
+            value = line.split(":", 1)[1].strip() if inside else ""
+            if value:
+                block.append(value)
+            continue
+        if inside:
+            block.append(line.strip())
     return block
 
 
@@ -143,6 +184,45 @@ def _floor_version(minor_offset: int, patch: int) -> str:
     return f"{major}.{int(minor) + minor_offset}.{patch}"
 
 
+def _dependency_places(pyproject: dict) -> dict[str, list]:
+    """Every dependency list in pyproject keyed by where it sits: `extra <name>` for each
+    `[project.optional-dependencies]` entry, `group <name>` for each `[dependency-groups]` one."""
+    return {
+        **{
+            f"extra {name}": deps
+            for name, deps in pyproject["project"]["optional-dependencies"].items()
+        },
+        **{f"group {name}": deps for name, deps in pyproject["dependency-groups"].items()},
+    }
+
+
+def _mflux_requirements(pyproject: dict) -> dict[str, Requirement]:
+    """Every `mflux` requirement in pyproject, keyed by where it sits: each extra under
+    `[project.optional-dependencies]` and each `[dependency-groups]` group (table entries such
+    as `{include-group = ...}` are skipped)."""
+    found: dict[str, Requirement] = {}
+    for place, deps in _dependency_places(pyproject).items():
+        for dep in deps:
+            if isinstance(dep, str) and Requirement(dep).name == "mflux":
+                assert place not in found, f"two mflux requirements in {place}"
+                found[place] = Requirement(dep)
+    return found
+
+
+def test_every_mflux_requirement_starts_at_the_ci_floor_minor() -> None:
+    """The floor job installs `mflux=={MFLUX_FLOOR_MINOR}.*`, and the install metadata must
+    admit nothing older, or a user resolves an mflux no CI job has run. The one-line bug this
+    catches: moving the lower bound of one mflux specifier (the `mflux` or `showcase` extra,
+    or the `test` group) without the others or without `MFLUX_FLOOR_MINOR`, e.g. leaving one
+    at `>=0.17`."""
+    found = _mflux_requirements(_pyproject())
+
+    assert set(found) == {"extra mflux", "extra showcase", "group test"}, sorted(found)
+    for place, requirement in found.items():
+        lower = [spec for spec in requirement.specifier if spec.operator == ">="]
+        assert [spec.version for spec in lower] == [MFLUX_FLOOR_MINOR], (place, str(requirement))
+
+
 def test_built_distributions_declare_core_metadata_2_4() -> None:
     """The v0.8.1 tag push failed to publish: hatchling 1.32 emits Metadata-Version 2.5 and
     the release workflow's `twine check --strict` (twine 6.2.0, bundled by the build action)
@@ -178,13 +258,91 @@ def test_ci_uv_sync_commands_are_frozen() -> None:
     assert all("--frozen" in command for command in sync_commands)
 
 
+def test_ci_every_job_installs_the_pinned_uv() -> None:
+    """The frozen sync only pins what uv installs, not uv itself: an unpinned `pip install uv`
+    lets a new uv release change how the lockfile is read under every job. The one-line bug
+    this catches: dropping or changing the `==UV_VERSION` pin on any job's `pip install uv`
+    line, or a job that installs uv twice."""
+    jobs = _job_ids()
+    workflow_installs = [
+        line.strip() for line in _CI_WORKFLOW.read_text().splitlines() if "pip install uv" in line
+    ]
+
+    assert jobs, "ci.yml declares no jobs"
+    for job in jobs:
+        installs = [line for line in _job_lines(job) if "pip install uv" in line]
+        assert installs == [f"run: pip install uv=={UV_VERSION}"], (job, installs)
+    assert len(workflow_installs) == len(jobs), workflow_installs
+
+
+def test_ci_workflow_token_is_read_only() -> None:
+    """Without a top-level `permissions:` the token's scope comes from a repository setting,
+    not from the file, and a job-level block replaces the top-level one wholesale. The
+    one-line bug this catches: deleting the top-level block, widening it (`contents: write`,
+    `write-all`), adding a second scope, or a job-level `permissions:` such as
+    `permissions: write-all`."""
+    assert _top_level_block("permissions") == ["contents: read"]
+    for job in _job_ids():
+        overrides = [
+            line
+            for line in _job_lines(job)
+            if line.removeprefix("- ").split(":", 1)[0].strip() == "permissions"
+        ]
+        assert not overrides, (job, overrides)
+
+
+def test_ci_checkouts_do_not_persist_the_token() -> None:
+    """`actions/checkout` writes the job token into `.git/config` unless told not to, where any
+    later step can read it; no step here needs git credentials. The one-line bug this
+    catches: removing `persist-credentials: false` (or setting it to true) on any job's
+    checkout, or a checkout step this test does not see."""
+    checkouts = {
+        job: [step for step in _job_steps(job) if "actions/checkout@" in step[0]]
+        for job in _job_ids()
+    }
+    workflow_checkouts = [
+        line for line in _CI_WORKFLOW.read_text().splitlines() if "actions/checkout@" in line
+    ]
+
+    assert all(checkouts.values()), checkouts
+    for job, steps in checkouts.items():
+        for step in steps:
+            assert "with:" in step, (job, step)
+            assert "persist-credentials: false" in step, (job, step)
+    assert len(workflow_checkouts) == sum(len(steps) for steps in checkouts.values())
+
+
+def test_every_place_that_requires_mflux_caps_pillow_below_13() -> None:
+    """mflux 0.23.0 fails at `import mflux` with Pillow 13 (mflux #890, fixed on mflux main
+    but not released). Every extra or group that pulls in mflux (the `mflux` and `showcase`
+    extras, the `test` group) must carry its own Pillow cap: an install resolves only the
+    place it names. The one-line bug this catches: `pip install mlx-taef[showcase]` (or a CI
+    sync of the `test` group) resolving Pillow 13 and crashing at `import mflux`, because the
+    cap sits on one place only or moved off `<13`."""
+    data = _pyproject()
+    places = _dependency_places(data)
+    mflux_places = set(_mflux_requirements(data))
+
+    assert mflux_places == {"extra mflux", "extra showcase", "group test"}, sorted(mflux_places)
+    for place in sorted(mflux_places):
+        pillow = [
+            Requirement(dep)
+            for dep in places[place]
+            if isinstance(dep, str) and Requirement(dep).name.lower() == "pillow"
+        ]
+        assert len(pillow) == 1, (place, places[place])
+        upper = [spec.version for spec in pillow[0].specifier if spec.operator == "<"]
+        assert upper == ["13"], (place, str(pillow[0]))
+        assert pillow[0].marker is None, (place, str(pillow[0]))
+
+
 def test_job_lines_reads_the_whole_job_and_nothing_after_it(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """The job tests below look only at what `_job_lines` returns, so a job cut short would
     hide its later lines from them (a `continue-on-error` after a stray indented blank line
     would pass unseen). The one-line bug this catches: stopping the job at a whitespace-only
-    line, or reading on past the job into a top-level key that follows it."""
+    line, or reading on past the job into the next job's key or a top-level key that follows."""
     workflow = tmp_path / "ci.yml"
     workflow.write_text(
         "jobs:\n"
@@ -195,6 +353,8 @@ def test_job_lines_reads_the_whole_job_and_nothing_after_it(
         "    steps:\n"
         "      # a comment\n"
         "      - run: echo hi\n"
+        "  b:\n"
+        "    runs-on: y\n"
         "env:\n"
         "  KEY: value\n"
     )
@@ -203,9 +363,38 @@ def test_job_lines_reads_the_whole_job_and_nothing_after_it(
     assert _job_lines("a") == ["runs-on: x", "steps:", "- run: echo hi"]
 
 
+def test_job_ids_and_top_level_block_read_what_the_hardening_tests_check(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The token and uv tests see only the jobs `_job_ids` lists and the scopes
+    `_top_level_block` returns. The one-line bug this catches: `_job_ids` listing step keys or
+    missing a job after a comment, or `_top_level_block` dropping a value written on the key's
+    own line (so `permissions: write-all` would read as no block) or reading on past the next
+    top-level key."""
+    workflow = tmp_path / "ci.yml"
+    workflow.write_text(
+        "permissions: write-all\n"
+        "  contents: read\n"
+        "jobs:\n"
+        "  a:\n"
+        "    runs-on: x\n"
+        "  # a comment\n"
+        "  b:\n"
+        "    steps:\n"
+        "      - run: echo hi\n"
+        "env:\n"
+        "  KEY: value\n"
+    )
+    monkeypatch.setattr(sys.modules[__name__], "_CI_WORKFLOW", workflow)
+
+    assert _job_ids() == ["a", "b"]
+    assert _top_level_block("permissions") == ["write-all", "contents: read"]
+
+
 def test_ci_mflux_floor_job_installs_the_floor_after_a_frozen_sync() -> None:
-    """The lockfile resolves mflux to the newest supported minor on macOS, so the oldest one
-    is only exercised by a job that installs it over the frozen test sync. The one-line bug
+    """The lockfile resolves mflux to the newest minor it admits on macOS, so 0.19, the oldest
+    minor the release names as supported (`MFLUX_FLOOR_MINOR`), is only exercised by a job
+    that installs it over the frozen test sync. The one-line bug
     this catches: deleting the job, or installing the floor before the sync (which would
     put the locked mflux straight back)."""
     job = _job_lines(_MFLUX_FLOOR_JOB)
@@ -260,6 +449,23 @@ def test_ci_mflux_floor_job_cannot_be_switched_off() -> None:
     assert not any("continue-on-error" in line for line in job), job
     assert "if" not in keys, job
     assert not any("PYTEST_ADDOPTS" in line for line in job), job
+
+
+def test_ci_mflux_floor_job_comment_names_the_floor_the_extras_admit() -> None:
+    """The floor job's comment tells a reader which mflux the job covers and what the pins
+    admit. The one-line bug this catches: the comment still claiming the pins admit a minor
+    below the floor (0.17, 0.18) after the extras moved to `>=0.19`, or losing the floor."""
+    comment = " ".join(
+        line.strip().removeprefix("#").strip()
+        for line in _job_block(_MFLUX_FLOOR_JOB)
+        if line.strip().startswith("#")
+    )
+    floor = int(MFLUX_FLOOR_MINOR.split(".")[1])
+    minors = [int(m) for m in re.findall(r"\b0\.(\d+)\b", comment)]
+
+    assert f"(`>={MFLUX_FLOOR_MINOR}`)" in comment, comment
+    assert minors, comment
+    assert all(minor >= floor for minor in minors), comment
 
 
 def test_ci_mflux_floor_job_never_lets_uv_run_resync() -> None:
@@ -391,17 +597,28 @@ def test_readme_python_badge_states_the_floor_as_a_range() -> None:
     )
 
 
-def test_mlx_teacache_has_no_python_version_marker() -> None:
-    """mlx-teacache supports 3.10 since its v0.9.3; the old gate must not silently return."""
+def test_mlx_teacache_pins_start_at_0_14_0_below_1_on_every_python() -> None:
+    """Both mlx-teacache pins (showcase extra, test group) read exactly `>=0.14.0,<1` with no
+    Python marker: a 3.11 marker drops it on 3.10, a stale `<0.10` cap locks a pre-0.14
+    release, and a floor moved anywhere off 0.14.0 (down to 0.13.5, which a containment check
+    against 0.13.4 lets through, or up past 0.14.0) changes what the combined showcase runs."""
     data = _pyproject()
     entries = [
-        dep
+        Requirement(dep)
         for dep in (
             data["project"]["optional-dependencies"]["showcase"] + data["dependency-groups"]["test"]
         )
         if isinstance(dep, str) and dep.startswith("mlx-teacache")
     ]
     assert len(entries) == 2, entries
-    for dep in entries:
-        assert "python_version" not in dep, f"stale 3.11 gate: {dep}"
-        assert ">=0.9.3" in dep, f"floor must be the first 3.10-capable release: {dep}"
+    for req in entries:
+        assert req.marker is None, f"stale python gate: {req}"
+        assert req.specifier.contains("0.14.0"), f"must admit 0.14.0: {req}"
+        assert req.specifier.contains("0.99.0"), f"must admit later 0.x releases: {req}"
+        assert not req.specifier.contains("0.13.4"), f"floor must exclude 0.13.x: {req}"
+        assert not req.specifier.contains("1.0.0"), f"must cap below 1.0: {req}"
+        lower = [spec.version for spec in req.specifier if spec.operator == ">="]
+        upper = [spec.version for spec in req.specifier if spec.operator == "<"]
+        assert lower == ["0.14.0"], f"floor must be exactly 0.14.0: {req}"
+        assert upper == ["1"], f"cap must be exactly <1: {req}"
+        assert len(req.specifier) == 2, f"only the floor and the cap: {req}"
