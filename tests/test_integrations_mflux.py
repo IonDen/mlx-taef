@@ -1433,6 +1433,51 @@ def test_real_mflux_in_loop_dispatch_hands_over_the_prediction(
     )
 
 
+def test_live_preview_survives_a_future_in_loop_keyword_through_the_real_dispatcher(
+    offline_taef2: object, tmp_path: Path
+) -> None:
+    """A later mflux may pass the in-loop hook one more keyword to every subscriber, the way
+    0.19 did to the before-loop hook; that TypeError would escape `on_error` and end the user's
+    generation. The installed GenerationContext.in_loop runs for real: the subscriber it sees is
+    the callback's bound `call_in_loop` with one extra keyword pre-applied (a partial), so the
+    dispatcher's own opt-in check reads the callback's signature through it. Catches: no `**`
+    catch-all on `call_in_loop` (the call raises TypeError, and on mflux 0.20+ the partial's
+    signature cannot even be read, so the prediction is lost), or the catch-all replacing the
+    named `denoised` parameter (the opt-in check stops seeing it, the prediction never comes).
+    Runs on the 0.19 floor too: its dispatcher has `in_loop` but no `denoised`, so only the
+    plain dispatch is checked there."""
+    import functools
+    import inspect
+    import types
+
+    from mflux.callbacks.callback_registry import CallbackRegistry
+    from mflux.callbacks.generation_context import GenerationContext
+    from mflux.models.common.config.config import Config
+    from mflux.models.common.config.model_config import ModelConfig
+    from PIL import Image
+
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    cb = LivePreviewCallback(variant="taef2", every=1, save_to=tmp_path / "p.png")
+    future = functools.partial(cb.call_in_loop, some_future_step_output=object())
+    registry = CallbackRegistry()
+    registry.register(types.SimpleNamespace(call_in_loop=future))
+    cfg = Config(model_config=ModelConfig.flux2_klein_base_4b(), height=64, width=64)
+    ctx = GenerationContext(registry, 42, "p", cfg)
+    latents, denoised = _packed_klein_latent(0), _packed_klein_latent(1)
+
+    ctx.in_loop(0, latents)
+    assert cb.last_preview_source == "latents"
+
+    if "denoised" not in inspect.signature(GenerationContext.in_loop).parameters:
+        return  # mflux 0.19.x: no prediction to hand over
+    ctx.in_loop(1, latents, denoised=denoised)
+    assert cb.last_preview_source == "prediction"
+    assert np.array_equal(
+        np.array(Image.open(tmp_path / "p.png")), _decode_as_callback_would(cb, denoised)
+    )
+
+
 def _load_live_preview_example() -> object:
     import importlib.util
 
@@ -1479,6 +1524,49 @@ def test_shipped_example_subclass_forwards_the_prediction_to_the_preview(
         np.array(Image.open(tmp_path / "p.png")), _decode_as_callback_would(cb, denoised)
     )
     assert "TAEF2 decode + save" in capsys.readouterr().out
+
+
+def test_shipped_example_subclass_survives_a_future_in_loop_keyword_through_the_real_dispatcher(
+    offline_taef2: object, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Catches: `examples/mflux_live_preview.py` overriding `call_in_loop` without a `**`
+    catch-all (anyone who copies it crashes with TypeError when a later mflux passes one more
+    in-loop keyword), or the catch-all costing the prediction opt-in (`denoised` no longer seen
+    by the dispatcher or not passed on). Forwarding the extra keywords themselves is not
+    observable while the parent ignores them. Same real-dispatcher setup as the base-class
+    test above; the 0.19 floor checks the plain dispatch only."""
+    import functools
+    import inspect
+    import types
+
+    from mflux.callbacks.callback_registry import CallbackRegistry
+    from mflux.callbacks.generation_context import GenerationContext
+    from mflux.models.common.config.config import Config
+    from mflux.models.common.config.model_config import ModelConfig
+    from PIL import Image
+
+    module = _load_live_preview_example()
+    cb = module._TimedPreviewCallback(  # type: ignore[attr-defined]
+        variant="taef2", every=1, save_to=tmp_path / "p.png"
+    )
+    future = functools.partial(cb.call_in_loop, some_future_step_output=object())
+    registry = CallbackRegistry()
+    registry.register(types.SimpleNamespace(call_in_loop=future))
+    cfg = Config(model_config=ModelConfig.flux2_klein_base_4b(), height=64, width=64)
+    ctx = GenerationContext(registry, 42, "p", cfg)
+    latents, denoised = _packed_klein_latent(0), _packed_klein_latent(1)
+
+    ctx.in_loop(0, latents)
+    assert cb.last_preview_source == "latents"
+    assert "TAEF2 decode + save" in capsys.readouterr().out
+
+    if "denoised" not in inspect.signature(GenerationContext.in_loop).parameters:
+        return  # mflux 0.19.x: no prediction to hand over
+    ctx.in_loop(1, latents, denoised=denoised)
+    assert cb.last_preview_source == "prediction"
+    assert np.array_equal(
+        np.array(Image.open(tmp_path / "p.png")), _decode_as_callback_would(cb, denoised)
+    )
 
 
 def test_last_preview_source_reports_only_a_preview_that_was_written(

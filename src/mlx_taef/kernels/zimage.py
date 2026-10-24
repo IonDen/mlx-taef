@@ -24,13 +24,15 @@ def unpack_zimage_latent(latent: mx.array, ctx: UnpackContext) -> mx.array:
     singleton temporal axis. This mirrors mflux `ZImageLatentCreator.unpack_latents`
     (`expand_dims(0)` -> `squeeze(2)` -> `(1,16,h,w)`) then NCHW->NHWC for TAEF1.
     `ctx.latent_height/width` are unused (the latent already carries its spatial dims) but
-    kept for the uniform `(latent, UnpackContext)` binding signature.
+    kept for the uniform `(latent, UnpackContext)` binding signature. mflux's Z-Image latent is
+    bfloat16; the result is float32, the dtype of the TAEF1 weights, so the decoder does not
+    run its first ops in bfloat16.
     """
     if latent.ndim != 4 or latent.shape[0] != 16 or latent.shape[1] != 1:
         raise ValueError(
             f"Expected Z-Image in-loop latent (16, 1, h, w), got {tuple(latent.shape)}"
         )
-    x = mx.expand_dims(latent, axis=0)  # (1, 16, 1, h, w)
+    x = mx.expand_dims(latent.astype(mx.float32), axis=0)  # (1, 16, 1, h, w)
     x = mx.squeeze(x, axis=2)  # (1, 16, h, w)
     return mx.transpose(x, (0, 2, 3, 1))  # (1, h, w, 16) NHWC for TAEF1
 

@@ -394,6 +394,7 @@ class LivePreviewCallback:
         config: object,
         time_steps: object,
         denoised: mx.array | None = None,
+        **_future_hook_kwargs: object,
     ) -> None:
         """Decode + save a preview every Nth iteration (counted by our own iter, not `t`).
 
@@ -403,6 +404,7 @@ class LivePreviewCallback:
         ignored and the latent decoded instead. Older mflux never passes it.
         mflux reads the signature of the method it calls, so a subclass that overrides this
         method must declare `denoised` too and pass it on, or the prediction never arrives.
+        Any other keyword a later mflux passes is accepted and ignored, as in `call_before_loop`.
         """
         idx = self._iter
         self._iter += 1
@@ -458,7 +460,9 @@ class LivePreviewCallback:
             bn_var=self.bn_var,
             bn_eps=self.bn_eps,
         )
-        img = self.model.decode_image(binding.unpack(latents, ctx))
+        # mflux builds the in-loop latent in the model's precision (bfloat16 for FLUX.2 Klein and
+        # Z-Image); the decoder weights are float32, so decode in float32 for every kernel.
+        img = self.model.decode_image(binding.unpack(latents.astype(mx.float32), ctx))
         target = self._resolve_target(idx)
         self._save_image(img[0], target)
         self.saved_paths.append(target)

@@ -50,6 +50,10 @@ KREA2 = ModelKernel(
             "krea2",
             "krea-2-raw",
             "krea2-raw",
+            # mflux 0.23's Krea 2 depth ControlNet: same transformer, VAE and latent.
+            "krea-2-controlnet-depth",
+            "krea-2-controlnet",
+            "krea2-controlnet",
         ),
         unpack=unpack_krea2_latent,
         packed_latent_downscale=None,  # 4-D unpacked latent, like zimage — not packed like qwen
