@@ -12,6 +12,14 @@ Visual showcase of what mlx-taef does on real generations. Every number on this 
 - Quantization: int4 (mflux `quantize=4`), bf16 generation, fp32 tiny-autoencoder decode
 - Every condition ran in an isolated subprocess with `mx.set_wired_limit` set per the cap column. Each decode was timed after one untimed warmup call, so the figure reflects steady-state per-step decode rather than a cold first call. Every model-loading subprocess — the three live-generation workers and the vs-VAE decode reps alike — enforces a 28 GiB ceiling on MLX active memory (runs after 2026-09-18 count active plus retained cache against the same ceiling and record the reading; the numbers here predate that change); the live-generation workers add a 55-minute wall budget on top. Hardware metadata is recorded inline in `_artifacts/showcase_report.json`.
 
+Re-checked for v0.8.4: on 2026-10-24 the decoder step was timed again on an Apple M1 Max (32 GB unified memory, macOS 27.0.1, lid closed with an external display attached) with mflux 0.23.0 and MLX 0.32.2, using `scripts/bench_decode.py`, which times the decode step only (median of 5 timed reps after a warmup). TAEF2 on the FLUX.2 Klein test latent took 32.6 ms, TAEF1 on the FLUX.1 test latent 31.3 ms, and TAEF1 on the Z-Image test latent 31.2 ms. Each is within about 7% of the published medians (30.4 ms for TAEF2, 29.5 ms for TAEF1 on both latents). The full-VAE timings were not measured again; they come from the earlier captures described above. Dividing those earlier full-VAE medians by today's decoder medians gives about 8.1×, 9.6× and 7.6× for FLUX.2 Klein, FLUX.1 and Z-Image, against the published ~8.7×, ~10.2× and ~8.0×, which pair decoder and full-VAE timings from the same earlier capture. The gallery images were not refreshed. From v0.8.4 every preview decodes a float32 latent (mflux hands over bfloat16 for Z-Image and FLUX.2 Klein). The Z-Image and FLUX.2 SSIM and LPIPS figures on this page were measured before that change. On the committed test latents it shifts pixels by about 0.1/255 on average (at most 6/255) for Z-Image and about 0.03/255 (at most 2/255) for FLUX.2 Klein, too little to move those figures meaningfully, but they were not re-scored. To repeat the pixel-shift figures, run `uv run python scripts/measure_preview_dtype_shift.py --case zimage` and `--case flux2-klein`. To repeat the timings:
+
+```bash
+uv run python scripts/bench_decode.py --latent tests/fixtures/showcase_latents/flux2_klein_base_4b.safetensors --condition taef2 --reps 5 --save-dir /tmp/mlx-taef-bench
+uv run python scripts/bench_decode.py --latent tests/fixtures/showcase_latents/flux1_dev.safetensors --condition taef1 --reps 5 --save-dir /tmp/mlx-taef-bench
+uv run python scripts/bench_decode.py --latent tests/fixtures/showcase_latents/z_image_turbo.safetensors --condition zimage --reps 5 --save-dir /tmp/mlx-taef-bench
+```
+
 ## Where this fits
 
 - TAEF2's upstream model card markets it as a *real-time previewing* tool for FLUX.2 generation ([huggingface.co/madebyollin/taef2](https://huggingface.co/madebyollin/taef2)).
@@ -34,7 +42,7 @@ Same FLUX.2 Klein base 4B latent, two different decoders. Both produce a 512×51
 | Applied wired cap | 12 GB | 2 GB |
 | Reference image | ![vanilla](_artifacts/showcase/taef2/vae/vanilla_vae_rep0.webp) | ![taef2](_artifacts/showcase/taef2/taef/taef2_rep0.webp) |
 
-**TAEF2 is ~8.7× faster, with ~4.8× lower peak decode memory.** SSIM(TAEF2, Vanilla) = **0.960**, LPIPS(TAEF2, Vanilla) = **0.057** (15/15 pairs each).
+**TAEF2 is ~8.7× faster, with ~4.8× lower peak decode memory.** SSIM(TAEF2, Vanilla) = **0.960**, LPIPS(TAEF2, Vanilla) = **0.057** (15/15 pairs each; measured before v0.8.4's float32 preview decode, see the re-check note under Test machine).
 
 Up to v0.8.1 this row read SSIM 0.616. Those releases applied the Flux2VAE batch-norm inverse to the latent before TAEF2, on the reasoning that the full VAE does the same. TAEF2 turns out to want the normalized latent the diffusion model emits, which is also how its upstream reference code and ComfyUI feed it. The inverse widens the latent by about 1.8× per channel (the VAE's running variance is close to 3), and the decode shows it: shadows crushed, highlights clipped, color oversaturated. `scripts/ab_taef2_bn_domain.py` decodes one latent both ways and scores each against the full VAE, with lossless PNGs between decoder and scorer. Without the inverse: SSIM 0.920, LPIPS 0.058. With it: 0.588 and 0.241. On a fully denoised 768×512 portrait the gap is the same shape, 0.945 / 0.022 against 0.716 / 0.150. The images and reports for both are committed under `_artifacts/ab_taef2_bn_domain/`; the portrait latent is not, and `control_portrait_768x512/RECIPE.md` there gives the capture command. The 0.960 in the table is higher than the A/B's 0.920 because this page's protocol scores webp files, and the codec smooths the same noise out of both images.
 
@@ -70,7 +78,7 @@ Z-Image-Turbo shares FLUX.1's 16-channel latent contract, so the existing TAEF1 
 | Applied wired cap | 4 GB | 1 GB |
 | Reference image | ![vanilla](_artifacts/showcase/zimage/vae/vanilla_vae_rep0.webp) | ![zimage](_artifacts/showcase/zimage/taef/zimage_rep0.webp) |
 
-**TAEF1 is ~8.0× faster on the Z-Image latent, with ~4.8× lower peak decode memory.** SSIM(TAEF1, Vanilla) = **0.940**, LPIPS(TAEF1, Vanilla) = **0.027** (15/15 pairs each). The same decoder produces the comparable FLUX.1 fidelity above.
+**TAEF1 is ~8.0× faster on the Z-Image latent, with ~4.8× lower peak decode memory.** SSIM(TAEF1, Vanilla) = **0.940**, LPIPS(TAEF1, Vanilla) = **0.027** (15/15 pairs each; measured before v0.8.4's float32 preview decode, see the re-check note under Test machine). The same decoder produces the comparable FLUX.1 fidelity above.
 
 ### `live_preview` — full FLUX.2 generation with per-step TAEF2 previews
 
