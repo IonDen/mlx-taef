@@ -669,7 +669,7 @@ def test_run_generation_wires_callback_and_saves_final(tmp_path: Path, monkeypat
     tmp_dirs = _spy(monkeypatch, ce, "_temp_variant_dir")
     variant_dir = tmp_path / "flux1-dev"
     final_image = Image.new("RGB", (2, 2), color=(255, 0, 0))
-    fake_callback_instance = MagicMock()
+    fake_callback_instance = MagicMock(last_preview_source="latents")
 
     def _on_generate() -> None:
         fake_callback_instance.saved_paths = _write_fake_gallery(tmp_dirs[-1], "flux1-dev", 2)
@@ -738,7 +738,7 @@ def test_run_generation_forwards_the_recipe_bn_choice_to_the_callback(
 
     tmp_dirs = _spy(monkeypatch, ce, "_temp_variant_dir")
     final_image = Image.new("RGB", (2, 2))
-    fake_callback_instance = MagicMock()
+    fake_callback_instance = MagicMock(last_preview_source="latents")
 
     def _on_generate() -> None:
         fake_callback_instance.saved_paths = _write_fake_gallery(tmp_dirs[-1], "flux2-klein-4b", 1)
@@ -766,6 +766,138 @@ def test_run_generation_forwards_the_recipe_bn_choice_to_the_callback(
     assert kwargs["preview_source"] == "latents"
 
 
+# --- --preview-source and the per-run record ----------------------------------------------
+
+
+def test_argparse_preview_source_defaults_to_latents() -> None:
+    """Catches: the default flipped to "auto", so a plain reproduce command would decode Krea 2's
+    prediction and no longer match the committed galleries."""
+    from scripts.capture_examples import _build_argparser
+
+    args = _build_argparser().parse_args(["--variant", "krea-2-turbo"])
+    assert args.preview_source == "latents"
+
+
+def test_argparse_preview_source_accepts_auto() -> None:
+    """Catches: "auto" missing from the choices, so the smoke run cannot ask for the prediction."""
+    from scripts.capture_examples import _build_argparser
+
+    args = _build_argparser().parse_args(["--variant", "krea-2-turbo", "--preview-source", "auto"])
+    assert args.preview_source == "auto"
+
+
+def test_argparse_preview_source_rejects_an_unknown_value() -> None:
+    """Catches: a free-form option, which would reach the callback only after minutes of model
+    load and fail there instead of at the command line."""
+    from scripts.capture_examples import _build_argparser
+
+    with pytest.raises(SystemExit):
+        _build_argparser().parse_args(
+            ["--variant", "krea-2-turbo", "--preview-source", "prediction"]
+        )
+
+
+def _run_krea2_with_fake_callback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    extra_args: list[str],
+    *,
+    observed: str | None,
+) -> tuple[MagicMock, Path]:
+    """Run `_run_generation("krea-2-turbo", ...)` against a fake model and callback.
+
+    The fake callback starts with `last_preview_source=None` and only takes `observed` inside
+    `generate_image()`, the way the real one sets it after each written preview, so a record
+    read before generation would show None.
+    """
+    from scripts import capture_examples as ce
+
+    import mlx_taef.integrations.mflux as mflux_integration
+
+    tmp_dirs = _spy(monkeypatch, ce, "_temp_variant_dir")
+    fake_callback_instance = MagicMock(last_preview_source=None)
+
+    def _on_generate() -> None:
+        fake_callback_instance.saved_paths = _write_fake_gallery(tmp_dirs[-1], "krea-2-turbo", 2)
+        fake_callback_instance.last_preview_source = observed
+
+    fake_flux, _ = _make_fake_flux(Image.new("RGB", (2, 2)), on_generate=_on_generate)
+    fake_callback_cls = MagicMock(return_value=fake_callback_instance)
+    monkeypatch.setattr(ce, "_build_flux_model", lambda variant, **kwargs: fake_flux)
+    monkeypatch.setattr(mflux_integration, "LivePreviewCallback", fake_callback_cls)
+
+    args = ce._build_argparser().parse_args(
+        ["--variant", "krea-2-turbo", "--out-dir", str(tmp_path), "--num-steps", "2", *extra_args]
+    )
+    final_path = ce._run_generation("krea-2-turbo", args)
+    return fake_callback_cls, final_path
+
+
+def test_run_generation_forwards_preview_source_auto_to_the_callback(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Catches: `preview_source="latents"` left pinned, so `--preview-source auto` never lets
+    Krea 2's prediction reach the callback and the smoke run cannot prove the prediction path."""
+    fake_callback_cls, _ = _run_krea2_with_fake_callback(
+        tmp_path, monkeypatch, ["--preview-source", "auto"], observed="prediction"
+    )
+
+    _, kwargs = fake_callback_cls.call_args
+    assert kwargs["preview_source"] == "auto"
+
+
+def test_run_generation_writes_run_record_with_the_observed_preview_source(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """The run record beside the frames carries what the callback reported after the run.
+
+    Catches: the record copying the requested value, or reading `last_preview_source` before
+    generation (None), either of which would let a Krea 2 run that fell back to the latent pass
+    as a prediction run.
+    """
+    import importlib.metadata
+    import json
+
+    from scripts import capture_examples as ce
+
+    ticks = iter([100.0, 103.0, 110.5])
+    monkeypatch.setattr(ce, "_clock", lambda: next(ticks))
+
+    _, final_path = _run_krea2_with_fake_callback(
+        tmp_path, monkeypatch, ["--preview-source", "auto"], observed="prediction"
+    )
+
+    record_path = tmp_path / "krea-2-turbo" / "krea-2-turbo_run.json"
+    assert final_path.parent == record_path.parent
+    record = json.loads(record_path.read_text())
+    assert record["variant"] == "krea-2-turbo"
+    assert record["preview_source"] == "auto"
+    assert record["last_preview_source"] == "prediction"
+    assert record["frame_count"] == 2
+    assert record["mflux_version"] == importlib.metadata.version("mflux")
+    assert record["mlx_version"] == importlib.metadata.version("mlx")
+    # Clock read at the start of the run (100.0), before generate_image (103.0), after it (110.5).
+    assert record["wall_seconds"] == 10.5
+    assert record["generation_seconds"] == 7.5
+    assert "last_preview_source=prediction" in capsys.readouterr().out
+
+
+def test_run_generation_run_record_reports_latents_when_the_callback_did(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Catches: a record that assumes "prediction" whenever "auto" was requested; Klein never
+    hands over a prediction, so its record must say "latents"."""
+    import json
+
+    _run_krea2_with_fake_callback(
+        tmp_path, monkeypatch, ["--preview-source", "auto"], observed="latents"
+    )
+
+    record = json.loads((tmp_path / "krea-2-turbo" / "krea-2-turbo_run.json").read_text())
+    assert record["preview_source"] == "auto"
+    assert record["last_preview_source"] == "latents"
+
+
 def test_run_generation_raises_when_preview_gallery_incomplete(tmp_path: Path, monkeypatch) -> None:
     """A short gallery (fewer frames than num_steps) must raise, not ship silently — this is
     the regression guard for Finding 1 (single-frame mode silently dropped every step but the
@@ -777,7 +909,7 @@ def test_run_generation_raises_when_preview_gallery_incomplete(tmp_path: Path, m
 
     tmp_dirs = _spy(monkeypatch, ce, "_temp_variant_dir")
     final_image = Image.new("RGB", (2, 2))
-    fake_callback_instance = MagicMock()
+    fake_callback_instance = MagicMock(last_preview_source="latents")
 
     def _on_generate() -> None:
         # Only 1 frame written, but num_steps below asks for 2 — an incomplete gallery.
@@ -861,7 +993,7 @@ def test_run_generation_success_replaces_old_contents_fully(tmp_path: Path, monk
 
     tmp_dirs = _spy(monkeypatch, ce, "_temp_variant_dir")
     final_image = Image.new("RGB", (2, 2))
-    fake_callback_instance = MagicMock()
+    fake_callback_instance = MagicMock(last_preview_source="latents")
 
     def _on_generate() -> None:
         fake_callback_instance.saved_paths = _write_fake_gallery(tmp_dirs[-1], "flux1-dev", 1)
@@ -880,8 +1012,10 @@ def test_run_generation_success_replaces_old_contents_fully(tmp_path: Path, monk
     ce._run_generation("flux1-dev", args)
 
     assert not stale.exists()
+    # The run record is part of every published capture (written beside the frames).
     assert {p.name for p in variant_dir.iterdir()} == {
         "flux1-dev_final.webp",
+        "flux1-dev_run.json",
         "flux1-dev_step00.webp",
     }
 
@@ -897,7 +1031,7 @@ def test_run_generation_threads_qwen_uniform_q4_flag_to_build_flux_model(
 
     tmp_dirs = _spy(monkeypatch, ce, "_temp_variant_dir")
     final_image = Image.new("RGB", (2, 2))
-    fake_callback_instance = MagicMock()
+    fake_callback_instance = MagicMock(last_preview_source="latents")
 
     def _on_generate() -> None:
         fake_callback_instance.saved_paths = _write_fake_gallery(tmp_dirs[-1], "qwen-image", 1)
@@ -929,7 +1063,383 @@ def test_run_generation_threads_qwen_uniform_q4_flag_to_build_flux_model(
 
     ce._run_generation("qwen-image", args)
 
-    assert build_calls == [("qwen-image", {"qwen_uniform_q4": True})]
+    assert build_calls == [("qwen-image", {"qwen_uniform_q4": True, "model_path": None})]
+
+
+# --- --model-path: load a saved checkpoint (e.g. the pre-quantized Krea 2 q4 repo) ---------
+
+
+_Q4_SNAPSHOT = "/hub/models--mflux-community--krea-2-turbo-mflux-q4/snapshots/abc123"
+
+
+def _record_krea2_constructor(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+    """Replace mflux's `Krea2` class with a recorder of its constructor kwargs (no weights load)."""
+    calls: list[dict[str, object]] = []
+
+    def _fake_krea2(**kwargs: object) -> object:
+        calls.append(kwargs)
+        return object()
+
+    monkeypatch.setattr("mflux.models.krea2.variants.txt2img.krea2.Krea2", _fake_krea2)
+    return calls
+
+
+def test_argparse_model_path_defaults_to_none() -> None:
+    """Catches: a default checkpoint path, which would change what a plain run loads."""
+    from scripts.capture_examples import _build_argparser
+
+    args = _build_argparser().parse_args(["--variant", "krea-2-turbo"])
+    assert args.model_path is None
+
+
+def test_build_flux_model_krea2_passes_no_model_path_by_default(monkeypatch) -> None:
+    """Without --model-path the build stays as before: `Krea2(quantize=4, model_config=...)`.
+
+    Catches: `model_path=None` (or any value) leaking into the default constructor call.
+    """
+    from scripts import capture_examples as ce
+
+    calls = _record_krea2_constructor(monkeypatch)
+
+    ce._build_flux_model("krea-2-turbo")
+
+    assert len(calls) == 1
+    assert "model_path" not in calls[0]
+    assert calls[0]["quantize"] == 4
+
+
+def test_build_flux_model_krea2_forwards_model_path(monkeypatch) -> None:
+    """--model-path reaches `Krea2(model_path=...)`; quantize stays 4.
+
+    mflux 0.23.0 resolves a saved checkpoint's stored precision over the requested one
+    (`QuantizationResolution`: stored and requested both set -> STORED), so quantize=4 does not
+    re-quantize a q4 save, and still quantizes a bf16 checkpoint given by path.
+    Catches: the path dropped on the way to the constructor (the slot would load bf16 Krea 2).
+    """
+    from scripts import capture_examples as ce
+
+    calls = _record_krea2_constructor(monkeypatch)
+
+    ce._build_flux_model("krea-2-turbo", model_path=_Q4_SNAPSHOT)
+
+    assert len(calls) == 1
+    assert calls[0]["model_path"] == _Q4_SNAPSHOT
+    assert calls[0]["quantize"] == 4
+
+
+@pytest.mark.parametrize("variant", ["flux1-dev", "combined", "flux2-klein-4b", "qwen-image"])
+def test_build_flux_model_rejects_model_path_for_other_variants(
+    variant: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches: --model-path silently ignored for a variant that does not load it, so a run
+    would download and load the default weights while the record claims the given path.
+
+    The real constructors are replaced by ones that fail the test, so a missing guard shows up
+    as a failure here instead of a model download inside the offline suite.
+    """
+    from scripts import capture_examples as ce
+
+    def _must_not_build(*args: object, **kwargs: object) -> object:
+        raise AssertionError("a model was built; --model-path should have been rejected first")
+
+    class _NoFlux1:
+        from_name = staticmethod(_must_not_build)
+
+    monkeypatch.setattr("mflux.models.flux.variants.txt2img.flux.Flux1", _NoFlux1)
+    monkeypatch.setattr(
+        "mflux.models.flux2.variants.txt2img.flux2_klein.Flux2Klein", _must_not_build
+    )
+    monkeypatch.setattr(ce, "_build_qwen_image_model", _must_not_build)
+
+    with pytest.raises(ValueError, match="--model-path"):
+        ce._build_flux_model(variant, model_path=_Q4_SNAPSHOT)
+
+
+def test_run_generation_threads_model_path_to_build_flux_model(tmp_path: Path, monkeypatch) -> None:
+    """Catches: `_run_generation` not handing `args.model_path` to the model build."""
+    from scripts import capture_examples as ce
+
+    import mlx_taef.integrations.mflux as mflux_integration
+
+    tmp_dirs = _spy(monkeypatch, ce, "_temp_variant_dir")
+    fake_callback_instance = MagicMock(last_preview_source="latents")
+
+    def _on_generate() -> None:
+        fake_callback_instance.saved_paths = _write_fake_gallery(tmp_dirs[-1], "krea-2-turbo", 1)
+
+    fake_flux, _ = _make_fake_flux(Image.new("RGB", (2, 2)), on_generate=_on_generate)
+    build_calls: list[tuple[str, dict[str, object]]] = []
+
+    def _fake_build(variant: str, **kwargs: object) -> object:
+        build_calls.append((variant, kwargs))
+        return fake_flux
+
+    monkeypatch.setattr(ce, "_build_flux_model", _fake_build)
+    monkeypatch.setattr(
+        mflux_integration, "LivePreviewCallback", MagicMock(return_value=fake_callback_instance)
+    )
+
+    args = ce._build_argparser().parse_args(
+        [
+            "--variant",
+            "krea-2-turbo",
+            "--out-dir",
+            str(tmp_path),
+            "--num-steps",
+            "1",
+            "--model-path",
+            _Q4_SNAPSHOT,
+        ]
+    )
+    ce._run_generation("krea-2-turbo", args)
+
+    assert build_calls == [("krea-2-turbo", {"qwen_uniform_q4": False, "model_path": _Q4_SNAPSHOT})]
+
+
+def test_run_record_carries_the_snapshot_a_local_model_path_names(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A local checkpoint path is recorded as its last component (the snapshot hash of a Hugging
+    Face cache dir), marked `local`. Catches: a record without the checkpoint it was made from,
+    so a q4 run and a bf16 run of the same variant could not be told apart afterwards."""
+    import json
+
+    _run_krea2_with_fake_callback(
+        tmp_path, monkeypatch, ["--model-path", _Q4_SNAPSHOT], observed="prediction"
+    )
+
+    record = json.loads((tmp_path / "krea-2-turbo" / "krea-2-turbo_run.json").read_text())
+    assert record["model_path"] == "abc123"
+    assert _Q4_SNAPSHOT.endswith(record["model_path"])
+    assert record["model_path_kind"] == "local"
+
+
+_HOME_SNAPSHOT = (
+    "/Users/alice/.cache/huggingface/hub/models--mflux-community--krea-2-turbo-mflux-q4"
+    "/snapshots/0123abcd"
+)
+
+
+def test_run_record_never_writes_a_home_directory_path(tmp_path: Path, monkeypatch) -> None:
+    """The record is published under the tracked `_artifacts/examples/`. Catches: `--model-path`
+    written verbatim, which leaks the user's home directory (and user name) into the repo."""
+    _run_krea2_with_fake_callback(
+        tmp_path, monkeypatch, ["--model-path", _HOME_SNAPSHOT], observed="prediction"
+    )
+
+    text = (tmp_path / "krea-2-turbo" / "krea-2-turbo_run.json").read_text()
+    assert "/Users/" not in text
+    assert "alice" not in text
+    assert '"model_path": "0123abcd"' in text
+
+
+def test_run_record_collapses_an_existing_local_directory_to_its_name(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Catches: only `/Users/...` strings collapsed, so an existing checkpoint dir elsewhere
+    (here under the test's temp dir) still lands in the record as a full path."""
+    import json
+
+    snapshot = tmp_path / "hub" / "snapshots" / "fedcba98"
+    snapshot.mkdir(parents=True)
+    out_dir = tmp_path / "out"
+
+    _run_krea2_with_fake_callback(
+        out_dir, monkeypatch, ["--model-path", str(snapshot)], observed="prediction"
+    )
+
+    text = (out_dir / "krea-2-turbo" / "krea-2-turbo_run.json").read_text()
+    record = json.loads(text)
+    assert record["model_path"] == "fedcba98"
+    assert record["model_path_kind"] == "local"
+    assert str(tmp_path) not in text
+
+
+def test_run_record_keeps_a_hugging_face_repo_id_as_given(tmp_path: Path, monkeypatch) -> None:
+    """A repo id names no local file and is what a reader needs to reproduce the run. Catches:
+    every `--model-path` collapsed to its basename, which turns `org/name` into `name`."""
+    import json
+
+    _run_krea2_with_fake_callback(
+        tmp_path,
+        monkeypatch,
+        ["--model-path", "mflux-community/krea-2-turbo-mflux-q4"],
+        observed="prediction",
+    )
+
+    record = json.loads((tmp_path / "krea-2-turbo" / "krea-2-turbo_run.json").read_text())
+    assert record["model_path"] == "mflux-community/krea-2-turbo-mflux-q4"
+    assert record["model_path_kind"] == "repo"
+
+
+def test_run_record_model_path_is_null_by_default(tmp_path: Path, monkeypatch) -> None:
+    """Catches: the key missing (or a made-up value) when the default weights were loaded."""
+    import json
+
+    _run_krea2_with_fake_callback(tmp_path, monkeypatch, [], observed="latents")
+
+    record = json.loads((tmp_path / "krea-2-turbo" / "krea-2-turbo_run.json").read_text())
+    assert "model_path" in record
+    assert record["model_path"] is None
+    assert record["model_path_kind"] is None
+
+
+def test_an_existing_relative_org_name_shaped_directory_is_recorded_as_local(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`models/snap` reads like a repo id, but it names a directory that exists under the
+    working directory, so the model was loaded from disk. Catches: the existence check
+    dropped, which records a local directory as the Hugging Face repo `models/snap`."""
+    from scripts.capture_examples import _describe_model_path
+
+    (tmp_path / "models" / "snap").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+
+    assert _describe_model_path("models/snap") == ("snap", "local")
+
+
+@pytest.mark.parametrize("model_path", [".", ""])
+def test_the_current_directory_is_recorded_by_its_own_name(
+    model_path: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`.` (and the empty string, which `Path` reads as `.`) is the directory the run started
+    in; the record names that directory. Catches: the path not resolved before its last
+    component is taken, which records an empty `model_path` that says nothing."""
+    from scripts.capture_examples import _describe_model_path
+
+    workdir = tmp_path / "fedcba98"
+    workdir.mkdir()
+    monkeypatch.chdir(workdir)
+
+    assert _describe_model_path(model_path) == ("fedcba98", "local")
+
+
+def _absolute_path_strings(node: object) -> list[str]:
+    """Every string in a JSON value that reads as an absolute filesystem path."""
+    if isinstance(node, dict):
+        return [s for value in node.values() for s in _absolute_path_strings(value)]
+    if isinstance(node, list):
+        return [s for value in node for s in _absolute_path_strings(value)]
+    if isinstance(node, str) and (node.startswith(("/", "~")) or "/Users/" in node):
+        return [node]
+    return []
+
+
+def test_absolute_path_strings_finds_paths_at_any_depth() -> None:
+    """The guard below is vacuous while no run record is committed; this pins what it flags."""
+    record = {
+        "model_path": "0123abcd",
+        "nested": {"dir": "/private/tmp/x", "list": ["ok", "~/models/snap"]},
+        "note": "loaded from C:/Users/alice/snap",
+        "repo": "mflux-community/krea-2-turbo-mflux-q4",
+    }
+
+    assert _absolute_path_strings(record) == [
+        "/private/tmp/x",
+        "~/models/snap",
+        "loaded from C:/Users/alice/snap",
+    ]
+
+
+def test_committed_example_run_records_carry_no_absolute_paths() -> None:
+    """Run records published under `_artifacts/examples/` stay free of local paths. Catches: a
+    record written before the model-path collapse, or a new field holding a full path."""
+    import json
+
+    examples = Path(__file__).resolve().parent.parent / "_artifacts" / "examples"
+    offenders = {
+        str(path.relative_to(examples)): _absolute_path_strings(json.loads(path.read_text()))
+        for path in sorted(examples.glob("**/*_run.json"))
+    }
+
+    assert {name: found for name, found in offenders.items() if found} == {}
+
+
+# --- main(): option combinations a variant cannot use ------------------------------------
+
+
+def _fail_if_called(*args: object, **kwargs: object) -> object:
+    raise AssertionError("main() went past argument checking")
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "flux1-dev",
+        "flux2-klein-4b",
+        "qwen-image",
+        "combined",
+        "taesd-roundtrip",
+        "taesdxl-roundtrip",
+    ],
+)
+def test_main_rejects_model_path_for_a_variant_other_than_krea2(
+    variant: str, tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """Catches: `--model-path` ignored by a roundtrip variant, or for a generation variant
+    rejected only after the memory caps and watchdog are installed (a late traceback)."""
+    from scripts import capture_examples as ce
+
+    monkeypatch.setattr(ce, "_install_memory_caps", _fail_if_called)
+    monkeypatch.setattr(ce, "_run_generation", _fail_if_called)
+    monkeypatch.setattr(ce, "_run_roundtrip", _fail_if_called)
+
+    with pytest.raises(SystemExit) as excinfo:
+        ce.main(["--variant", variant, "--out-dir", str(tmp_path), "--model-path", "org/name"])
+
+    assert excinfo.value.code == 2
+    assert "--model-path" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("variant", ["taesd-roundtrip", "taesdxl-roundtrip"])
+def test_main_rejects_preview_source_auto_for_a_roundtrip_variant(
+    variant: str, tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """A roundtrip writes no preview frames. Catches: `--preview-source auto` accepted and
+    silently ignored, so the user believes a prediction preview was captured."""
+    from scripts import capture_examples as ce
+
+    monkeypatch.setattr(ce, "_install_memory_caps", _fail_if_called)
+    monkeypatch.setattr(ce, "_run_roundtrip", _fail_if_called)
+
+    with pytest.raises(SystemExit) as excinfo:
+        ce.main(["--variant", variant, "--out-dir", str(tmp_path), "--preview-source", "auto"])
+
+    assert excinfo.value.code == 2
+    assert "--preview-source" in capsys.readouterr().err
+
+
+def test_main_accepts_model_path_and_preview_source_auto_for_krea2(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Catches: the new checks rejecting the one variant both options exist for."""
+    from scripts import capture_examples as ce
+
+    seen: list[tuple[str, str, str]] = []
+
+    def _fake_run_generation(variant: str, args: object) -> Path:
+        seen.append((variant, args.model_path, args.preview_source))  # type: ignore[attr-defined]
+        return tmp_path / "final.webp"
+
+    monkeypatch.setattr(ce, "_install_memory_caps", lambda: None)
+    monkeypatch.setattr(ce, "_install_capture_watchdog", lambda *a, **kw: MagicMock())
+    monkeypatch.setattr(ce, "_run_generation", _fake_run_generation)
+
+    exit_code = ce.main(
+        [
+            "--variant",
+            "krea-2-turbo",
+            "--out-dir",
+            str(tmp_path),
+            "--model-path",
+            "org/name",
+            "--preview-source",
+            "auto",
+        ]
+    )
+
+    assert exit_code == 0
+    assert seen == [("krea-2-turbo", "org/name", "auto")]
 
 
 # --- _run_roundtrip: real end-to-end against committed tiny weights --------------------
@@ -1235,7 +1745,7 @@ def test_run_generation_combined_applies_teacache_and_writes_telemetry(
 
     tmp_dirs = _spy(monkeypatch, ce, "_temp_variant_dir")
     final_image = Image.new("RGB", (2, 2), color=(0, 0, 255))
-    fake_callback_instance = MagicMock()
+    fake_callback_instance = MagicMock(last_preview_source="latents")
     # One shared event log makes the wrap-BEFORE-generate ordering observable — two
     # independent "was it called" lists would pass even if the wrap moved after generation
     # (verified by mutation during review: reordering _run_generation went undetected).
@@ -1305,7 +1815,7 @@ def test_run_generation_combined_zero_skips_raises_and_preserves_published_dir(
     sentinel.write_bytes(b"previous good capture")
 
     tmp_dirs = _spy(monkeypatch, ce, "_temp_variant_dir")
-    fake_callback_instance = MagicMock()
+    fake_callback_instance = MagicMock(last_preview_source="latents")
 
     def _on_generate() -> None:
         fake_callback_instance.saved_paths = _write_fake_gallery(tmp_dirs[-1], "combined", 3)
@@ -1341,7 +1851,7 @@ def test_run_generation_non_combined_variant_does_not_apply_teacache(
     import mlx_taef.integrations.mflux as mflux_integration
 
     tmp_dirs = _spy(monkeypatch, ce, "_temp_variant_dir")
-    fake_callback_instance = MagicMock()
+    fake_callback_instance = MagicMock(last_preview_source="latents")
 
     def _on_generate() -> None:
         fake_callback_instance.saved_paths = _write_fake_gallery(tmp_dirs[-1], "flux1-dev", 1)
