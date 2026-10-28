@@ -1,14 +1,7 @@
 """Sanity check: committed fixture files match recorded SHA-256."""
 
 import hashlib
-import sys
-
-# Version-gated import: no single CI leg runs both arms, so both are excluded
-# from coverage rather than reporting one as untested on every interpreter.
-if sys.version_info >= (3, 11):  # pragma: no cover
-    import tomllib
-else:  # pragma: no cover
-    import tomli as tomllib
+import tomllib
 from pathlib import Path
 
 FIXTURES_TOML = Path(__file__).parent / "fixtures.toml"

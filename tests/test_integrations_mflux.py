@@ -1444,8 +1444,8 @@ def test_live_preview_survives_a_future_in_loop_keyword_through_the_real_dispatc
     catch-all on `call_in_loop` (the call raises TypeError, and on mflux 0.20+ the partial's
     signature cannot even be read, so the prediction is lost), or the catch-all replacing the
     named `denoised` parameter (the opt-in check stops seeing it, the prediction never comes).
-    Runs on the 0.19 floor too: its dispatcher has `in_loop` but no `denoised`, so only the
-    plain dispatch is checked there."""
+    Runs on mflux 0.19.x too (older than the 0.24 floor): its dispatcher has `in_loop` but no
+    `denoised`, so only the plain dispatch is checked there."""
     import functools
     import inspect
     import types
@@ -1534,7 +1534,7 @@ def test_shipped_example_subclass_survives_a_future_in_loop_keyword_through_the_
     in-loop keyword), or the catch-all costing the prediction opt-in (`denoised` no longer seen
     by the dispatcher or not passed on). Forwarding the extra keywords themselves is not
     observable while the parent ignores them. Same real-dispatcher setup as the base-class
-    test above; the 0.19 floor checks the plain dispatch only."""
+    test above; on mflux 0.19.x (older than the 0.24 floor) only the plain dispatch is checked."""
     import functools
     import inspect
     import types

@@ -63,7 +63,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -76,6 +76,8 @@ jobs:
       - name: Sync (test group only — keep CI light)
         run: uv sync --frozen --group test
       - name: Run unit + parity tests
+        env:
+          HF_HUB_OFFLINE: "1"
         run: |
           uv run pytest \
             --cov=mlx_taef \
@@ -85,10 +87,11 @@ jobs:
 
   test-mflux-floor:
     # The lockfile resolves mflux to the newest minor on macOS; this leg runs the offline
-    # suite on mflux 0.19, the oldest minor the extras admit (`>=0.19`). Every `uv run` here
-    # needs `--no-sync`: a plain `uv run` re-syncs to the lockfile and silently puts the
-    # locked mflux back. The 95% coverage gate runs in the `test` matrix; this leg has none
-    # because one older mflux can cover different lines.
+    # suite on mflux 0.24, the oldest minor the extras admit (`>=0.24`), on the oldest
+    # supported Python, with the locked Pillow 13. Every `uv run` here needs `--no-sync`: a
+    # plain `uv run` re-syncs to the lockfile and silently puts the locked mflux back. The 95%
+    # coverage gate runs in the `test` matrix; this leg has none because one older mflux can
+    # cover different lines.
     runs-on: macos-15
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -96,14 +99,14 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: "3.12"
+          python-version: "3.11"
       - name: Install uv
         run: pip install uv==0.11.2
       - name: Sync (test group only)
         run: uv sync --frozen --group test
-      - name: Install mflux 0.19 (no dependency changes)
-        run: uv pip install --no-deps "mflux==0.19.*"
-      - name: Check mflux 0.19 is installed and imports
+      - name: Install mflux 0.24 (no other dependency changes)
+        run: uv pip install --no-deps "mflux==0.24.*"
+      - name: Check mflux 0.24 and Pillow 13 or newer are installed and mflux imports
         run: |
           uv run --no-sync python -c '
           import importlib.metadata as md
@@ -112,9 +115,14 @@ jobs:
           import mflux.callbacks.generation_context
           import mflux.models.common.config.model_config
           mflux_version, mlx_version = md.version("mflux"), md.version("mlx")
-          print(f"mflux {mflux_version}, mlx {mlx_version}")
-          if not mflux_version.startswith("0.19."):
-              raise SystemExit(f"expected mflux 0.19.x, got {mflux_version}")
+          pillow_version = md.version("pillow")
+          print(f"mflux {mflux_version}, mlx {mlx_version}, Pillow {pillow_version}")
+          if not mflux_version.startswith("0.24."):
+              raise SystemExit(f"expected mflux 0.24.x, got {mflux_version}")
+          if int(pillow_version.split(".")[0]) < 13:
+              raise SystemExit(f"expected Pillow 13 or newer, got {pillow_version}")
           '
       - name: Run unit + parity tests
+        env:
+          HF_HUB_OFFLINE: "1"
         run: uv run --no-sync pytest -m "not benchmark and not network"
