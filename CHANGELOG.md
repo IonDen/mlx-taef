@@ -152,12 +152,12 @@ mflux 0.19.x compatibility.
 - The `mflux` extra now installs against mflux 0.19.x (`>=0.17,<0.20`); the previous `<0.19` pin
   excluded it. mflux 0.19.1 itself requires MLX 0.32 and torch 2.13 or newer, so installing the
   extra pulls those in. Verified against mflux 0.19.1 with MLX 0.32.2: the in-loop callback
-  contract and every packed-latent layout are unchanged, the committed parity fixtures stay
-  bit-exact under MLX 0.32.2, and a registered live preview composes with mflux's new
-  `--pid-decode` (NVIDIA PiD) option, which replaces only the post-loop VAE decode. A Krea 2
-  Turbo generation with the preview registered was re-captured end to end under 0.19.1: mflux
-  0.19 rewrote the Krea 2 sampling schedule, so the image differs from the 0.18.1 capture, and
-  the preview tracks the new final at SSIM 0.94.
+  contract and every packed-latent layout are unchanged, the committed parity fixtures still
+  pass within their tolerances under MLX 0.32.2, and a registered live preview composes with
+  mflux's new `--pid-decode` (NVIDIA PiD) option, which replaces only the post-loop VAE decode. A
+  Krea 2 Turbo generation with the preview registered was re-captured end to end under 0.19.1:
+  mflux 0.19 rewrote the Krea 2 sampling schedule, so the image differs from the 0.18.1 capture,
+  and the preview tracks the new final at SSIM 0.94.
 - mflux 0.19 points its `qwen-image` model at the newer `Qwen/Qwen-Image-2512` checkpoint. Its
   VAE weights are byte-identical to Qwen-Image's, so `variant="qwen-image"` previews it
   unchanged.
@@ -210,8 +210,8 @@ Krea 2 Turbo live preview.
 
 - Python 3.10 is now supported (`requires-python` drops from `>=3.11` to `>=3.10`). The CI test
   matrix runs 3.10 through 3.14, so every advertised version is exercised by the full offline
-  suite, including the bit-exact parity fixtures. On 3.10 the `Self` return types come from
-  `typing-extensions`, which installs automatically on that version only.
+  suite, including the parity fixtures, which pass within their tolerances. On 3.10 the `Self`
+  return types come from `typing-extensions`, which installs automatically on that version only.
 - The `showcase` extra and the `test` group install `mlx-teacache` only on Python 3.11+, since it
   requires 3.11. Everything else in both, and all of the runtime dependencies, work on 3.10; the
   showcase's combined scenario already reports a clear error when `mlx-teacache` is absent.
@@ -404,7 +404,7 @@ opt-in network test (`pytest --run-network`), not in default CI.
 ## [0.3.1] — 2026-06-08
 
 Hardening patch. No public API shape changes; the one new symbol is `MfluxNotInstalledError`.
-The existing parity and SSIM fixtures gate the change bit-for-bit.
+The existing parity and SSIM fixtures still pass within their tolerances.
 
 ### Added
 - `MfluxNotInstalledError` — raised when `mlx_taef.integrations.mflux` is imported
@@ -431,7 +431,7 @@ The existing parity and SSIM fixtures gate the change bit-for-bit.
 Internal refactor. No change to the public API or to decoded output: `TAESD`,
 `TAESDXL`, `TAEF1`, `TAEF2`, `from_pretrained` / `from_pretrained_local`,
 `get_memory_cap_hint`, and imports from `mlx_taef.variants` all behave as before. The
-existing parity and SSIM fixtures gate the change bit-for-bit.
+existing parity and SSIM fixtures still pass within their tolerances.
 
 ### Changed
 - Each variant is now a composable model kernel (`mlx_taef.kernels`): a frozen
