@@ -1326,7 +1326,7 @@ def _absolute_path_strings(node: object) -> list[str]:
 
 
 def test_absolute_path_strings_finds_paths_at_any_depth() -> None:
-    """The guard below is vacuous while no run record is committed; this pins what it flags."""
+    """The guard below passes on any JSON this misses; this pins what it flags."""
     record = {
         "model_path": "0123abcd",
         "nested": {"dir": "/private/tmp/x", "list": ["ok", "~/models/snap"]},
@@ -1341,17 +1341,19 @@ def test_absolute_path_strings_finds_paths_at_any_depth() -> None:
     ]
 
 
-def test_committed_example_run_records_carry_no_absolute_paths() -> None:
-    """Run records published under `_artifacts/examples/` stay free of local paths. Catches: a
-    record written before the model-path collapse, or a new field holding a full path."""
+def test_committed_example_json_carries_no_absolute_paths() -> None:
+    """Every JSON published under `_artifacts/examples/` (run records and showcase reports)
+    stays free of local paths. Catches: a record written before the model-path collapse, a
+    report copied in with home-directory artifact paths, or a new field holding a full path."""
     import json
 
     examples = Path(__file__).resolve().parent.parent / "_artifacts" / "examples"
     offenders = {
         str(path.relative_to(examples)): _absolute_path_strings(json.loads(path.read_text()))
-        for path in sorted(examples.glob("**/*_run.json"))
+        for path in sorted(examples.glob("**/*.json"))
     }
 
+    assert offenders, "no JSON under _artifacts/examples/ to check"
     assert {name: found for name, found in offenders.items() if found} == {}
 
 

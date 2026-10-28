@@ -46,7 +46,7 @@
           0.5460954159498215
         ],
         "median_peak_memory_gb": 0.5460954159498215,
-        "image_path": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/zimage/taef/zimage_rep4.webp",
+        "image_path": "_artifacts/showcase/zimage/taef/zimage_rep4.webp",
         "per_rep_failures": []
       },
       "vanilla_vae": {
@@ -68,7 +68,7 @@
           1.9590810295194387
         ],
         "median_peak_memory_gb": 1.9590810295194387,
-        "image_path": "/Users/ionden/Documents/Work/mac/mlx-taef/_artifacts/showcase/zimage/vae/vanilla_vae_rep2.webp",
+        "image_path": "_artifacts/showcase/zimage/vae/vanilla_vae_rep2.webp",
         "per_rep_failures": []
       },
       "ssim_per_pair": [

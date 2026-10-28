@@ -115,10 +115,10 @@ same-variant invocations interfering with each other.
 Wall-clock ETAs (M1 Max, quantize=4, 512x512 — documented estimates, not independently
 measured at this resolution): flux1-dev ~1-2 min; flux2-klein-4b (4 native steps) under a
 minute; qwen-image (20 steps) ~3-6 min; combined (25-step flux1-dev + teacache, ~6 of 25
-transformer steps skipped when the gate engages) ~2-4 min warm; krea-2-turbo (8 steps) ~1-3 min warm cache (see
-scripts/_capture_latent.py's docstring for krea-2-turbo's cold-cache download time — ~25-45
-min the first time its ~36 GB of weights aren't cached). Roundtrip variants are offline and
-fast (<5 s).
+transformer steps skipped when the gate engages) ~2-4 min warm; krea-2-turbo (8 steps) ~1-3
+min warm cache (see scripts/_capture_latent.py's docstring for krea-2-turbo's cold-cache
+download time — ~25-45 min the first time its ~36 GB of weights aren't cached). Roundtrip
+variants are offline and fast (<5 s).
 
 Qwen-Image build: mixed precision by default. A uniform `quantize=4` build of Qwen-Image shows a
 documented reticulated/cracked skin-texture artifact — see the published case study,
@@ -473,7 +473,10 @@ def _build_argparser() -> argparse.ArgumentParser:
         "--num-steps",
         type=int,
         default=None,
-        help="Override inference steps for generation variants. Default: per-variant native step count.",
+        help=(
+            "Override inference steps for generation variants. "
+            "Default: per-variant native step count."
+        ),
     )
     parser.add_argument(
         "--guidance",
@@ -812,8 +815,9 @@ def _write_run_record(
     """Print the observed preview source and write `<variant>_run.json` beside the frames.
 
     `model_path` is the `--model-path` the model was loaded from (None: the default repo),
-    recorded as `_describe_model_path` describes it. `last_preview_source` is what `LivePreviewCallback` reported after the run ("latents",
-    "prediction", or None when no preview was written), not what was requested.
+    recorded as `_describe_model_path` describes it. `last_preview_source` is what
+    `LivePreviewCallback` reported after the run ("latents", "prediction", or None when no
+    preview was written), not what was requested.
     `wall_seconds` spans model build plus generation; `generation_seconds` is
     `generate_image` alone.
     """
