@@ -1,17 +1,21 @@
-# .github/workflows/release.yml
 name: Release
 on:
   push:
     tags: ["v*"]
 
+# Read-only by default; the two jobs that publish grant themselves the one scope they need.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 0
-      - uses: hynek/build-and-inspect-python-package@v2
+          persist-credentials: false
+      - uses: hynek/build-and-inspect-python-package@d44ca7d91762de7a7d5436ddae667c6da6d1c3df # v2.18.0
 
   publish:
     needs: build
@@ -20,11 +24,11 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: Packages
           path: dist
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
 
   github-release:
     needs: publish
@@ -32,12 +36,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: Packages
           path: dist
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: dist/*
           generate_release_notes: true
