@@ -4,6 +4,7 @@ A non-binding sketch of where the library is headed. Each item lists status, eff
 
 ## Released
 
+- **v0.9.0** (2026-10-29) — Python 3.11 and mflux 0.24 become the floor, and Pillow 13 wherever Pillow is installed (the base install does not depend on it). The `mflux` extra accepts mflux 0.24 and every later release (tested up to 0.24.0), with no upper bound. Python 3.10 (stay on 0.8.4), mflux 0.19 to 0.23 and Pillow below 13 are dropped: Pillow 13 fixes GHSA-5x8w-8jj5-q52h, and mflux 0.19 to 0.23 cannot import under it. A CI job runs the offline suite against the newest mflux release every Monday, so mlx-taef changes only when something breaks. mflux 0.24's new anima, fibo2, iris and moss models are refused with a clear error. No run with real model weights was made for this release.
 - **v0.8.4** (2026-10-24) — wider mflux support. The `mflux` extra accepts mflux 0.19 through 0.25 (tested on 0.19.x and 0.23.0), with Pillow capped below 13 until an mflux release imports cleanly with it. Krea 2's depth ControlNet previews with the Krea 2 decoder. Qwen-Image 2.1, FLUX 3 Image Klein and Ming-Image are refused with a clear error when the preview callback is created, before the preview decoder loads. Z-Image and FLUX.2 Klein previews decode in float32, shifting pixels by about 0.1/255 on average or less. CI runs on the locked mflux 0.23.0 and on 0.19.x.
 - **v0.8.3** (2026-09-23) — mflux 0.20 support and simpler setup. The `mflux` extra accepts mflux 0.19.x and 0.20.x. `LivePreviewCallback(flux=model)` infers the tiny decoder from the model's mflux config, and a model outside the supported families raises at construction with the `variant=` override named. On mflux 0.20, Krea 2 previews decode the model's per-step prediction of the finished image, which is recognizable from the first step. The benchmark and showcase watchdogs now count MLX's retained cache toward their memory ceiling and record the policy they ran under.
 - **v0.8.2** (2026-09-17) — TAEF2 fidelity fix. `LivePreviewCallback` no longer applies the Flux2VAE batch-norm inverse before TAEF2 when `flux=model` is passed: TAEF2 wants the normalized latent as mflux produces it, and the extra step made previews dark and oversaturated. SSIM against the full VAE on the benchmark latent rises from 0.616 to 0.960 (LPIPS 0.216 to 0.057) under the webp-scored showcase protocol. `auto_bn` defaults to `False`; opting back in still works and logs a warning. The FLUX.2 rows and frames in COMPARISON and EXAMPLES are re-measured, and the FLUX.2 and Qwen-Image unpack tests now compare against mflux's own inverse element for element.
@@ -38,7 +39,7 @@ A non-binding sketch of where the library is headed. Each item lists status, eff
 
 ## Known-upstream variants, not yet supported
 
-These are upstream [`madebyollin/taesd`](https://github.com/madebyollin/taesd) variants that mlx-taef does not support as of v0.8.4. Each needs its own integration and a calibration pass against the full VAE.
+These are upstream [`madebyollin/taesd`](https://github.com/madebyollin/taesd) variants that mlx-taef does not support as of v0.9.0. Each needs its own integration and a calibration pass against the full VAE.
 
 - **TAESD3** — for Stable Diffusion 3 / 3.5.
 - **TAESANA** — for Sana. Whether upstream publishes a checkpoint for it is unconfirmed.

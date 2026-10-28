@@ -5,7 +5,7 @@
 </p>
 
 [![PyPI version](https://img.shields.io/pypi/v/mlx-taef.svg)](https://pypi.org/project/mlx-taef/)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://pypi.org/project/mlx-taef/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://pypi.org/project/mlx-taef/)
 [![License: MIT](https://img.shields.io/pypi/l/mlx-taef.svg)](https://github.com/IonDen/mlx-taef/blob/main/LICENSE)
 
 Tiny AutoEncoders for diffusion latents on Apple Silicon, in pure MLX.
@@ -14,7 +14,7 @@ Tiny AutoEncoders for diffusion latents on Apple Silicon, in pure MLX.
 
 Use it for:
 - **Live previews** during long generations on Mac — the decode step itself takes ~30 ms for both TAEF1 and TAEF2 on M1 Max, versus ~0.3 s for the full VAE decode (~8–10× faster). [Watch a step-by-step decode](https://github.com/IonDen/mlx-taef/blob/main/PREVIEW.md), or see [COMPARISON.md](COMPARISON.md) for the measured table and reproducer.
-- **Low-memory fallbacks** when the full VAE OOMs on 16 GB Macs (TAEF2 peaks at ~0.59 GB decode memory vs ~2.8 GB for the full FLUX.2 VAE on the same latent).
+- **Low-memory fallbacks** when the full VAE OOMs on 16 GB Macs (TAEF2 peaks at ~0.59 GB peak decode memory (measured after model load, not for the whole process) vs ~2.8 GB for the full FLUX.2 VAE on the same latent).
 - **Quick latent inspection** in notebooks and ML research.
 
 ```python
@@ -28,7 +28,7 @@ img_uint8 = taef.decode_image(latents)      # uint8 NHWC ready for PIL
 
 ## Which library do I need?
 
-**You want live previews or low-memory FLUX decode?** You're in the right place. `mlx-taef`'s decode step takes ~30 ms on M1 Max, for either TAEF2 or TAEF1 — vs ~0.3 s for the full VAE decode, with ~5× less decode memory. Drops into mflux via `LivePreviewCallback`.
+**You want live previews or low-memory FLUX decode?** You're in the right place. `mlx-taef`'s decode step takes ~30 ms on M1 Max, for either TAEF2 or TAEF1 — vs ~0.3 s for the full VAE decode, with ~5× lower peak decode memory. Drops into mflux via `LivePreviewCallback`.
 
 **You want FLUX generation itself to be faster on Apple Silicon?** You want [`mlx-teacache`](https://github.com/IonDen/mlx-teacache) — it skips redundant denoising steps when the schedule is cacheable (measured 1.46× on FLUX.1-dev at 25 steps).
 
@@ -64,7 +64,7 @@ uv add "mlx-taef[mflux]"
 Pin an exact version in a project that needs reproducibility:
 
 ```bash
-pip install "mlx-taef==0.7.1"
+pip install "mlx-taef==0.9.0"
 ```
 
 Verify the install:
@@ -73,7 +73,7 @@ Verify the install:
 mlx-taef --help
 ```
 
-Requires Python ≥ 3.10 and Apple Silicon (`mlx` itself is Apple-Silicon-only). The base `mlx-taef` install pulls in **no PyTorch**; in this repo `torch` is used only to generate test fixtures. The optional `mflux` extra is a separate case: mflux currently depends on PyTorch, so installing `mlx-taef[mflux]` brings it in.
+Requires Python ≥ 3.11 and Apple Silicon (`mlx` itself is Apple-Silicon-only). The base `mlx-taef` install pulls in **no PyTorch**; in this repo `torch` is used only to generate test fixtures. The optional `mflux` extra is a separate case: mflux currently depends on PyTorch, so installing `mlx-taef[mflux]` brings it in. The extra accepts mflux 0.24 and every later release, with no upper bound: the newest mflux release is tested every Monday by a CI job, and mlx-taef is changed only when something breaks. Tested up to mflux 0.24.0. Pillow 13 or newer is required wherever mlx-taef needs Pillow; older Pillow releases are affected by [GHSA-5x8w-8jj5-q52h](https://github.com/advisories/GHSA-5x8w-8jj5-q52h). Python 3.10 users stay on mlx-taef 0.8.4, or move to Python 3.11 or newer.
 
 ## Variants
 
@@ -187,6 +187,7 @@ See `docs/manual-verification.md` for the full verification recipe.
 - **v0.8.2 — released on PyPI** (2026-09-17). TAEF2 previews now match the full FLUX.2 VAE much more closely: SSIM against the full VAE decode rises from 0.616 to 0.960 on the benchmark latent (webp-scored, as in COMPARISON; 0.59 to 0.92 on lossless PNGs). Earlier releases applied the VAE's batch-norm inverse to the latent before TAEF2 whenever `flux=model` was passed, which is not the input TAEF2 wants, so previews came out dark and oversaturated. The default now feeds TAEF2 the latent as mflux produces it; `auto_bn=True` or explicit `bn_mean` / `bn_var` keep the old behavior and log a warning. COMPARISON and EXAMPLES carry the re-measured FLUX.2 numbers and frames.
 - **v0.8.3 — released on PyPI** (2026-09-23). Works with mflux 0.19.x and 0.20.x. `LivePreviewCallback(flux=model)` now picks the matching tiny decoder from the model, so the variant argument is optional, and an unsupported model is reported when the callback is created rather than at the first preview. On mflux 0.20, Krea 2 previews decode the model's prediction of the finished image and are recognizable from the first step; `preview_source="latents"` keeps the old view.
 - **v0.8.4 — released on PyPI** (2026-10-24). The `mflux` extra now accepts mflux 0.19 through 0.25 (tested on 0.19.x and 0.23.0; 0.17 and 0.18 are no longer accepted) and keeps Pillow below 13, since mflux 0.23.0 fails to import under Pillow 13. Previews now cover Krea 2's depth ControlNet; Qwen-Image 2.1, FLUX 3 Image Klein and Ming-Image are refused with a clear error when the preview callback is created, before the preview decoder loads. Z-Image and FLUX.2 Klein previews now decode in float32, which shifts pixels by about 0.1/255 on average or less.
+- **v0.9.0 — released on PyPI** (2026-10-29). Requires Python 3.11 or newer and mflux 0.24 or newer, with no upper bound on mflux, and Pillow 13 or newer wherever Pillow is installed (the base install does not depend on Pillow). Python 3.10 (stay on 0.8.4), mflux 0.19 to 0.23 and Pillow below 13 are dropped: Pillow 13 fixes GHSA-5x8w-8jj5-q52h (see the CHANGELOG), and mflux 0.19 to 0.23 cannot import under it. A CI job tests the newest mflux release every Monday; mlx-taef is changed only when something breaks. Evidence: the offline suite passes (860 passed, 30 skipped) on mflux 0.24.0 with Pillow 13.0.0 and MLX 0.32.2, and CI passed on Python 3.11 to 3.14 and on the oldest supported mflux (0.24.x on Python 3.11); no run with real model weights was made for this release.
 
 Track future releases via the [PyPI history](https://pypi.org/project/mlx-taef/#history) or `gh release list -R IonDen/mlx-taef`.
 

@@ -5,6 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-10-29
+
+Requires Python 3.11 or newer and mflux 0.24 or newer, with no upper bound on mflux, and Pillow 13
+or newer wherever Pillow is required (the `image` and `showcase` extras and the `test`, `typecheck`
+and `fixtures` groups; the base install does not depend on Pillow). Pillow 13 fixes the heap
+overflow in [GHSA-5x8w-8jj5-q52h](https://github.com/advisories/GHSA-5x8w-8jj5-q52h). mflux 0.24 is
+the first mflux release that imports under Pillow 13 (mflux
+[#890](https://github.com/mflux-community/mflux/pull/890)).
+
+Parity checks on Metal compare outputs within tolerances.
+
+### Removed
+- Python 3.10. Users on 3.10 stay on 0.8.4, or move to Python 3.11 or newer.
+- mflux 0.19 to 0.23. They cannot import under Pillow 13
+  (mflux [#890](https://github.com/mflux-community/mflux/pull/890)).
+- Pillow below 13 (see Security below).
+
+### Added
+- A CI job that runs every Monday (and on demand) against the newest mflux release. It installs
+  that release on top of the locked environment and runs the offline suite.
+
+### Changed
+- The `mflux` and `showcase` extras and the `test` group require `mflux>=0.24`, with no upper
+  bound, up from `>=0.19,<0.26`. mflux releases often, so mlx-taef now tests the newest mflux
+  release every Monday and changes the library only when something breaks. The weekly job fails on
+  a routing change (a new mflux model that a preview kernel would claim, a known model that moves
+  to another kernel or stops being refused, or a model mflux removes) and on any other failing
+  test in the offline suite. A new model the resolver refuses only shows up in the test log as an
+  `UnclassifiedMfluxModelsWarning`; it does not fail the job.
+- Pillow is `>=13` wherever it is required: the `image` and `showcase` extras and the `test`,
+  `typecheck` and `fixtures` groups. The `Pillow<13` cap from 0.8.4 is gone.
+- `requires-python` is `>=3.11`, CI runs Python 3.11 to 3.14, and the CI job for the oldest
+  supported mflux now runs mflux 0.24 on Python 3.11. The `typing-extensions` and `tomli`
+  dependencies, which only Python 3.10 needed, are gone.
+- mflux 0.24 adds the anima, fibo2, iris and moss models. None has a tiny decoder here, so, like
+  other such models, they are refused with a clear error when the preview callback is created.
+  FLUX 3 Image Klein is still refused.
+- The README's decode-memory figures now say they are peak decode memory measured after model
+  load, not whole-process memory.
+
+### Security
+- [GHSA-5x8w-8jj5-q52h](https://github.com/advisories/GHSA-5x8w-8jj5-q52h) is rated critical; the
+  overflow can lead to code execution. It is a heap buffer overflow in Pillow's FlashPix (FPX)
+  image decoder. Pillow 12.x and older (up to 12.3.0) are affected; it is fixed in Pillow 13.0.0.
+  The `Pillow<13` cap in 0.8.4 held `mlx-taef[mflux]` installs on an affected Pillow. 0.9.0
+  requires Pillow 13, and Python 3.11 because Pillow 13 does not install on 3.10.
+- Exposure through mlx-taef itself is low: Pillow registers the FPX decoder only when `olefile`
+  is installed, mlx-taef does not install it, and the package itself opens no image files (it only
+  writes preview images).
+
+### Tested
+- Offline suite on mflux 0.24.0, Pillow 13.0.0 and MLX 0.32.2 (Python 3.13, macOS): 860 passed,
+  30 skipped.
+- CI passed on Python 3.11 to 3.14 and on the oldest supported mflux (0.24.x on Python 3.11).
+- No run with real model weights was made for this release; one is planned.
+
 ## [0.8.4] - 2026-10-24
 
 Accepts mflux 0.19 through 0.25 (tested on 0.19.x and 0.23.0), previews Krea 2's depth ControlNet,
