@@ -18,7 +18,16 @@ else:  # pragma: no cover
 
 _REPO_ROOT = Path(__file__).parent.parent
 _CI_WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "ci.yml"
+_RELEASE_WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "release.yml"
 _PYPROJECT = _REPO_ROOT / "pyproject.toml"
+
+# A `uses:` line pinned to a full commit SHA, with the exact release tag of that commit as its
+# trailing comment (a floating tag such as `# v6` does not count).
+_PINNED_USES = re.compile(r"(- )?uses: [\w.-]+/[\w./-]+@[0-9a-f]{40} # v\d+\.\d+\.\d+")
+
+# A `uses` key in any spelling YAML accepts: bare, quoted (`"uses":`, `'uses':`) or with
+# spaces before the colon (`uses :`).
+_USES_KEY = re.compile(r"""\buses['"]?\s*:""")
 
 # The single source of truth for "which Pythons do we claim to support".
 # Every surface below must agree with it, so a widened floor can never ship
@@ -50,13 +59,14 @@ def _pyproject() -> dict:
     return tomllib.loads(_PYPROJECT.read_text())
 
 
-def _job_block(job_id: str) -> list[str]:
-    """The raw lines of one ci.yml job after its `  <id>:` key, blank or whitespace-only lines
-    skipped, up to the first non-blank line indented two spaces or less (the next job key, or
-    a top-level key after the last job)."""
-    lines = _CI_WORKFLOW.read_text().splitlines()
+def _job_block(job_id: str, workflow: Path | None = None) -> list[str]:
+    """The raw lines of one job of `workflow` (ci.yml when None) after its `  <id>:` key, blank
+    or whitespace-only lines skipped, up to the first non-blank line indented two spaces or less
+    (the next job key, or a top-level key after the last job)."""
+    workflow = workflow or _CI_WORKFLOW
+    lines = workflow.read_text().splitlines()
     header = f"  {job_id}:"
-    assert header in lines, f"ci.yml has no `{job_id}` job"
+    assert header in lines, f"{workflow.name} has no `{job_id}` job"
     block: list[str] = []
     for line in lines[lines.index(header) + 1 :]:
         if not line.strip():
@@ -67,10 +77,12 @@ def _job_block(job_id: str) -> list[str]:
     return block
 
 
-def _job_ids() -> list[str]:
-    """The ids of the ci.yml jobs: the keys indented two spaces under the top-level `jobs:`."""
-    lines = _CI_WORKFLOW.read_text().splitlines()
-    assert "jobs:" in lines, "ci.yml has no top-level `jobs:`"
+def _job_ids(workflow: Path | None = None) -> list[str]:
+    """The ids of the jobs of `workflow` (ci.yml when None): the keys indented two spaces under
+    the top-level `jobs:`."""
+    workflow = workflow or _CI_WORKFLOW
+    lines = workflow.read_text().splitlines()
+    assert "jobs:" in lines, f"{workflow.name} has no top-level `jobs:`"
     ids: list[str] = []
     for line in lines[lines.index("jobs:") + 1 :]:
         if not line.strip() or line.lstrip().startswith("#"):
@@ -82,13 +94,13 @@ def _job_ids() -> list[str]:
     return ids
 
 
-def _top_level_block(key: str) -> list[str]:
-    """The stripped lines under every unindented `<key>:` line of ci.yml, up to the next
-    unindented line, blank and `#` lines skipped; a value on the key's own line comes first
-    (so `permissions: write-all` reads as `["write-all"]`)."""
+def _top_level_block(key: str, workflow: Path | None = None) -> list[str]:
+    """The stripped lines under every unindented `<key>:` line of `workflow` (ci.yml when None),
+    up to the next unindented line, blank and `#` lines skipped; a value on the key's own line
+    comes first (so `permissions: write-all` reads as `["write-all"]`)."""
     block: list[str] = []
     inside = False
-    for line in _CI_WORKFLOW.read_text().splitlines():
+    for line in (workflow or _CI_WORKFLOW).read_text().splitlines():
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         if not line.startswith(" "):
@@ -102,22 +114,60 @@ def _top_level_block(key: str) -> list[str]:
     return block
 
 
-def _job_lines(job_id: str) -> list[str]:
-    """The stripped lines of one ci.yml job (bounded as in `_job_block`), without lines that
-    start with `#`. The filter is textual, so `#` lines inside a `run: |` block (shell or
-    Python comments) are dropped too."""
-    return [line.strip() for line in _job_block(job_id) if not line.strip().startswith("#")]
+def _job_lines(job_id: str, workflow: Path | None = None) -> list[str]:
+    """The stripped lines of one job (bounded as in `_job_block`), without lines that start
+    with `#`. The filter is textual, so `#` lines inside a `run: |` block (shell or Python
+    comments) are dropped too."""
+    return [
+        line.strip() for line in _job_block(job_id, workflow) if not line.strip().startswith("#")
+    ]
 
 
-def _job_steps(job_id: str) -> list[list[str]]:
+def _job_steps(job_id: str, workflow: Path | None = None) -> list[list[str]]:
     """`_job_lines` grouped into steps: each step starts at a line beginning with `- `."""
     steps: list[list[str]] = []
-    for line in _job_lines(job_id):
+    for line in _job_lines(job_id, workflow):
         if line.startswith("- "):
             steps.append([line])
         elif steps:
             steps[-1].append(line)
     return steps
+
+
+def _job_permissions(job_id: str, workflow: Path) -> list[str]:
+    """The stripped scope lines of one job's own `permissions:` key (a value on the key's line
+    comes first), or [] when the job sets none."""
+    block = _job_block(job_id, workflow)
+    keys = [i for i, line in enumerate(block) if line.strip().startswith("permissions:")]
+    assert len(keys) <= 1, (job_id, keys)
+    if not keys:
+        return []
+    key_line = block[keys[0]]
+    indent = len(key_line) - len(key_line.lstrip(" "))
+    value = key_line.split(":", 1)[1].strip()
+    scopes = [value] if value else []
+    for line in block[keys[0] + 1 :]:
+        if len(line) - len(line.lstrip(" ")) <= indent:
+            break
+        scopes.append(line.strip())
+    return scopes
+
+
+def _unpinned_uses(text: str) -> list[str]:
+    """The stripped `uses:` lines of a workflow that are not `owner/repo@<40 hex> # vX.Y.Z`.
+    Comment lines are skipped; any other line with a `uses` key (also quoted, `"uses":`, or
+    spaced, `uses :`) is read as a step."""
+    uses = [
+        line.strip()
+        for line in text.splitlines()
+        if _USES_KEY.search(line) and not line.lstrip().startswith("#")
+    ]
+    return [line for line in uses if not _PINNED_USES.fullmatch(line)]
+
+
+def _step_indices(steps: list[list[str]], text: str) -> list[int]:
+    """The indices of the steps with a line containing `text`."""
+    return [i for i, step in enumerate(steps) if any(text in line for line in step)]
 
 
 def _runs_on(job_id: str) -> str:
@@ -175,6 +225,32 @@ def _run_floor_guard(monkeypatch: pytest.MonkeyPatch, mflux_version: str) -> lis
     }
     exec(compile(program, "<ci.yml floor guard>", "exec"), namespace)
     return requested
+
+
+# A `0.N` read as an mflux minor: after the word `mflux`, the verb `admit`/`admits`, or a
+# version operator (`<`, `>`, `<=`, `>=`, `==`, `!=`, `~=`), followed by any list continuation
+# (`, 0.N`, `and 0.N`, `or 0.N`).
+_MFLUX_MINOR_MENTION = re.compile(
+    r"(?:\b(?:mflux|admits?)\s+|(?:[<>]=?|[=!~]=)\s*)0\.(\d+)\b"
+    r"((?:\s*(?:,|\band\b|\bor\b)\s*0\.\d+\b)*)"
+)
+
+
+def _mflux_minors_named_in(comment: str) -> list[int]:
+    """The mflux minors a workflow comment names, in order: a `0.N` right after the word
+    `mflux`, after `admit`/`admits`, or after a version operator (`mflux 0.19`, `admit 0.19`,
+    `>=0.19` and `<0.19` all read as 19), plus every `0.N` of a list that continues it
+    (`mflux 0.17, 0.18`, `admit 0.17 and 0.18`, `>=0.17 or 0.18`).
+
+    Deliberately not read: a bare `0.N` with none of those in front of it and not inside such
+    a list, so a duration or ratio in the same prose ("takes 0.5 s") is not taken for a
+    version. A comment that names a stale minor only that way ("0.17 is still allowed") is
+    not seen."""
+    minors: list[int] = []
+    for mention in _MFLUX_MINOR_MENTION.finditer(comment):
+        minors.append(int(mention.group(1)))
+        minors.extend(int(m) for m in re.findall(r"0\.(\d+)", mention.group(2)))
+    return minors
 
 
 def _floor_version(minor_offset: int, patch: int) -> str:
@@ -310,6 +386,137 @@ def test_ci_checkouts_do_not_persist_the_token() -> None:
             assert "with:" in step, (job, step)
             assert "persist-credentials: false" in step, (job, step)
     assert len(workflow_checkouts) == sum(len(steps) for steps in checkouts.values())
+
+
+def test_release_workflow_token_is_read_only_outside_the_two_publishing_jobs() -> None:
+    """Without a top-level `permissions:` the build job's token takes the repository default,
+    which can be read-write. Only `publish` (the PyPI Trusted Publishing OIDC token) and
+    `github-release` (creating the release) need more, each in its own job. The one-line bug
+    this catches: deleting or widening the top-level block, or a job grant moved or widened
+    (e.g. `contents: write` on `build`, or `write-all` on `publish`)."""
+    grants = {job: _job_permissions(job, _RELEASE_WORKFLOW) for job in _job_ids(_RELEASE_WORKFLOW)}
+
+    assert _top_level_block("permissions", _RELEASE_WORKFLOW) == ["contents: read"]
+    assert grants == {
+        "build": [],
+        "publish": ["id-token: write"],
+        "github-release": ["contents: write"],
+    }
+
+
+def test_release_checkouts_do_not_persist_the_token() -> None:
+    """The release build only reads the tagged tree (hatch-vcs reads the tags locally), so
+    the token has no reason to sit in `.git/config` for the build action's steps. The
+    one-line bug this catches: removing `persist-credentials: false` from the build checkout,
+    or a checkout step this test does not see."""
+    checkouts = [
+        step
+        for job in _job_ids(_RELEASE_WORKFLOW)
+        for step in _job_steps(job, _RELEASE_WORKFLOW)
+        if "actions/checkout@" in step[0]
+    ]
+    workflow_checkouts = [
+        line for line in _RELEASE_WORKFLOW.read_text().splitlines() if "actions/checkout@" in line
+    ]
+
+    assert checkouts, "release.yml has no checkout"
+    assert len(checkouts) == len(workflow_checkouts)
+    for step in checkouts:
+        assert "persist-credentials: false" in step, step
+
+
+def test_unpinned_uses_flags_every_pin_but_a_full_sha_with_its_release_tag() -> None:
+    """The pin test below is only as strict as `_unpinned_uses`. The one-line bug this
+    catches: accepting a tag or branch pin, a short SHA, a SHA with no tag comment, or a
+    floating tag (`# v6`) as the comment; or not selecting a `uses` key written quoted
+    (`"uses":`) or with a space before the colon (`uses :`), both valid YAML."""
+    sha = "d23441a48e516b6c34aea4fa41551a30e30af803"
+    workflow = (
+        f"      - uses: actions/checkout@{sha} # v6.1.0\n"
+        f"        uses: pypa/gh-action-pypi-publish@{sha} # v1.14.3\n"
+        "      # uses: actions/checkout@v6\n"
+        "      - uses: actions/checkout@v6\n"
+        "      - uses: pypa/gh-action-pypi-publish@release/v1\n"
+        f"      - uses: actions/checkout@{sha[:12]} # v6.1.0\n"
+        f"      - uses: actions/checkout@{sha}\n"
+        f"      - uses: actions/checkout@{sha} # v6\n"
+        '      - "uses": actions/checkout@v1\n'
+        "      - uses : actions/checkout@v1\n"
+    )
+
+    assert _unpinned_uses(workflow) == [
+        "- uses: actions/checkout@v6",
+        "- uses: pypa/gh-action-pypi-publish@release/v1",
+        f"- uses: actions/checkout@{sha[:12]} # v6.1.0",
+        f"- uses: actions/checkout@{sha}",
+        f"- uses: actions/checkout@{sha} # v6",
+        '- "uses": actions/checkout@v1',
+        "- uses : actions/checkout@v1",
+    ]
+
+
+@pytest.mark.parametrize("workflow", [_CI_WORKFLOW, _RELEASE_WORKFLOW], ids=["ci", "release"])
+def test_every_action_is_pinned_to_a_commit_sha(workflow: Path) -> None:
+    """A tag or branch is a moving pointer: whoever controls the action's repository can
+    point it at new code that then runs with the job's token. A full commit SHA cannot move.
+    The one-line bug this catches: a `uses:` line pinned by tag or branch, e.g. a new step
+    added as `actions/checkout@v6`."""
+    text = workflow.read_text()
+
+    assert "uses:" in text, f"{workflow.name} uses no actions"
+    assert _unpinned_uses(text) == []
+
+
+def test_ci_twine_pin_names_the_build_action_release_that_bundles_it() -> None:
+    """The lint job's `twine==6.2.0` stands in for the twine the release build runs, which
+    is whatever the pinned build-and-inspect release bundles (the v2 line bundles 6.2.0). The
+    one-line bug this catches: moving the build action's pin in release.yml (to v3, which
+    bundles twine 7) without revisiting the twine pin and the comment that names the release."""
+    pins = [
+        line.strip()
+        for line in _RELEASE_WORKFLOW.read_text().splitlines()
+        if "hynek/build-and-inspect-python-package@" in line
+    ]
+    lint_comment = " ".join(
+        line.strip().removeprefix("#").strip()
+        for line in _job_block("lint")
+        if line.strip().startswith("#")
+    )
+
+    assert len(pins) == 1, pins
+    tag = pins[0].rsplit("# ", 1)[1]
+    assert tag.startswith("v2."), tag
+    assert f"hynek/build-and-inspect-python-package {tag}" in lint_comment, lint_comment
+
+
+def test_ci_lint_job_checks_the_lockfile_between_installing_uv_and_syncing() -> None:
+    """Every job syncs with `--frozen`, which installs the lockfile as written even when
+    pyproject.toml has moved on, so a dependency change without a lock refresh would test the
+    old dependencies and pass. The one-line bug this catches: removing the `uv lock --check`
+    step, running it before uv is installed or after the sync, or letting it fail quietly
+    (`continue-on-error` or an `if:` on the step, or on the `lint` job itself, which skips or
+    excuses every step at once)."""
+    block = _job_block("lint")
+    job_indent = min(len(line) - len(line.lstrip(" ")) for line in block)
+    job_keys = [
+        line.split(":", 1)[0].strip()
+        for line in block
+        if len(line) - len(line.lstrip(" ")) == job_indent and not line.lstrip().startswith("#")
+    ]
+    assert "continue-on-error" not in job_keys, job_keys
+    assert "if" not in job_keys, job_keys
+    steps = _job_steps("lint")
+    install = _step_indices(steps, "name: Install uv")
+    lock = _step_indices(steps, "uv lock --check")
+    sync = _step_indices(steps, "run: uv sync")
+
+    assert len(install) == len(lock) == len(sync) == 1, (install, lock, sync)
+    assert install[0] < lock[0] < sync[0], (install, lock, sync)
+    lock_step = steps[lock[0]]
+    assert "run: uv lock --check" in lock_step, lock_step
+    keys = [line.removeprefix("- ").split(":", 1)[0].strip() for line in lock_step]
+    assert "continue-on-error" not in keys, lock_step
+    assert "if" not in keys, lock_step
 
 
 def test_every_place_that_requires_mflux_caps_pillow_below_13() -> None:
@@ -453,19 +660,46 @@ def test_ci_mflux_floor_job_cannot_be_switched_off() -> None:
 
 def test_ci_mflux_floor_job_comment_names_the_floor_the_extras_admit() -> None:
     """The floor job's comment tells a reader which mflux the job covers and what the pins
-    admit. The one-line bug this catches: the comment still claiming the pins admit a minor
-    below the floor (0.17, 0.18) after the extras moved to `>=0.19`, or losing the floor."""
+    admit. The one-line bug this catches: the comment still naming a minor below the floor
+    after the extras moved to `>=0.19`, as `mflux 0.17`, `admit 0.17 and 0.18`, `>=0.17` or
+    `>0.18` (the forms `_mflux_minors_named_in` reads), or losing the `(`>=0.19`)` floor."""
     comment = " ".join(
         line.strip().removeprefix("#").strip()
         for line in _job_block(_MFLUX_FLOOR_JOB)
         if line.strip().startswith("#")
     )
     floor = int(MFLUX_FLOOR_MINOR.split(".")[1])
-    minors = [int(m) for m in re.findall(r"\b0\.(\d+)\b", comment)]
+    minors = _mflux_minors_named_in(comment)
 
     assert f"(`>={MFLUX_FLOOR_MINOR}`)" in comment, comment
     assert minors, comment
     assert all(minor >= floor for minor in minors), comment
+
+
+def test_floor_comment_reading_skips_decimals_that_are_not_mflux_versions() -> None:
+    """The floor-comment test reads every mflux minor the comment names; a duration or ratio
+    in the same prose is not one. The one-line bug this catches: a stray `0.N` (e.g. "takes
+    0.5 s") read as mflux 0.5, failing the floor check on a correct comment."""
+    comment = (
+        "this leg runs the suite on mflux 0.19, the oldest minor the extras admit (`>=0.19`);"
+        " the guard takes 0.5 s"
+    )
+
+    assert _mflux_minors_named_in(comment) == [19, 19]
+
+
+def test_floor_comment_reading_still_sees_a_stale_mflux_minor() -> None:
+    """Narrowing the reading must not blind it to the claim it exists for. The one-line bug
+    this catches: a pattern that no longer matches `mflux 0.N`, `admit 0.N`, a one- or
+    two-character operator before `0.N` (`<0.20`, `>=0.19`), or the later minors of a list
+    (`0.17, 0.18`, `0.17 and 0.18`), so a comment that still names 0.17 or 0.18 passes."""
+    assert _mflux_minors_named_in("the pins admit mflux 0.17 (`>=0.17`)") == [17, 17]
+    assert _mflux_minors_named_in(
+        "this leg runs mflux 0.19 (`>=0.19`); the pins still admit 0.17 and 0.18"
+    ) == [19, 19, 17, 18]
+    assert _mflux_minors_named_in("the extras resolve mflux 0.17, 0.18 or 0.19") == [17, 18, 19]
+    assert _mflux_minors_named_in("the extras cap mflux at `<0.20`") == [20]
+    assert _mflux_minors_named_in("the extras admit `>0.18`") == [18]
 
 
 def test_ci_mflux_floor_job_never_lets_uv_run_resync() -> None:

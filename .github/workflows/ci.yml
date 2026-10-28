@@ -13,14 +13,18 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
       - name: Install uv
         run: pip install uv==0.11.2
+      - name: Check uv.lock matches pyproject.toml
+        # Every sync below is --frozen, which installs the lockfile as written; this fails
+        # the run when pyproject.toml changed without a lock refresh.
+        run: uv lock --check
       - name: Sync
         run: uv sync --frozen --group lint
       - name: Ruff check
@@ -33,17 +37,18 @@ jobs:
         env:
           SETUPTOOLS_SCM_PRETEND_VERSION: "0.0.0"
       - name: Check distributions with the release action's twine
-        # twine is pinned to the version hynek/build-and-inspect-python-package@v2 bundles,
-        # so a metadata/tooling mismatch fails here instead of on the tag push.
+        # twine is pinned to the version bundled by hynek/build-and-inspect-python-package
+        # v2.18.0 (the release.yml pin), so a metadata/tooling mismatch fails here instead
+        # of on the tag push.
         run: uvx twine==6.2.0 check --strict dist/*
 
   typecheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
       - name: Install uv
@@ -60,10 +65,10 @@ jobs:
       matrix:
         python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: ${{ matrix.python }}
       - name: Install uv
@@ -86,10 +91,10 @@ jobs:
     # because one older mflux can cover different lines.
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
       - name: Install uv
