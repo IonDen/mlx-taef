@@ -42,9 +42,17 @@ Same FLUX.2 Klein base 4B latent, two different decoders. Both produce a 512×51
 | Applied wired cap | 12 GB | 2 GB |
 | Reference image | ![vanilla](_artifacts/showcase/taef2/vae/vanilla_vae_rep0.webp) | ![taef2](_artifacts/showcase/taef2/taef/taef2_rep0.webp) |
 
+The reference latent comes from 4 steps of the undistilled FLUX.2 Klein base 4B, so both decodes look soft. This row compares only the two decoders.
+
 **TAEF2 is ~8.7× faster, with ~4.8× lower peak decode memory.** SSIM(TAEF2, Vanilla) = **0.960**, LPIPS(TAEF2, Vanilla) = **0.057** (15/15 pairs each; measured before v0.8.4's float32 preview decode, see the re-check note under Test machine).
 
 Up to v0.8.1 this row read SSIM 0.616. Those releases applied the Flux2VAE batch-norm inverse to the latent before TAEF2, on the reasoning that the full VAE does the same. TAEF2 turns out to want the normalized latent the diffusion model emits, which is also how its upstream reference code and ComfyUI feed it. The inverse widens the latent by about 1.8× per channel (the VAE's running variance is close to 3), and the decode shows it: shadows crushed, highlights clipped, color oversaturated. `scripts/ab_taef2_bn_domain.py` decodes one latent both ways and scores each against the full VAE, with lossless PNGs between decoder and scorer. Without the inverse: SSIM 0.920, LPIPS 0.058. With it: 0.588 and 0.241. On a fully denoised 768×512 portrait the gap is the same shape, 0.945 / 0.022 against 0.716 / 0.150. The images and reports for both are committed under `_artifacts/ab_taef2_bn_domain/`; the portrait latent is not, and `control_portrait_768x512/RECIPE.md` there gives the capture command. The 0.960 in the table is higher than the A/B's 0.920 because this page's protocol scores webp files, and the codec smooths the same noise out of both images.
+
+| Denoised control | Vanilla FLUX.2 VAE | TAEF2 |
+|---|---|---|
+| 768×512 portrait of an elderly fisherman, 28 steps, seed 7 (prompt and seed differ from the other rows) | ![vanilla, denoised control](_artifacts/ab_taef2_bn_domain/control_portrait_768x512/flux2_klein_base_4b_portrait_768x512.vanilla_vae.png) | ![taef2, denoised control](_artifacts/ab_taef2_bn_domain/control_portrait_768x512/flux2_klein_base_4b_portrait_768x512.identity.png) |
+
+The denoised control checks the decoder on a fully denoised image. Its SSIM 0.945 and LPIPS 0.022 come from a different latent (this portrait) and are scored on lossless PNGs, so they are not comparable with the webp-scored 0.960 above, which uses the 4-step fixture.
 
 TAEF2 is still a 4 MB decoder standing in for a ~340 MB VAE, and it softens fine detail such as specular highlights and micro-texture. If you need final-quality output, use the full VAE: the decode step alone costs about 0.27 s and 2.8 GB, on top of the multi-GB model construction the tiny autoencoder skips entirely.
 
