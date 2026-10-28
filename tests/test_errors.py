@@ -182,8 +182,9 @@ def test_mflux_not_installed_error_exported_from_root() -> None:
 
 def test_mflux_not_installed_error_raised_when_mflux_import_fails(monkeypatch) -> None:
     """Raise-condition: importing the integration with mflux absent must raise
-    MfluxNotInstalledError, not a bare ImportError. Drives the real module-level guard at
-    integrations/mflux.py (which is `# pragma: no cover` because mflux is present in dev)."""
+    MfluxNotInstalledError, not a bare ImportError. Drives the real module-level import at
+    integrations/mflux.py with `mflux.callbacks.callback` made unimportable, since mflux is
+    installed in dev."""
     import importlib
     import sys
 
@@ -192,8 +193,49 @@ def test_mflux_not_installed_error_raised_when_mflux_import_fails(monkeypatch) -
     # Make importing `mflux.callbacks.callback` fail at import time.
     monkeypatch.setitem(sys.modules, "mflux.callbacks.callback", None)
     monkeypatch.delitem(sys.modules, "mlx_taef.integrations.mflux", raising=False)
-    with pytest.raises(MfluxNotInstalledError):
+    with pytest.raises(MfluxNotInstalledError) as raised:
         importlib.import_module("mlx_taef.integrations.mflux")
+    assert type(raised.value) is MfluxNotInstalledError, str(raised.value)
+    assert isinstance(raised.value.__cause__, ImportError), raised.value.__cause__
+
+
+def test_any_mflux_import_failure_raises_the_plain_install_error(monkeypatch) -> None:
+    """Every supported mflux (0.24 and newer) imports on Pillow 13, so an ImportError from
+    importing mflux gets the plain install hint whatever its text, chained from the original.
+    The failure here carries the old Pillow 13 crash text with an mflux 0.23.0 beside Pillow
+    13.0.0 reported as installed. The one-line bug this catches: the integration still
+    special-casing that crash (a different error type or message), or dropping the cause."""
+    import importlib
+    import importlib.metadata
+    import sys
+
+    from mlx_taef.errors import MfluxNotInstalledError
+
+    crash = ImportError("cannot import name '_IntegralLike' from 'numbers'")
+    real_import_module = importlib.import_module
+    real_version = importlib.metadata.version
+    faked = {"mflux": "0.23.0", "pillow": "13.0.0"}
+
+    def fake_import_module(name: str, package: str | None = None):
+        if name == "mflux.callbacks.callback":
+            raise crash
+        return real_import_module(name, package)
+
+    def fake_version(distribution: str) -> str:
+        return faked.get(distribution.lower()) or real_version(distribution)
+
+    monkeypatch.setattr(importlib.metadata, "version", fake_version)
+    monkeypatch.setattr(importlib, "import_module", fake_import_module)
+    monkeypatch.delitem(sys.modules, "mlx_taef.integrations.mflux", raising=False)
+    with pytest.raises(MfluxNotInstalledError) as raised:
+        real_import_module("mlx_taef.integrations.mflux")
+
+    assert type(raised.value) is MfluxNotInstalledError, str(raised.value)
+    assert str(raised.value) == (
+        "mflux is required for mlx_taef.integrations.mflux. "
+        "Install with: pip install 'mlx-taef[mflux]'."
+    )
+    assert raised.value.__cause__ is crash
 
 
 def test_showcase_only_exceptions_not_in_package_root_all() -> None:

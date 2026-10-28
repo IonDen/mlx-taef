@@ -19,14 +19,13 @@ from typing import Literal
 import mlx.core as mx
 import numpy as np
 
+from mlx_taef.api import TAEF1, TAEF2, Krea2, QwenImage, Taef, ZImage
 from mlx_taef.errors import MfluxNotInstalledError, UnsupportedMfluxModelError
 
 try:
     importlib.import_module("mflux.callbacks.callback")
-except ImportError as e:  # pragma: no cover
+except ImportError as e:
     raise MfluxNotInstalledError() from e
-
-from mlx_taef.api import TAEF1, TAEF2, Krea2, QwenImage, Taef, ZImage
 
 logger = logging.getLogger(__name__)
 

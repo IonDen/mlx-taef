@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "mlx-taef"
 description = "Tiny AutoEncoders for diffusion on Apple Silicon — live previews + low-memory decode for FLUX, SD, and Qwen-Image."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "Denis Ineshin", email = "denis.ineshin@gmail.com" }]
 keywords = [
@@ -22,7 +22,6 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
   "Operating System :: MacOS :: MacOS X",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
@@ -37,20 +36,20 @@ dependencies = [
   "numpy>=1.26",
   "huggingface-hub>=0.24",
   "safetensors>=0.4",
-  # `typing.Self` is 3.11+; annotations are evaluated at import time (this repo
-  # bans `from __future__ import annotations`), so 3.10 needs the backport.
-  'typing-extensions>=4.5; python_version < "3.11"',
 ]
 
 [project.optional-dependencies]
-# mflux 0.23.0 fails at `import mflux` with Pillow 13 (mflux #890, fixed on mflux main, not yet
-# released). Lift the Pillow cap once an mflux release carries the fix.
-mflux = ["mflux>=0.19,<0.26", "Pillow<13"]
-image = ["Pillow>=10.0"]
+# No upper bound on mflux, by policy: the newest mflux release is tested weekly and fixed only
+# when it breaks something. mflux 0.24 is the floor: it is the first release that imports on
+# Pillow 13.
+mflux = ["mflux>=0.24"]
+# Pillow 12.x and older are affected by GHSA-5x8w-8jj5-q52h, fixed in Pillow 13; every Pillow
+# requirement here starts at 13.
+image = ["Pillow>=13"]
 showcase = [
-  "mflux>=0.19,<0.26",
+  "mflux>=0.24",
   "mlx-teacache>=0.14.0,<1",
-  "Pillow>=10.0,<13",  # see the Pillow note above the mflux extra
+  "Pillow>=13",
   "scikit-image>=0.22",
 ]
 
@@ -71,20 +70,18 @@ test = [
   "pytest-cov>=5.0",
   "hypothesis>=6.130",
   "pytest-benchmark>=4.0",
-  "mflux>=0.19,<0.26",
+  "mflux>=0.24",
   "mlx-teacache>=0.14.0,<1",
   "scikit-image>=0.22",
-  "Pillow>=10.0,<13",  # see the Pillow note above the mflux extra
-  'tomli>=2.0; python_version < "3.11"',
+  "Pillow>=13",
 ]
 typecheck = [
   "mypy>=1.13",
-  "typing-extensions>=4.5",
   # mypy --strict on src/mlx_taef needs PIL's types resolvable — integrations/mflux.py
   # imports it. (Previously this was masked by uv's implicit "dev" default group
   # pulling in Pillow from the test/fixtures groups; now that default-groups = []
   # scopes each CI sync to exactly its own group, typecheck must declare it directly.)
-  "Pillow>=10.0",
+  "Pillow>=13",
 ]
 lint = [
   "ruff>=0.7",
@@ -96,7 +93,7 @@ docs = [
 # Reference-fixture generation only. Not for runtime.
 fixtures = [
   "torch>=2.4,<3",
-  "pillow>=10.0",
+  "pillow>=13",
   "lpips>=0.1.4",
 ]
 dev = [
@@ -157,7 +154,7 @@ exclude = [
 [tool.ruff]
 src = ["src"]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = [
@@ -198,7 +195,7 @@ docstring-code-format = true
 exclude = ["tests/_third_party/**/*.py"]  # vendored; preserve original formatting
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 strict = true
 warn_unreachable = true
 enable_error_code = ["redundant-expr", "truthy-bool", "ignore-without-code"]

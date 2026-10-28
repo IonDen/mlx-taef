@@ -1,24 +1,23 @@
 import builtins
 import importlib.metadata
+import itertools
 import re
+import shlex
 import sys
 import textwrap
+import tomllib
 import types
 from pathlib import Path
 
 import pytest
-from packaging.requirements import Requirement
-
-# Version-gated import: no single CI leg runs both arms, so both are excluded
-# from coverage rather than reporting one as untested on every interpreter.
-if sys.version_info >= (3, 11):  # pragma: no cover
-    import tomllib
-else:  # pragma: no cover
-    import tomli as tomllib
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.utils import canonicalize_name
 
 _REPO_ROOT = Path(__file__).parent.parent
 _CI_WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "ci.yml"
 _RELEASE_WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "release.yml"
+_MFLUX_LATEST_WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "mflux-latest.yml"
+_MFLUX_LATEST_JOB = "test-mflux-latest"
 _PYPROJECT = _REPO_ROOT / "pyproject.toml"
 
 # A `uses:` line pinned to a full commit SHA, with the exact release tag of that commit as its
@@ -32,11 +31,11 @@ _USES_KEY = re.compile(r"""\buses['"]?\s*:""")
 # The single source of truth for "which Pythons do we claim to support".
 # Every surface below must agree with it, so a widened floor can never ship
 # untested (the CI matrix entry IS the test for a version).
-SUPPORTED_PYTHONS = ("3.10", "3.11", "3.12", "3.13", "3.14")
+SUPPORTED_PYTHONS = ("3.11", "3.12", "3.13", "3.14")
 
 # Oldest mflux minor CI exercises (the minor the latest release names as supported); bump it
 # when that moves.
-MFLUX_FLOOR_MINOR = "0.19"
+MFLUX_FLOOR_MINOR = "0.24"
 
 # The uv every CI job installs before its frozen sync; the version the lockfile was produced
 # with. Bump it together with the `pip install uv==` lines in ci.yml.
@@ -52,6 +51,7 @@ _MFLUX_GUARD_IMPORTS = (
 )
 
 _MFLUX_FLOOR_JOB = "test-mflux-floor"
+
 _GUARD_OPENING = "uv run --no-sync python -c '"
 
 
@@ -176,6 +176,23 @@ def _runs_on(job_id: str) -> str:
     return runs_on[0]
 
 
+_HF_HUB_OFFLINE_LINES = {'HF_HUB_OFFLINE:"1"', "HF_HUB_OFFLINE:'1'", "HF_HUB_OFFLINE:1"}
+
+
+def _sets_hf_hub_offline(step: list[str]) -> bool:
+    """Whether a step (stripped lines, as `_job_steps` gives them) has an `env:` key that sets
+    `HF_HUB_OFFLINE` to 1."""
+    return "env:" in step and any(line.replace(" ", "") in _HF_HUB_OFFLINE_LINES for line in step)
+
+
+def _pytest_step(job_id: str, workflow: Path | None = None) -> list[str]:
+    """The one step of a job with a line that runs pytest."""
+    steps = _job_steps(job_id, workflow)
+    found = _step_indices(steps, "pytest")
+    assert len(found) == 1, (job_id, steps)
+    return steps[found[0]]
+
+
 def _floor_guard() -> tuple[str, str]:
     """The floor job's guard program (the lines between the `python -c '` line and the first
     line that starts with `'`, dedented) and that closing line, stripped."""
@@ -195,18 +212,55 @@ class _StubModule(types.ModuleType):
         return _StubModule(f"{self.__name__}.{name}")
 
 
-def _run_floor_guard(monkeypatch: pytest.MonkeyPatch, mflux_version: str) -> list[str]:
-    """Execute the guard program as `python -c` would, with `importlib.metadata.version`
-    reporting `mflux_version` for mflux and 0.32.2 for mlx. Imports of `mflux` and its
-    submodules get stubs instead of the installed mflux, and their names are returned in
-    the order the program requested them; every other import is real."""
+def _inline_programs(job_id: str, workflow: Path) -> list[tuple[int, str, str]]:
+    """Every `python -c '` program of a job as (step index, program, closing line): the step
+    index counts steps as `_job_steps` does, the program is the lines between the opening line
+    and the first line that starts with `'` (dedented), the closing line is stripped."""
+    block = [line for line in _job_block(job_id, workflow) if not line.strip().startswith("#")]
+    programs: list[tuple[int, str, str]] = []
+    step = -1
+    for i, line in enumerate(block):
+        if line.strip().startswith("- "):
+            step += 1
+        if line.rstrip().endswith("python -c '"):
+            rest = block[i + 1 :]
+            closings = [j for j, item in enumerate(rest) if item.strip().startswith("'")]
+            assert closings, f"a `python -c '` program in {job_id} never closes its quote"
+            program = textwrap.dedent("\n".join(rest[: closings[0]]))
+            programs.append((step, program, rest[closings[0]].strip()))
+    return programs
+
+
+def _run_floor_guard(
+    monkeypatch: pytest.MonkeyPatch, mflux_version: str, pillow_version: str = "13.0.0"
+) -> list[str]:
+    """Execute the floor guard program as `python -c` would; see `_exec_program`."""
     program, _ = _floor_guard()
-    installed = {"mflux": mflux_version, "mlx": "0.32.2"}
+    return _exec_program(
+        monkeypatch, program, mflux_version, pillow_version, "<ci.yml floor guard>"
+    )
+
+
+def _exec_program(
+    monkeypatch: pytest.MonkeyPatch,
+    program: str,
+    mflux_version: str,
+    pillow_version: str,
+    filename: str,
+    failing: str | None = None,
+) -> list[str]:
+    """Execute a workflow's inline Python program as `python -c` would, with
+    `importlib.metadata.version` reporting `mflux_version` for mflux, `pillow_version` for
+    pillow and 0.32.2 for mlx. Imports of `mflux` and its submodules get stubs instead of the
+    installed mflux, and their names are returned in the order the program requested them;
+    every other import is real. With `failing`, importing that one mflux module raises
+    ModuleNotFoundError, as a moved or broken module would."""
+    installed = {"mflux": mflux_version, "mlx": "0.32.2", "pillow": pillow_version}
 
     def fake_version(distribution: str) -> str:
-        if distribution not in installed:
+        if distribution.lower() not in installed:
             raise importlib.metadata.PackageNotFoundError(distribution)
-        return installed[distribution]
+        return installed[distribution.lower()]
 
     monkeypatch.setattr(importlib.metadata, "version", fake_version)
     requested: list[str] = []
@@ -214,6 +268,8 @@ def _run_floor_guard(monkeypatch: pytest.MonkeyPatch, mflux_version: str) -> lis
 
     def recording_import(name, globals=None, locals=None, fromlist=(), level=0):
         if level == 0 and (name == "mflux" or name.startswith("mflux.")):
+            if name == failing:
+                raise ModuleNotFoundError(f"No module named {name!r}", name=name)
             requested.append(name)
             requested.extend(f"{name}.{item}" for item in fromlist or ())
             return _StubModule(name if fromlist else "mflux")
@@ -223,16 +279,18 @@ def _run_floor_guard(monkeypatch: pytest.MonkeyPatch, mflux_version: str) -> lis
         "__name__": "__main__",
         "__builtins__": {**vars(builtins), "__import__": recording_import},
     }
-    exec(compile(program, "<ci.yml floor guard>", "exec"), namespace)
+    exec(compile(program, filename, "exec"), namespace)
     return requested
 
 
 # A `0.N` read as an mflux minor: after the word `mflux`, the verb `admit`/`admits`, or a
 # version operator (`<`, `>`, `<=`, `>=`, `==`, `!=`, `~=`), followed by any list continuation
-# (`, 0.N`, `and 0.N`, `or 0.N`).
+# (`, 0.N`, `and 0.N`, `or 0.N`). Each item may carry a patch (`0.17.1`); a continuation item
+# followed by a unit of seconds (`s`, `sec`, `secs`, `second`, `seconds`: "and 0.5 s") is a
+# duration and ends the list.
 _MFLUX_MINOR_MENTION = re.compile(
-    r"(?:\b(?:mflux|admits?)\s+|(?:[<>]=?|[=!~]=)\s*)0\.(\d+)\b"
-    r"((?:\s*(?:,|\band\b|\bor\b)\s*0\.\d+\b)*)"
+    r"(?:\b(?:mflux|admits?)\s+|(?:[<>]=?|[=!~]=)\s*)0\.(\d+)(?:\.\d+)?\b"
+    r"((?:\s*(?:,|\band\b|\bor\b)\s*0\.\d+(?:\.\d+)?\b(?!\s*(?:s|secs?|seconds?)\b))*)"
 )
 
 
@@ -240,22 +298,23 @@ def _mflux_minors_named_in(comment: str) -> list[int]:
     """The mflux minors a workflow comment names, in order: a `0.N` right after the word
     `mflux`, after `admit`/`admits`, or after a version operator (`mflux 0.19`, `admit 0.19`,
     `>=0.19` and `<0.19` all read as 19), plus every `0.N` of a list that continues it
-    (`mflux 0.17, 0.18`, `admit 0.17 and 0.18`, `>=0.17 or 0.18`).
+    (`mflux 0.17, 0.18`, `admit 0.17 and 0.18`, `>=0.17 or 0.18`, `mflux 0.17.1, 0.18`).
 
     Deliberately not read: a bare `0.N` with none of those in front of it and not inside such
-    a list, so a duration or ratio in the same prose ("takes 0.5 s") is not taken for a
-    version. A comment that names a stale minor only that way ("0.17 is still allowed") is
-    not seen."""
+    a list, or a list item followed by a unit of seconds (`s`, `sec`, `secs`, `second`,
+    `seconds`: "mflux 0.19 and 0.5 s"), so a duration or ratio in the same prose ("takes 0.5 s")
+    is not taken for a version. A comment that names a stale minor only that way ("0.17 is
+    still allowed") is not seen."""
     minors: list[int] = []
     for mention in _MFLUX_MINOR_MENTION.finditer(comment):
         minors.append(int(mention.group(1)))
-        minors.extend(int(m) for m in re.findall(r"0\.(\d+)", mention.group(2)))
+        minors.extend(int(m) for m in re.findall(r"0\.(\d+)(?:\.\d+)?", mention.group(2)))
     return minors
 
 
 def _floor_version(minor_offset: int, patch: int) -> str:
-    """An mflux version `minor_offset` minors away from the floor minor, e.g. (1, 0) -> 0.20.0
-    while the floor is 0.19."""
+    """An mflux version `minor_offset` minors away from the floor minor, e.g. (1, 0) -> 0.25.0
+    while the floor is 0.24."""
     major, minor = MFLUX_FLOOR_MINOR.split(".")
     return f"{major}.{int(minor) + minor_offset}.{patch}"
 
@@ -290,13 +349,26 @@ def test_every_mflux_requirement_starts_at_the_ci_floor_minor() -> None:
     admit nothing older, or a user resolves an mflux no CI job has run. The one-line bug this
     catches: moving the lower bound of one mflux specifier (the `mflux` or `showcase` extra,
     or the `test` group) without the others or without `MFLUX_FLOOR_MINOR`, e.g. leaving one
-    at `>=0.17`."""
+    at `>=0.19`."""
     found = _mflux_requirements(_pyproject())
 
     assert set(found) == {"extra mflux", "extra showcase", "group test"}, sorted(found)
     for place, requirement in found.items():
         lower = [spec for spec in requirement.specifier if spec.operator == ">="]
         assert [spec.version for spec in lower] == [MFLUX_FLOOR_MINOR], (place, str(requirement))
+
+
+def test_every_mflux_requirement_is_exactly_the_floor_with_no_marker() -> None:
+    """mflux 0.24 is the first release that imports on Pillow 13, so every place that installs
+    mflux reads exactly `mflux>=0.24`: no ceiling, no exclusions, no environment marker. The
+    one-line bug this catches: a leftover `>=0.19`, a cap such as `,<0.26`, or a marker that
+    drops mflux on some Python (`; python_version >= "3.12"`) in any of the three places."""
+    found = _mflux_requirements(_pyproject())
+
+    assert set(found) == {"extra mflux", "extra showcase", "group test"}, sorted(found)
+    for place, requirement in found.items():
+        assert str(requirement.specifier) == f">={MFLUX_FLOOR_MINOR}", (place, str(requirement))
+        assert requirement.marker is None, (place, str(requirement))
 
 
 def test_built_distributions_declare_core_metadata_2_4() -> None:
@@ -455,7 +527,11 @@ def test_unpinned_uses_flags_every_pin_but_a_full_sha_with_its_release_tag() -> 
     ]
 
 
-@pytest.mark.parametrize("workflow", [_CI_WORKFLOW, _RELEASE_WORKFLOW], ids=["ci", "release"])
+@pytest.mark.parametrize(
+    "workflow",
+    [_CI_WORKFLOW, _RELEASE_WORKFLOW, _MFLUX_LATEST_WORKFLOW],
+    ids=["ci", "release", "mflux-latest"],
+)
 def test_every_action_is_pinned_to_a_commit_sha(workflow: Path) -> None:
     """A tag or branch is a moving pointer: whoever controls the action's repository can
     point it at new code that then runs with the job's token. A full commit SHA cannot move.
@@ -519,28 +595,47 @@ def test_ci_lint_job_checks_the_lockfile_between_installing_uv_and_syncing() -> 
     assert "if" not in keys, lock_step
 
 
-def test_every_place_that_requires_mflux_caps_pillow_below_13() -> None:
-    """mflux 0.23.0 fails at `import mflux` with Pillow 13 (mflux #890, fixed on mflux main
-    but not released). Every extra or group that pulls in mflux (the `mflux` and `showcase`
-    extras, the `test` group) must carry its own Pillow cap: an install resolves only the
-    place it names. The one-line bug this catches: `pip install mlx-taef[showcase]` (or a CI
-    sync of the `test` group) resolving Pillow 13 and crashing at `import mflux`, because the
-    cap sits on one place only or moved off `<13`."""
-    data = _pyproject()
-    places = _dependency_places(data)
-    mflux_places = set(_mflux_requirements(data))
+def test_no_mflux_requirement_has_an_upper_bound() -> None:
+    """mflux ships often; the policy is no ceiling: the newest release is tested weekly and
+    fixed only when it breaks, so an install never waits on a pin bump here. The one-line bug
+    this catches: an upper bound (`<0.26`, `<=0.25`, `==0.24.*`, `~=0.24`) back on any of the
+    `mflux` extra, the `showcase` extra or the `test` group."""
+    found = _mflux_requirements(_pyproject())
 
-    assert mflux_places == {"extra mflux", "extra showcase", "group test"}, sorted(mflux_places)
-    for place in sorted(mflux_places):
-        pillow = [
-            Requirement(dep)
-            for dep in places[place]
-            if isinstance(dep, str) and Requirement(dep).name.lower() == "pillow"
-        ]
-        assert len(pillow) == 1, (place, places[place])
-        upper = [spec.version for spec in pillow[0].specifier if spec.operator == "<"]
-        assert upper == ["13"], (place, str(pillow[0]))
-        assert pillow[0].marker is None, (place, str(pillow[0]))
+    assert set(found) == {"extra mflux", "extra showcase", "group test"}, sorted(found)
+    for place, requirement in found.items():
+        operators = {spec.operator for spec in requirement.specifier}
+        assert operators <= {">=", ">", "!="}, (place, str(requirement))
+        assert requirement.specifier.contains("999.0.0"), (place, str(requirement))
+
+
+def test_every_pillow_requirement_starts_at_13_with_no_upper_bound() -> None:
+    """Pillow 12.3.0 and older are affected by GHSA-5x8w-8jj5-q52h (fixed in 13.0.0), so every
+    place that installs Pillow must exclude them and admit every later release. The one-line
+    bug this catches: one place left at `>=10.0` (the `image` extra, the `typecheck` or
+    `fixtures` group), a floor set past 13.0.0, or a cap such as `<14` back on any of them."""
+    pillow = {
+        place: Requirement(dep)
+        for place, deps in _dependency_places(_pyproject()).items()
+        for dep in deps
+        if isinstance(dep, str) and Requirement(dep).name.lower() == "pillow"
+    }
+
+    assert set(pillow) == {
+        "extra image",
+        "extra showcase",
+        "group test",
+        "group typecheck",
+        "group fixtures",
+    }, sorted(pillow)
+    for place, requirement in pillow.items():
+        operators = {spec.operator for spec in requirement.specifier}
+        assert ">=" in operators, (place, str(requirement))
+        assert operators <= {">=", ">", "!="}, (place, str(requirement))
+        assert not requirement.specifier.contains("12.3.0"), (place, str(requirement))
+        assert not requirement.specifier.contains("12.99.0"), (place, str(requirement))
+        assert requirement.specifier.contains("13.0.0"), (place, str(requirement))
+        assert requirement.specifier.contains("999.0.0"), (place, str(requirement))
 
 
 def test_job_lines_reads_the_whole_job_and_nothing_after_it(
@@ -599,7 +694,7 @@ def test_job_ids_and_top_level_block_read_what_the_hardening_tests_check(
 
 
 def test_ci_mflux_floor_job_installs_the_floor_after_a_frozen_sync() -> None:
-    """The lockfile resolves mflux to the newest minor it admits on macOS, so 0.19, the oldest
+    """The lockfile resolves mflux to the newest minor it admits on macOS, so 0.24, the oldest
     minor the release names as supported (`MFLUX_FLOOR_MINOR`), is only exercised by a job
     that installs it over the frozen test sync. The one-line bug
     this catches: deleting the job, or installing the floor before the sync (which would
@@ -609,6 +704,122 @@ def test_ci_mflux_floor_job_installs_the_floor_after_a_frozen_sync() -> None:
     sync = job.index("run: uv sync --frozen --group test")
     install = job.index(f'run: uv pip install --no-deps "mflux=={MFLUX_FLOOR_MINOR}.*"')
     assert sync < install
+
+
+def test_ci_mflux_floor_install_moves_only_mflux() -> None:
+    """The floor mflux imports on the locked Pillow 13, so the floor leg installs mflux alone
+    and keeps the lock's Pillow. The one-line bug this catches: a Pillow pin (`"Pillow<13"`, the
+    old workaround for mflux before 0.24) or any other package left in the floor install."""
+    steps = _job_steps(_MFLUX_FLOOR_JOB)
+    installs = _step_indices(steps, "uv pip install")
+
+    assert len(installs) == 1, steps
+    install = [line for line in steps[installs[0]] if "uv pip install" in line]
+    assert install == [f'run: uv pip install --no-deps "mflux=={MFLUX_FLOOR_MINOR}.*"'], install
+
+
+def test_ci_mflux_floor_job_runs_on_the_lowest_supported_python() -> None:
+    """The floor leg pairs the oldest mflux with the oldest Python the release supports, so the
+    lowest corner of the support claim runs in CI. The one-line bug this catches: the job's
+    `setup-python` left on 3.12 (or any version other than the floor) after the floor moved."""
+    versions = [line for line in _job_lines(_MFLUX_FLOOR_JOB) if line.startswith("python-version:")]
+
+    assert versions == [f'python-version: "{SUPPORTED_PYTHONS[0]}"'], versions
+
+
+_SHELL_OPERATORS = {"&&", "||", ";", "|", "&"}
+
+
+def _pip_install_arguments(text: str) -> list[str]:
+    """Every argument after `pip install` (plain, `uv pip` or `python -m pip`) on any line of
+    `text`, up to the end of that shell command (`&&`, `||`, `;`, `|`, `&`), with shell quoting
+    removed. Flags are kept; the caller skips them."""
+    arguments: list[str] = []
+    for line in text.splitlines():
+        if "pip install" not in line:
+            continue
+        lexer = shlex.shlex(line, posix=True, punctuation_chars=";&|")
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+        reading = False
+        for previous, token in itertools.pairwise(["", *tokens]):
+            if token in _SHELL_OPERATORS:
+                reading = False
+            elif previous == "pip" and token == "install":
+                reading = True
+            elif reading:
+                arguments.append(token)
+    return arguments
+
+
+def _pillow_pins_rejecting_13(text: str) -> list[str]:
+    """The `pip install` arguments in `text` that are Pillow requirements whose specifier
+    rejects Pillow 13.0.0. Flags and arguments that are not requirements (files, paths) are
+    skipped."""
+    pins = []
+    for argument in _pip_install_arguments(text):
+        try:
+            requirement = Requirement(argument)
+        except InvalidRequirement:
+            continue
+        if canonicalize_name(requirement.name) == "pillow" and not requirement.specifier.contains(
+            "13.0.0"
+        ):
+            pins.append(argument)
+    return pins
+
+
+@pytest.mark.parametrize(
+    "workflow",
+    [_CI_WORKFLOW, _RELEASE_WORKFLOW, _MFLUX_LATEST_WORKFLOW],
+    ids=["ci", "release", "mflux-latest"],
+)
+def test_no_workflow_pins_pillow_below_13(workflow: Path) -> None:
+    """Every supported mflux imports on Pillow 13, and Pillow 12.x is affected by
+    GHSA-5x8w-8jj5-q52h, so no job installs an older Pillow. The one-line bug this catches:
+    the `Pillow<13` workaround left in any workflow's install step, in any spelling
+    (`"Pillow < 13"`, `pillow<=12.3`, `pillow==12.*`), or in a check."""
+    text = workflow.read_text()
+
+    assert _pillow_pins_rejecting_13(text) == [], workflow.name
+    assert "pillow<13" not in text.lower(), workflow.name
+
+
+@pytest.mark.parametrize(
+    "run_line",
+    [
+        'run: uv pip install --no-deps "mflux==0.24.*" "Pillow < 13"',
+        "run: pip install pillow<=12.3",
+        "run: uv pip install pillow==12.*",
+        "- run: python -m pip install -q 'Pillow<13.0' && uv sync --frozen",
+        'run: uv pip install "PILLOW!=13.0.0"',
+    ],
+)
+def test_pillow_pin_reading_flags_every_spelling_that_rejects_13(run_line: str) -> None:
+    """The one-line bug this catches: the reader matching only the literal `pillow<13` (so a
+    spaced, `<=`, `==12.*` or upper-case pin slips through), reading only `uv pip install` or
+    only plain `pip install`, or stopping at the first flag."""
+    assert len(_pillow_pins_rejecting_13(run_line)) == 1, run_line
+
+
+@pytest.mark.parametrize(
+    "run_line",
+    [
+        "run: pip install uv==0.11.2",
+        'run: uv pip install --no-deps "mflux==0.24.*"',
+        "run: uv pip install --upgrade-package mflux mflux",
+        'run: uv pip install "Pillow>=13" pillow',
+        "run: pip install -r requirements.txt ./dist/pkg.whl",
+        'run: echo "Pillow<12 is not installed here"',
+        'run: pip install uv==0.11.2 && echo "pillow==12.*"',
+    ],
+)
+def test_pillow_pin_reading_passes_installs_that_admit_13(run_line: str) -> None:
+    """The one-line bug this catches: the reader flagging a Pillow pin that admits 13.0.0, a
+    package other than Pillow, a bare `Pillow`, or text outside a `pip install` command (also
+    after the command ends at `&&`), or raising on an argument that is not a requirement (a
+    file, a path)."""
+    assert _pillow_pins_rejecting_13(run_line) == [], run_line
 
 
 def test_ci_mflux_floor_job_runs_on_the_test_jobs_runner() -> None:
@@ -661,8 +872,8 @@ def test_ci_mflux_floor_job_cannot_be_switched_off() -> None:
 def test_ci_mflux_floor_job_comment_names_the_floor_the_extras_admit() -> None:
     """The floor job's comment tells a reader which mflux the job covers and what the pins
     admit. The one-line bug this catches: the comment still naming a minor below the floor
-    after the extras moved to `>=0.19`, as `mflux 0.17`, `admit 0.17 and 0.18`, `>=0.17` or
-    `>0.18` (the forms `_mflux_minors_named_in` reads), or losing the `(`>=0.19`)` floor."""
+    after the extras moved to `>=0.24`, as `mflux 0.19`, `admit 0.19 and 0.23`, `>=0.19` or
+    `>0.23` (the forms `_mflux_minors_named_in` reads), or losing the `(`>=0.24`)` floor."""
     comment = " ".join(
         line.strip().removeprefix("#").strip()
         for line in _job_block(_MFLUX_FLOOR_JOB)
@@ -679,25 +890,39 @@ def test_ci_mflux_floor_job_comment_names_the_floor_the_extras_admit() -> None:
 def test_floor_comment_reading_skips_decimals_that_are_not_mflux_versions() -> None:
     """The floor-comment test reads every mflux minor the comment names; a duration or ratio
     in the same prose is not one. The one-line bug this catches: a stray `0.N` (e.g. "takes
-    0.5 s") read as mflux 0.5, failing the floor check on a correct comment."""
+    0.5 s") read as mflux 0.5, failing the floor check on a correct comment, also when it
+    follows a version list's `and`/`or` ("mflux 0.19 and 0.5 s")."""
     comment = (
         "this leg runs the suite on mflux 0.19, the oldest minor the extras admit (`>=0.19`);"
         " the guard takes 0.5 s"
     )
 
     assert _mflux_minors_named_in(comment) == [19, 19]
+    assert _mflux_minors_named_in("mflux 0.19 and 0.5 s") == [19]
+    assert _mflux_minors_named_in("mflux 0.19 or 0.5 s, then mflux 0.20") == [19, 20]
+    assert _mflux_minors_named_in("mflux 0.19 and 0.5 seconds") == [19]
+    assert _mflux_minors_named_in("mflux 0.19 and 0.5 second") == [19]
+    assert _mflux_minors_named_in("mflux 0.19, 0.5 sec") == [19]
+    assert _mflux_minors_named_in("mflux 0.19 or 0.5 secs, then mflux 0.20") == [19, 20]
 
 
 def test_floor_comment_reading_still_sees_a_stale_mflux_minor() -> None:
     """Narrowing the reading must not blind it to the claim it exists for. The one-line bug
     this catches: a pattern that no longer matches `mflux 0.N`, `admit 0.N`, a one- or
     two-character operator before `0.N` (`<0.20`, `>=0.19`), or the later minors of a list
-    (`0.17, 0.18`, `0.17 and 0.18`), so a comment that still names 0.17 or 0.18 passes."""
+    (`0.17, 0.18`, `0.17 and 0.18`, also after a patched item such as `0.17.1, 0.18`), so a
+    comment that still names 0.17 or 0.18 passes."""
+    assert _mflux_minors_named_in("mflux 0.17.1, 0.18") == [17, 18]
+    assert _mflux_minors_named_in("admit 0.19, 0.17.2 and 0.18") == [19, 17, 18]
+    assert _mflux_minors_named_in("the pins admit 0.17 and 0.18 so far") == [17, 18]
     assert _mflux_minors_named_in("the pins admit mflux 0.17 (`>=0.17`)") == [17, 17]
     assert _mflux_minors_named_in(
         "this leg runs mflux 0.19 (`>=0.19`); the pins still admit 0.17 and 0.18"
     ) == [19, 19, 17, 18]
     assert _mflux_minors_named_in("the extras resolve mflux 0.17, 0.18 or 0.19") == [17, 18, 19]
+    # A word after the list that only starts like a unit is not a duration.
+    assert _mflux_minors_named_in("admit 0.17 and 0.18 since v0.8.4") == [17, 18]
+    assert _mflux_minors_named_in("admit 0.17 and 0.18 secretly") == [17, 18]
     assert _mflux_minors_named_in("the extras cap mflux at `<0.20`") == [20]
     assert _mflux_minors_named_in("the extras admit `>0.18`") == [18]
 
@@ -772,6 +997,45 @@ def test_ci_mflux_floor_guard_imports_the_mflux_modules_the_suite_needs(
     assert not missing, f"the guard never imports {missing}; it requested {requested}"
 
 
+@pytest.mark.parametrize("pillow_version", ["9.5.0", "10.4.0", "12.99.0"])
+def test_ci_mflux_floor_guard_fails_the_job_below_pillow_13(
+    monkeypatch: pytest.MonkeyPatch, pillow_version: str
+) -> None:
+    """The floor leg runs mflux 0.24 on the locked Pillow 13; a Pillow 12 or older that
+    slipped in (a lock or resolver change) must fail the job, not pass under it. The one-line
+    bug this catches: no Pillow check in the guard, the old `>= 13` rejection left in place, a
+    string comparison (`"9.5.0" >= "13"` holds as strings), or `raise SystemExit(0)` instead of
+    a failing exit."""
+    with pytest.raises(SystemExit) as exit_:
+        _run_floor_guard(monkeypatch, _floor_version(0, 1), pillow_version)
+
+    code = exit_.value.code
+    assert isinstance(code, str) or (isinstance(code, int) and code != 0), code
+
+
+@pytest.mark.parametrize("pillow_version", ["13.0.0", "13.1.2", "14.0.0"])
+def test_ci_mflux_floor_guard_accepts_every_pillow_major_from_13(
+    monkeypatch: pytest.MonkeyPatch, pillow_version: str
+) -> None:
+    """Any Pillow from 13.0.0 on is what the floor leg should run on. The one-line bug this
+    catches: a check off by one major (`> 13`, which rejects 13.0.0), or one that only accepts
+    `13.` and rejects Pillow 14."""
+    try:
+        _run_floor_guard(monkeypatch, _floor_version(0, 1), pillow_version)
+    except SystemExit as exit_:
+        pytest.fail(f"the guard exited with code {exit_.code!r} on Pillow {pillow_version}")
+
+
+def test_ci_mflux_floor_guard_prints_the_pillow_version(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The job log is the record of what the floor leg ran on. The one-line bug this catches:
+    the guard's print line losing the Pillow version."""
+    _run_floor_guard(monkeypatch, _floor_version(0, 1), "13.0.0")
+
+    assert "Pillow 13.0.0" in capsys.readouterr().out
+
+
 def test_ci_mflux_floor_job_runs_the_offline_suite_without_a_coverage_gate() -> None:
     """The floor leg must run the same offline selection as the matrix, but a single older
     mflux may legitimately cover different lines, so the 95% gate stays on the matrix. The
@@ -782,6 +1046,32 @@ def test_ci_mflux_floor_job_runs_the_offline_suite_without_a_coverage_gate() -> 
 
     assert pytest_runs == ['run: uv run --no-sync pytest -m "not benchmark and not network"']
     assert not any("--cov-fail-under" in line for line in job)
+
+
+@pytest.mark.parametrize(
+    ("step", "offline"),
+    [
+        (["- name: t", "env:", 'HF_HUB_OFFLINE: "1"', "run: uv run pytest"], True),
+        (["- name: t", "env:", "HF_HUB_OFFLINE: 1", "run: uv run pytest"], True),
+        (["- name: t", "env:", 'HF_HUB_OFFLINE: "0"', "run: uv run pytest"], False),
+        (["- name: t", "env:", 'HF_HUB_CACHE: "1"', "run: uv run pytest"], False),
+        (["- name: t", "run: HF_HUB_OFFLINE: 1"], False),  # no env key on the step
+    ],
+)
+def test_sets_hf_hub_offline_reads_only_an_env_value_of_1(step: list[str], offline: bool) -> None:
+    """The helper the three offline-pytest pins share. The one-line bug this catches: a
+    reading that accepts `HF_HUB_OFFLINE: "0"`, another variable, or a step without `env:`."""
+    assert _sets_hf_hub_offline(step) is offline
+
+
+@pytest.mark.parametrize("job_id", ["test", _MFLUX_FLOOR_JOB])
+def test_ci_pytest_steps_run_with_the_hub_offline(job_id: str) -> None:
+    """The suite is offline by design; `HF_HUB_OFFLINE=1` makes a test that reaches the Hub
+    fail instead of downloading. The one-line bug this catches: the `env:` block dropped from
+    the pytest step of the `test` matrix or the mflux floor leg."""
+    step = _pytest_step(job_id)
+
+    assert _sets_hf_hub_offline(step), step
 
 
 def test_requires_python_floor_matches_lowest_supported_version() -> None:
@@ -817,6 +1107,16 @@ def test_mypy_targets_the_lowest_supported_version() -> None:
     assert _pyproject()["tool"]["mypy"]["python_version"] == SUPPORTED_PYTHONS[0]
 
 
+def test_ruff_targets_the_lowest_supported_version() -> None:
+    """Ruff's pyupgrade rules and syntax checks read `target-version`; above the floor they
+    would accept syntax the floor cannot parse, below it they keep shims the floor no longer
+    needs. The one-line bug this catches: `target-version` left on `py310` after the floor
+    moved to 3.11, or set to a newer Python than the floor."""
+    floor = SUPPORTED_PYTHONS[0].replace(".", "")
+
+    assert _pyproject()["tool"]["ruff"]["target-version"] == f"py{floor}"
+
+
 def test_readme_python_badge_states_the_floor_as_a_range() -> None:
     """The badge is hand-written (shields' pyversions enumerates every version), so it
     must be pinned to the declared floor or it will quietly advertise the wrong one."""
@@ -833,8 +1133,8 @@ def test_readme_python_badge_states_the_floor_as_a_range() -> None:
 
 def test_mlx_teacache_pins_start_at_0_14_0_below_1_on_every_python() -> None:
     """Both mlx-teacache pins (showcase extra, test group) read exactly `>=0.14.0,<1` with no
-    Python marker: a 3.11 marker drops it on 3.10, a stale `<0.10` cap locks a pre-0.14
-    release, and a floor moved anywhere off 0.14.0 (down to 0.13.5, which a containment check
+    Python marker: a marker drops it on some supported Python, a stale `<0.10` cap locks a
+    pre-0.14 release, and a floor moved anywhere off 0.14.0 (down to 0.13.5, which a containment check
     against 0.13.4 lets through, or up past 0.14.0) changes what the combined showcase runs."""
     data = _pyproject()
     entries = [
@@ -856,3 +1156,237 @@ def test_mlx_teacache_pins_start_at_0_14_0_below_1_on_every_python() -> None:
         assert lower == ["0.14.0"], f"floor must be exactly 0.14.0: {req}"
         assert upper == ["1"], f"cap must be exactly <1: {req}"
         assert len(req.specifier) == 2, f"only the floor and the cap: {req}"
+
+
+def _latest_steps() -> list[list[str]]:
+    return _job_steps(_MFLUX_LATEST_JOB, _MFLUX_LATEST_WORKFLOW)
+
+
+def _latest_step(text: str) -> list[str]:
+    """The one step of the latest-mflux job with a line containing `text`."""
+    steps = _latest_steps()
+    found = _step_indices(steps, text)
+    assert len(found) == 1, (text, steps)
+    return steps[found[0]]
+
+
+def test_mflux_latest_workflow_runs_weekly_and_on_demand_only() -> None:
+    """mflux has no upper bound here, so a new release reaches users before any pull request
+    runs against it; the weekly run is what notices a break. The one-line bug this catches: the
+    schedule dropped or made monthly or daily, the manual trigger dropped, or a push or
+    pull_request trigger added (which would put an unpinned mflux on every PR)."""
+    triggers = _top_level_block("on", _MFLUX_LATEST_WORKFLOW)
+    crons = [line for line in triggers if line.startswith("- cron:")]
+
+    assert [line for line in triggers if line.endswith(":")] == [
+        "schedule:",
+        "workflow_dispatch:",
+    ], triggers
+    assert len(crons) == 1, triggers
+    minute, hour, day_of_month, month, day_of_week = (
+        crons[0].removeprefix("- cron:").strip().strip("\"'").split()
+    )
+    assert minute.isdigit(), crons
+    assert hour.isdigit(), crons
+    assert (day_of_month, month) == ("*", "*"), crons
+    assert day_of_week in {"0", "1", "2", "3", "4", "5", "6"}, crons
+
+
+def test_mflux_latest_workflow_token_is_read_only() -> None:
+    """The job installs and runs whatever the newest mflux release ships, so its token must
+    not be able to write. The one-line bug this catches: deleting or widening the top-level
+    `permissions:` block, or a job-level `permissions:` that replaces it."""
+    assert _top_level_block("permissions", _MFLUX_LATEST_WORKFLOW) == ["contents: read"]
+    assert _job_ids(_MFLUX_LATEST_WORKFLOW) == [_MFLUX_LATEST_JOB]
+    assert _job_permissions(_MFLUX_LATEST_JOB, _MFLUX_LATEST_WORKFLOW) == []
+
+
+def test_mflux_latest_checkout_does_not_persist_the_token_and_uv_is_pinned() -> None:
+    """Code from the newest mflux runs in this job; the token must not sit in `.git/config`
+    for it, and uv must be the version the lockfile was made with. The one-line bug this
+    catches: dropping `persist-credentials: false` from the checkout, or unpinning uv."""
+    checkout = _latest_step("actions/checkout@")
+    installs = [
+        line
+        for line in _job_lines(_MFLUX_LATEST_JOB, _MFLUX_LATEST_WORKFLOW)
+        if "pip install uv" in line
+    ]
+
+    assert "persist-credentials: false" in checkout, checkout
+    assert installs == [f"run: pip install uv=={UV_VERSION}"], installs
+
+
+def test_mflux_latest_job_upgrades_only_mflux_after_the_frozen_sync() -> None:
+    """The job starts from the locked test environment and then moves mflux alone to the
+    newest release; mlx, Pillow and the rest move only when that mflux's own requirements
+    force them. The one-line bug this catches: upgrading before the sync (the sync puts the
+    locked mflux back), a bare `--upgrade` (every locked dependency moves, so a red run could
+    come from a new Pillow or mlx instead of mflux), `--no-deps` (a release that needs a newer
+    Pillow or mlx would not get it), or a second install or sync after the upgrade."""
+    steps = _latest_steps()
+    sync = _step_indices(steps, "uv sync")
+    upgrade = _step_indices(steps, "uv pip install")
+
+    assert len(sync) == len(upgrade) == 1, steps
+    assert "run: uv sync --frozen --group test" in steps[sync[0]], steps[sync[0]]
+    installs = [line for line in steps[upgrade[0]] if "uv pip install" in line]
+    assert installs == ["run: uv pip install --upgrade-package mflux mflux"], installs
+    assert sync[0] < upgrade[0], steps
+
+
+def test_mflux_latest_job_prints_the_versions_it_tests() -> None:
+    """The log is the record of which mflux the weekly run tested and with what. The
+    one-line bug this catches: dropping the print step or one of the three versions from it,
+    or printing before the upgrade (the locked versions, not the tested ones)."""
+    steps = _latest_steps()
+    printed = _step_indices(steps, 'version("mflux")')
+    upgrade = _step_indices(steps, "uv pip install")
+
+    assert len(printed) == 1, steps
+    step = " ".join(steps[printed[0]])
+    for name in ("mflux", "mlx", "pillow"):
+        assert f'"{name}"' in step, (name, step)
+    assert upgrade[0] < printed[0], steps
+
+
+def test_mflux_latest_job_runs_the_offline_suite_without_resyncing() -> None:
+    """The suite must run on the upgraded venv, offline. The one-line bug this catches: a
+    plain `uv run` (it re-syncs to the lock and tests the locked mflux), a pytest step without
+    `HF_HUB_OFFLINE=1` (a test could reach the Hub), or a marker expression that skips the
+    suite or runs network or benchmark tests."""
+    pytest_step = _latest_step("pytest")
+    uv_runs = [
+        line for line in _job_lines(_MFLUX_LATEST_JOB, _MFLUX_LATEST_WORKFLOW) if "uv run" in line
+    ]
+
+    assert 'run: uv run --no-sync pytest -m "not benchmark and not network"' in pytest_step
+    assert _sets_hf_hub_offline(pytest_step), pytest_step
+    assert len(uv_runs) >= 2, uv_runs
+    assert all("uv run --no-sync " in line for line in uv_runs), uv_runs
+
+
+def test_mflux_latest_job_cannot_be_switched_off() -> None:
+    """A failure here is the signal that a new mflux broke something; it must be loud. The
+    one-line bug this catches: `continue-on-error` or an `if:` on the job or a step, or a
+    `PYTEST_ADDOPTS` that rewrites the pytest selection."""
+    job = _job_lines(_MFLUX_LATEST_JOB, _MFLUX_LATEST_WORKFLOW)
+    keys = [line.removeprefix("- ").split(":", 1)[0].strip() for line in job]
+
+    assert not any("continue-on-error" in line for line in job), job
+    assert "if" not in keys, job
+    assert not any("PYTEST_ADDOPTS" in line for line in job), job
+
+
+def test_mflux_latest_job_runs_on_the_test_jobs_runner() -> None:
+    """The job is the `test` matrix's suite with the newest mflux; on another runner image a
+    failure could come from the platform instead of mflux. The one-line bug this catches:
+    moving the `test` job to a new runner and leaving this one on the old one."""
+    runs_on = [
+        line
+        for line in _job_lines(_MFLUX_LATEST_JOB, _MFLUX_LATEST_WORKFLOW)
+        if line.startswith("runs-on:")
+    ]
+
+    assert runs_on == [_runs_on("test")], runs_on
+
+
+def _latest_import_checks(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, list[str]]]:
+    """(step index, mflux modules requested) for each inline program of the latest-mflux job
+    that imports any mflux module, run against a faked mflux 0.25.0 beside Pillow 13.0.0."""
+    checks: list[tuple[int, list[str]]] = []
+    for step, program, _ in _inline_programs(_MFLUX_LATEST_JOB, _MFLUX_LATEST_WORKFLOW):
+        requested = _exec_program(monkeypatch, program, "0.25.0", "13.0.0", "<mflux-latest>")
+        if requested:
+            checks.append((step, requested))
+    return checks
+
+
+def test_mflux_latest_job_imports_the_mflux_modules_the_suite_needs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The mflux tests `pytest.importorskip` mflux's modules, so a newest mflux that moved or
+    broke one would skip every registry walk and leave the weekly job green; only a step that
+    imports them turns that red. The one-line bug this catches: no import check, one of the
+    four imports dropped, or the check placed before the upgrade (it would import the locked
+    mflux) or after pytest."""
+    steps = _latest_steps()
+    upgrade = _step_indices(steps, "uv pip install")
+    pytest_steps = _step_indices(steps, "pytest")
+    checks = _latest_import_checks(monkeypatch)
+
+    covering = [step for step, requested in checks if set(_MFLUX_GUARD_IMPORTS) <= set(requested)]
+    assert covering, f"no step imports all of {_MFLUX_GUARD_IMPORTS}: {checks}"
+    for step, _ in checks:
+        assert upgrade[0] < step < pytest_steps[0], (step, steps)
+
+
+@pytest.mark.parametrize("module", _MFLUX_GUARD_IMPORTS)
+def test_mflux_latest_import_check_fails_the_job_when_a_module_does_not_import(
+    monkeypatch: pytest.MonkeyPatch, module: str
+) -> None:
+    """A module that does not import must fail the step, not be swallowed. The one-line bug
+    this catches: wrapping an import in `try`/`except ImportError: pass`, or importing it
+    through `importlib.util.find_spec`, which never runs the module."""
+    programs = [
+        program for _, program, _ in _inline_programs(_MFLUX_LATEST_JOB, _MFLUX_LATEST_WORKFLOW)
+    ]
+    raised = [program for program in programs if _raises_import_error(monkeypatch, program, module)]
+
+    assert len(raised) == 1, f"importing {module} failed in {len(raised)} programs, not one"
+
+
+def _raises_import_error(monkeypatch: pytest.MonkeyPatch, program: str, failing: str) -> bool:
+    """Whether the latest-mflux job's `program` raises ImportError when `failing` does not
+    import (see `_exec_program`)."""
+    try:
+        _exec_program(monkeypatch, program, "0.25.0", "13.0.0", "<mflux-latest>", failing)
+    except ImportError:
+        return True
+    return False
+
+
+def test_mflux_latest_import_check_is_the_whole_step_script() -> None:
+    """The import check fails the job only through its exit status, so its step's script must
+    be the program alone, run without a re-sync. The one-line bug this catches: `' || true`
+    after the closing quote, another command in the same step, or a plain `uv run` that puts
+    the locked mflux back before the import."""
+    steps = _latest_steps()
+    programs = _inline_programs(_MFLUX_LATEST_JOB, _MFLUX_LATEST_WORKFLOW)
+    import_steps = [step for step, program, _ in programs if "import mflux" in program]
+
+    assert len(import_steps) == 1, programs
+    step = steps[import_steps[0]]
+    assert _GUARD_OPENING in step, step
+    assert step[step.index(_GUARD_OPENING) - 1] == "run: |", step
+    assert step[-1] == "'", step
+
+
+def test_mflux_latest_job_times_out_after_an_hour() -> None:
+    """Without a job timeout GitHub lets a hung run hold a macOS runner for six hours. The
+    one-line bug this catches: dropping the job's `timeout-minutes`, moving it onto one step,
+    or a value other than 60."""
+    job_keys = [
+        line.strip()
+        for line in _job_block(_MFLUX_LATEST_JOB, _MFLUX_LATEST_WORKFLOW)
+        if len(line) - len(line.lstrip(" ")) == 4 and not line.strip().startswith("#")
+    ]
+
+    assert [key for key in job_keys if key.startswith("timeout-minutes:")] == [
+        "timeout-minutes: 60"
+    ], job_keys
+
+
+def _comment_text(lines: list[str]) -> str:
+    """The `#` comment lines among `lines`, without the `#`, joined by spaces."""
+    return " ".join(
+        line.strip().removeprefix("#").strip() for line in lines if line.strip().startswith("#")
+    )
+
+
+def test_mflux_latest_job_comment_says_to_check_whether_mlx_moved_first() -> None:
+    """Upgrading mflux also moves mlx when the new release needs a newer one, so a red run
+    may come from mlx, not mflux. The one-line bug this catches: the triage note dropped from
+    the job's comment."""
+    comment = _comment_text(_job_block(_MFLUX_LATEST_JOB, _MFLUX_LATEST_WORKFLOW))
+
+    assert "check first whether mlx moved" in comment, comment

@@ -1122,7 +1122,7 @@ def _run_report_update(args: argparse.Namespace) -> int:
         base,
         scenario,
         result,
-        generated_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        generated_at=datetime.datetime.now(datetime.UTC).isoformat(),
         hardware=_build_hardware_metadata(),
     )
     _write_report(args.report, merged)
@@ -1166,7 +1166,7 @@ def main(argv: list[str] | None = None) -> int:
 
     report: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
-        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "generated_at": datetime.datetime.now(datetime.UTC).isoformat(),
         "hardware": _build_hardware_metadata(),
         "isolation": "subprocess-per-condition",
         "prior_artifacts_moved_to": trashed.name if trashed else None,
