@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-11-08
+
+### Fixed
+- With `LivePreviewCallback`, an error MLX raises while evaluating a denoising step (for example,
+  a Metal allocation larger than the device allows) used to abort the whole process (exit code
+  134) while the preview converted its image, with no Python exception and no warning. The error
+  now reaches the caller as a Python exception.
+- The same kind of error while MLX evaluates the preview image now follows `on_error` (a warning
+  and previews off by default, or an exception with `on_error="raise"`) instead of aborting the
+  process.
+- Each preview is written to a temporary file in the same folder and renamed into place. A viewer
+  reading the file never sees a half-written image, and an interrupted write (such as Ctrl-C) leaves
+  the last complete preview in place. The preview's folder must be writable, because the new file
+  is created there. The file is replaced rather than rewritten, so a hard link to it is not kept.
+  A symlink at the preview path is replaced by a regular file instead of being written through.
+  The format still follows the file extension. New files take the process umask; because the file
+  is replaced, an existing preview's owner, ACLs and non-default mode are not carried over.
+
+### Changed
+- PNG previews are saved with zlib compression level 1 instead of Pillow's default 6. Other
+  formats are unchanged. Level 1 encoded faster on all three frames measured, and the files are
+  1.5 to 1.7 times larger. Median encode time, level 6 against level 1: 15.5 ms against 6.2 ms
+  for a 512x512 preview frame from the repository; 60.3 ms against 20.5 ms for the same frame
+  upscaled to 1024x1024; 55.0 ms against 37.6 ms for the upscaled frame with added noise. The
+  saving is smaller on textured images: 9.3 ms per preview on the 512x512 frame, and level 1 is
+  about 1.5 times faster on the noisy frame rather than about 3. Level 1 is kept because preview
+  files are temporary. Measured on an Apple M1 Max with 32 GiB, macOS 27.2,
+  Python 3.13.12 and Pillow 13.0.0 (zlib 1.3.1.zlib-ng), 9 repetitions after 2 warm-up encodes;
+  run `uv run python scripts/bench_preview_encode.py` to reproduce. This is PNG encode time only,
+  not generation speed.
+
 ## [0.9.0] - 2026-10-29
 
 Requires Python 3.11 or newer and mflux 0.24 or newer, with no upper bound on mflux, and Pillow 13

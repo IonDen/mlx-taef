@@ -64,7 +64,7 @@ uv add "mlx-taef[mflux]"
 Pin an exact version in a project that needs reproducibility:
 
 ```bash
-pip install "mlx-taef==0.9.0"
+pip install "mlx-taef==0.9.1"
 ```
 
 Verify the install:
@@ -188,6 +188,7 @@ See `docs/manual-verification.md` for the full verification recipe.
 - **v0.8.3 — released on PyPI** (2026-09-23). Works with mflux 0.19.x and 0.20.x. `LivePreviewCallback(flux=model)` now picks the matching tiny decoder from the model, so the variant argument is optional, and an unsupported model is reported when the callback is created rather than at the first preview. On mflux 0.20, Krea 2 previews decode the model's prediction of the finished image and are recognizable from the first step; `preview_source="latents"` keeps the old view.
 - **v0.8.4 — released on PyPI** (2026-10-24). The `mflux` extra now accepts mflux 0.19 through 0.25 (tested on 0.19.x and 0.23.0; 0.17 and 0.18 are no longer accepted) and keeps Pillow below 13, since mflux 0.23.0 fails to import under Pillow 13. Previews now cover Krea 2's depth ControlNet; Qwen-Image 2.1, FLUX 3 Image Klein and Ming-Image are refused with a clear error when the preview callback is created, before the preview decoder loads. Z-Image and FLUX.2 Klein previews now decode in float32, which shifts pixels by about 0.1/255 on average or less.
 - **v0.9.0 — released on PyPI** (2026-10-29). Requires Python 3.11 or newer and mflux 0.24 or newer, with no upper bound on mflux, and Pillow 13 or newer wherever Pillow is installed (the base install does not depend on Pillow). Python 3.10 (stay on 0.8.4), mflux 0.19 to 0.23 and Pillow below 13 are dropped: Pillow 13 fixes GHSA-5x8w-8jj5-q52h (see the CHANGELOG), and mflux 0.19 to 0.23 cannot import under it. A CI job tests the newest mflux release every Monday; mlx-taef is changed only when something breaks. Evidence: the offline suite passes (860 passed, 30 skipped) on mflux 0.24.0 with Pillow 13.0.0 and MLX 0.32.2, and CI passed on Python 3.11 to 3.14 and on the oldest supported mflux (0.24.x on Python 3.11); no run with real model weights was made for this release.
+- **v0.9.1 — released on PyPI** (2026-11-08). An error MLX raises while evaluating a denoising step (for example, a Metal allocation larger than the device allows) now reaches the caller as a Python exception instead of aborting the process, and the same kind of error while computing the preview image follows `on_error`. Previews are written to a temporary file and renamed into place, so a viewer or an interrupted write never leaves a partial image, and a symlink at the preview path is replaced rather than written through. PNG previews use zlib level 1 instead of 6: faster to encode, with files 1.5 to 1.7 times larger (see the CHANGELOG for timings and the recipe).
 
 Track future releases via the [PyPI history](https://pypi.org/project/mlx-taef/#history) or `gh release list -R IonDen/mlx-taef`.
 
