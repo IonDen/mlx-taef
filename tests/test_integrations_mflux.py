@@ -1,5 +1,8 @@
 """Tests for the mflux integration (skipped if mflux not installed)."""
 
+import json
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -1020,6 +1023,186 @@ def test_strict_error_policy_propagates_runtime_failure(
     monkeypatch.setattr(cb, "_save_image", _fail_save)
     with pytest.raises(OSError, match="disk full"):
         cb.call_in_loop(0, 0, "", mx.zeros((1, 1, 128)), None, None)
+
+
+def _failing_graph(shape: tuple[int, ...], dtype: mx.Dtype = mx.float32) -> mx.array:
+    """A real lazy array whose evaluation fails: it slices a 2**60-element buffer, which the
+    allocator refuses before taking any memory. `mx.eval` raises RuntimeError on it; reading
+    it through NumPy's buffer protocol aborts the whole process instead."""
+    size = 1
+    for dim in shape:
+        size *= dim
+    return mx.zeros((2**30, 2**30), dtype=dtype)[0, :size].reshape(shape)
+
+
+# Runs in a child process: if the decode's failure reaches NumPy unevaluated, the process
+# aborts, and the parent sees that as an exit code instead of losing the test runner.
+_DECODE_FAILURE_CHILD = """
+import json, logging, sys
+from pathlib import Path
+
+import mlx.core as mx
+from mlx_taef import TAEF2
+from mlx_taef.integrations.mflux import LivePreviewCallback
+
+converted, save_to, on_error = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+model = TAEF2.from_pretrained_local(converted)
+TAEF2.from_pretrained = classmethod(lambda cls, **kw: model)
+warnings = []
+handler = logging.Handler()
+handler.emit = lambda record: warnings.append(record.getMessage())
+logging.getLogger("mlx_taef").addHandler(handler)
+
+cb = LivePreviewCallback(
+    variant="taef2", every=1, save_to=save_to, latent_height=1, latent_width=1,
+    on_error=on_error,
+)
+# A decoded 2x2 RGB frame whose graph fails on evaluation (a 2**60-byte buffer).
+cb.model.decode_image = lambda latents: (
+    mx.zeros((2**30, 2**30), dtype=mx.uint8)[0, :12].reshape(1, 2, 2, 3)
+)
+raised = None
+try:
+    cb.call_in_loop(0, 0, "", mx.zeros((1, 1, 128)), None, None)
+except RuntimeError as e:
+    raised = str(e)
+print(json.dumps({"raised": raised, "disabled": cb._disabled, "warnings": warnings}))
+"""
+
+
+def _run_decode_failure(tmp_path: Path, on_error: str) -> dict[str, object]:
+    converted = Path(__file__).parent / "converted" / "taef2_decoder.safetensors"
+    save_to = tmp_path / "out" / "p.png"
+    proc = subprocess.run(
+        [sys.executable, "-c", _DECODE_FAILURE_CHILD, str(converted), str(save_to), on_error],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        cwd=tmp_path,
+        check=False,
+    )
+    assert proc.returncode == 0, f"child exited {proc.returncode}: {proc.stderr[-2000:]}"
+    assert not save_to.parent.exists() or list(save_to.parent.iterdir()) == []
+    result: dict[str, object] = json.loads(proc.stdout.strip().splitlines()[-1])
+    return result
+
+
+def test_a_decode_that_fails_on_evaluation_follows_the_default_policy(tmp_path: Path) -> None:
+    """Catches: the decoded frame first evaluated inside `np.array`, where an MLX failure aborts
+    the process instead of logging the warning and switching previews off."""
+    result = _run_decode_failure(tmp_path, "disable")
+
+    assert result["raised"] is None
+    assert result["disabled"] is True
+    warnings = result["warnings"]
+    assert isinstance(warnings, list)
+    assert len(warnings) == 1
+    assert warnings[0].startswith("live preview failed at step 0:")
+
+
+def test_a_decode_that_fails_on_evaluation_raises_under_the_raise_policy(tmp_path: Path) -> None:
+    """Catches: the decoded frame first evaluated inside `np.array`, where an MLX failure aborts
+    the process instead of reaching the caller as a RuntimeError."""
+    result = _run_decode_failure(tmp_path, "raise")
+
+    assert isinstance(result["raised"], str)
+    assert result["disabled"] is False
+    assert result["warnings"] == []
+
+
+def _record_evals(monkeypatch: pytest.MonkeyPatch, watched: list[object]) -> list[object]:
+    """Wrap `mx.eval` (the same object the integration module calls) to record which of the
+    `watched` step arrays it forces; every call still goes to the real `mx.eval`."""
+    real_eval = mx.eval
+    evaluated: list[object] = []
+
+    def _eval(*arrays: object) -> None:
+        evaluated.extend(a for a in arrays if any(a is step for step in watched))
+        real_eval(*arrays)
+
+    monkeypatch.setattr(mx, "eval", _eval)
+    return evaluated
+
+
+@pytest.mark.parametrize("on_error", ["disable", "raise"])
+def test_a_failing_step_propagates_unchanged_and_leaves_previews_on(
+    offline_taef2: object,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    on_error: str,
+) -> None:
+    """Catches: the step graph first forced inside the preview's `try`, so a transformer failure
+    is logged as "live preview failed", previews switch off, and the step error is swallowed.
+
+    The step latent is a real graph that fails in the real `mx.eval`; nothing is stubbed. If
+    the step eval were dropped, the decoded frame's own eval would raise before NumPy reads it.
+    """
+    import logging
+
+    with pytest.raises(RuntimeError) as direct:
+        mx.eval(_failing_graph((1, 1, 128)))
+    cb = LivePreviewCallback(
+        variant="taef2",
+        every=1,
+        save_to=tmp_path / "p.png",
+        latent_height=1,
+        latent_width=1,
+        on_error=on_error,  # type: ignore[arg-type]
+    )
+    step = _failing_graph((1, 1, 128))
+    entered: list[int] = []
+    real_emit = cb._emit_preview
+
+    def _spy_emit(idx: int, latents: mx.array, config: object) -> None:
+        entered.append(idx)
+        real_emit(idx, latents, config)
+
+    monkeypatch.setattr(cb, "_emit_preview", _spy_emit)
+
+    with (
+        caplog.at_level(logging.WARNING, logger="mlx_taef"),
+        pytest.raises(RuntimeError) as raised,
+    ):
+        cb.call_in_loop(0, 0, "", step, None, None)
+
+    assert str(raised.value) == str(direct.value)
+    assert cb._disabled is False
+    assert entered == []
+    assert not (tmp_path / "p.png").exists()
+    assert not any("live preview failed" in message for message in caplog.messages)
+
+
+def test_only_steps_that_emit_a_preview_force_the_step_graph(
+    offline_taef2: object, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches: the eval placed before the `every` early return, which forces the graph on
+    every step (an extra sync per skipped step), or not placed at all."""
+    cb = LivePreviewCallback(
+        variant="taef2", every=2, save_to=tmp_path / "p.png", latent_height=1, latent_width=1
+    )
+    steps = [mx.full((1, 1, 128), float(i)) for i in range(3)]
+    evaluated = _record_evals(monkeypatch, list(steps))
+
+    for step in steps:
+        cb.call_in_loop(0, 0, "", step, None, None)
+
+    assert [id(a) for a in evaluated] == [id(steps[0]), id(steps[2])]
+
+
+def test_the_prediction_is_the_graph_forced_when_it_is_the_preview_source(
+    offline_taef2: object, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches: the eval forcing `latents` while the preview decodes `denoised`, which leaves a
+    failure in the prediction's graph inside the preview's error handling."""
+    cb = LivePreviewCallback(variant="taef2", every=1, save_to=tmp_path / "p.png")
+    latents, denoised = _packed_klein_latent(0), _packed_klein_latent(1)
+    evaluated = _record_evals(monkeypatch, [latents, denoised])
+
+    cb.call_in_loop(0, 0, "p", latents, _FakeConfig(64, 64), None, denoised=denoised)
+
+    assert [id(a) for a in evaluated] == [id(denoised)]
+    assert cb.last_preview_source == "prediction"
 
 
 def test_before_loop_resets_disabled_state(offline_taef2: object) -> None:
