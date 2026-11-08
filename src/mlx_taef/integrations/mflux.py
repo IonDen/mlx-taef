@@ -13,14 +13,19 @@ Install with: `pip install "mlx-taef[mflux]"`.
 
 import importlib
 import logging
+import os
+import secrets
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import mlx.core as mx
 import numpy as np
 
 from mlx_taef.api import TAEF1, TAEF2, Krea2, QwenImage, Taef, ZImage
 from mlx_taef.errors import MfluxNotInstalledError, UnsupportedMfluxModelError
+
+if TYPE_CHECKING:
+    from PIL.Image import Image as PILImage
 
 try:
     importlib.import_module("mflux.callbacks.callback")
@@ -404,13 +409,15 @@ class LivePreviewCallback:
         mflux reads the signature of the method it calls, so a subclass that overrides this
         method must declare `denoised` too and pass it on, or the prediction never arrives.
         Any other keyword a later mflux passes is accepted and ignored, as in `call_before_loop`.
+        A failure in the denoising step itself propagates unchanged and leaves previews on;
+        only a failure while decoding or writing the preview follows `on_error`.
         """
         idx = self._iter
         self._iter += 1
         if self._disabled:
             return
         if idx % self.every != 0:
-            return  # pragma: no cover
+            return
 
         # A prediction in another layout than the latent (no mflux model does this today) would
         # fail to unpack and switch previews off; the latent is always decodable, so use it.
@@ -421,6 +428,10 @@ class LivePreviewCallback:
         )
         source = denoised if use_prediction and denoised is not None else latents
         label: Literal["latents", "prediction"] = "prediction" if use_prediction else "latents"
+        # Force the step's graph here, outside the preview's error handling: a failure in the
+        # transformer step is not a preview failure. mflux evaluates the same graph right after
+        # this hook, so the work moves rather than adds.
+        mx.eval(source)
         if self.on_error == "raise":
             self._emit_preview(idx, source, config)
             self.last_preview_source = label
@@ -479,11 +490,58 @@ class LivePreviewCallback:
     def _save_image(self, img_nhwc_uint8: mx.array, target: Path) -> None:
         from PIL import Image
 
+        # Evaluate before the host copy: a failure here is a Python exception that `on_error`
+        # handles, while NumPy reading an unevaluated graph that fails aborts the process.
+        mx.eval(img_nhwc_uint8)
         arr = np.array(img_nhwc_uint8)
         # Lazy mkdir for numbered-frame galleries where the target dir
         # may not exist yet.
         target.parent.mkdir(parents=True, exist_ok=True)
-        Image.fromarray(arr).save(target)
+        _replace_with_image(Image.fromarray(arr), target)
+
+
+def _open_new_file(path: str, flags: int) -> int:
+    """`open()` opener: create `path` with the plain-create mode.
+
+    The caller's exclusive create already refuses an existing name, link or not, and the temp
+    name is random; `O_NOFOLLOW` is a backstop.
+    """
+    return os.open(path, flags | os.O_NOFOLLOW, 0o666)
+
+
+def _replace_with_image(image: "PILImage", target: Path) -> None:
+    """Write `image` to a new file next to `target`, then rename it onto `target`.
+
+    A reader of `target` sees the previous file or the complete new one, never a partial write.
+    A symlink at `target` itself is replaced, not followed; the folders on the way to `target`
+    are used as given, links included. The rename fails on a directory.
+    The temp name ends in the target's extension, so Pillow picks the format exactly as it would
+    for `target`. The temp file is removed on any failure, Ctrl-C included; a process killed
+    outright (SIGKILL) can leave a `.tmp-*` file next to `target`.
+    PNG previews use zlib level 1 instead of Pillow's default 6; other formats get no option.
+    """
+    from PIL import Image
+
+    extension = os.path.splitext(target.name)[1]  # noqa: PTH122 - Pillow's own suffix rule
+    params: dict[str, Any] = {}
+    if Image.registered_extensions().get(extension.lower()) == "PNG":
+        # Level 1 encodes ~3x faster than 6 on a 1024x1024 frame upscaled from a 512x512
+        # preview, and less on textured frames (scripts/bench_preview_encode.py).
+        params["compress_level"] = 1
+    tmp = target.with_name(f".tmp-{secrets.token_hex(8)}{extension}")
+    opened = False
+    try:
+        with open(tmp, "x+b", opener=_open_new_file) as fh:
+            opened = True
+            image.save(fh, **params)
+        tmp.replace(target)
+    except BaseException as e:
+        # FileExistsError before the open returned: the exclusive create found the temp name
+        # taken, so the entry there is not ours to remove. Any other failure, Ctrl-C included,
+        # may land after the file was created, and the cleanup tolerates its absence.
+        if opened or not isinstance(e, FileExistsError):
+            tmp.unlink(missing_ok=True)
+        raise
 
 
 __all__ = ["LivePreviewCallback", "unpack_flux2_latent"]
