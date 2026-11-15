@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] - 2026-11-15
+
+### Fixed
+- `LivePreviewCallback.save_to` set to a string after the callback was created now behaves like a
+  string passed to the constructor. Before, every preview write failed, single-frame and numbered
+  (`numbered_frames=True`) alike. With the default `on_error="disable"` that meant a warning and no
+  more previews for that generation; with `on_error="raise"` the generation stopped with an
+  `AttributeError`.
+
+### Changed
+- Assigning a value that is neither a string nor a path to `save_to` now raises `TypeError` at the
+  assignment, instead of failing at the first preview. Nothing else in the API changes.
+
 ## [0.9.1] - 2026-11-08
 
 ### Fixed
@@ -29,8 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   1.5 to 1.7 times larger. Median encode time, level 6 against level 1: 15.5 ms against 6.2 ms
   for a 512x512 preview frame from the repository; 60.3 ms against 20.5 ms for the same frame
   upscaled to 1024x1024; 55.0 ms against 37.6 ms for the upscaled frame with added noise. The
-  saving is smaller on textured images: 9.3 ms per preview on the 512x512 frame, and level 1 is
-  about 1.5 times faster on the noisy frame rather than about 3. Level 1 is kept because preview
+  saving is smaller on two frames: on the native 512x512 frame level 1 saves 9.3 ms per preview,
+  and on the noisy frame it is about 1.5 times faster, against about 3 on the upscaled 1024x1024
+  frame. Level 1 is kept because preview
   files are temporary. Measured on an Apple M1 Max with 32 GiB, macOS 27.2,
   Python 3.13.12 and Pillow 13.0.0 (zlib 1.3.1.zlib-ng), 9 repetitions after 2 warm-up encodes;
   run `uv run python scripts/bench_preview_encode.py` to reproduce. This is PNG encode time only,
