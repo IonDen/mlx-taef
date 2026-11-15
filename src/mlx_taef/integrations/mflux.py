@@ -229,7 +229,7 @@ class LivePreviewCallback:
         auto_bn: bool = False,
         variant: Literal["taef1", "taef2", "zimage", "qwen-image", "krea2"] | None = None,
         every: int = 5,
-        save_to: str | Path = "preview.png",
+        save_to: str | os.PathLike[str] = "preview.png",
         numbered_frames: bool = False,
         latent_height: int | None = None,
         latent_width: int | None = None,
@@ -282,7 +282,7 @@ class LivePreviewCallback:
         # caller's `every` is honored only in single-frame mode.
         self.numbered_frames = numbered_frames
         self.every = 1 if numbered_frames else every
-        self.save_to = Path(save_to)
+        self.save_to = save_to
         self.latent_height = latent_height
         self.latent_width = latent_width
         self.bn_mean = bn_mean
@@ -357,6 +357,15 @@ class LivePreviewCallback:
     def variant(self) -> str:
         """The tiny-decoder variant in use: the one passed, or the one inferred from `flux`."""
         return self._variant
+
+    @property
+    def save_to(self) -> Path:
+        """The preview path or numbered-frame template, converted to a `Path` when set."""
+        return self._save_to
+
+    @save_to.setter
+    def save_to(self, value: str | os.PathLike[str]) -> None:
+        self._save_to = Path(value)
 
     def call_before_loop(
         self,
