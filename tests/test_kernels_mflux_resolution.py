@@ -86,14 +86,13 @@ def test_every_mflux_registry_entry_resolves_to_its_kernel_or_is_rejected(
         assert resolve_kernel_from_model_config(config) is KERNELS[expected]
 
 
-# Registry keys mflux 0.21 to 0.23 added, as mflux 0.23.0's `model_config.py` builds them
-# (model_name, aliases; base_model is None for all), read 2026-10-23 from the tagged source
-# -> expected kernel name, or None when no tiny decoder here previews the model. Alias lists are
-# copied whole, in mflux's order (the key-named alias first); a guard test below compares each
-# row with the installed registry for every key that mflux already has.
-# - qwen-image-edit-2511: the Qwen-Image edit family. Up to mflux 0.21 its two aliases sat on the
-#   `qwen-image-edit` config (same edit pipeline, same Qwen-Image VAE); 0.22 gave it its own key
-#   so it loads the 2511 weights instead of 2509.
+# Registry keys mflux added after the hand-written table above and before the 0.24 floor
+# (model_name, aliases; base_model is None for all), first read 2026-10-23 from mflux's tagged
+# source -> expected kernel name, or None when no tiny decoder here previews the model. Alias
+# lists are copied whole, in mflux's order (the key-named alias first); a guard test below
+# compares each row with the installed 0.24 registry.
+# - qwen-image-edit-2511: the Qwen-Image edit family under its own key, so it loads the 2511
+#   weights instead of 2509 (same edit pipeline and Qwen-Image VAE as `qwen-image-edit`).
 # - krea-2-controlnet-depth: Krea 2 Turbo plus a depth ControlNet on the same transformer and VAE.
 # - Qwen-Image 2.1 (Turbo, ControlNet union): the 64-channel 2.1 VAE taew2.1 cannot decode; its
 #   in-loop latent has the same (1, N, 64) shape as Qwen-Image's, so a claim would decode garbage.
@@ -129,8 +128,7 @@ _MFLUX_0_23_NEW_KEYS: dict[str, tuple[str, list[str], str | None]] = {
         ],
         None,
     ),
-    # The FLUX 3 alias lists are mflux 0.24.0's; 0.24 appended `flux-3-image-klein(-base)`,
-    # which _REGISTRY_ALIAS_INTRODUCED_IN dates so the 0.23 registry still compares equal.
+    # The FLUX 3 alias lists are mflux 0.24.0's, `flux-3-image-klein(-base)` included.
     "flux3-image-klein": (
         "black-forest-labs/flux-3-image-klein",
         ["flux3-image-klein", "flux3-klein", "flux3", "flux-3-image-klein"],
@@ -172,7 +170,7 @@ _MFLUX_0_24_NEW_KEYS: dict[str, tuple[str, list[str], str | None]] = {
     "anima-base": ("circlestone-labs/Anima", ["anima-base"], None),
 }
 
-# Every key mflux added after 0.20, with the strings mflux builds for it.
+# Every key the two tables above classify, with the strings mflux 0.24 builds for it.
 _MFLUX_NEW_KEYS = {**_MFLUX_0_23_NEW_KEYS, **_MFLUX_0_24_NEW_KEYS}
 
 
@@ -372,9 +370,9 @@ def test_registry_prefixes_and_aliases_are_disjoint_across_kernels() -> None:
                 assert not p1.startswith(p2), (p1, k1, p2, k2)
 
 
-# Every key of mflux 0.19.1's AVAILABLE_MODELS -> the kernel that previews it, or None. A key
-# missing from this map (a model mflux added) fails the exhaustive test with its name, so it has
-# to be classified here on purpose rather than claimed or rejected by accident.
+# Every key of mflux's AVAILABLE_MODELS on the 0.24 floor -> the kernel that previews it, or
+# None. A key missing from this map (a model mflux added) fails the exhaustive test with its
+# name, so it has to be classified here on purpose rather than claimed or rejected by accident.
 _EXPECTED_BY_REGISTRY_KEY: dict[str, str | None] = {
     "dev": "taef1",
     "schnell": "taef1",
@@ -410,35 +408,20 @@ _EXPECTED_BY_REGISTRY_KEY: dict[str, str | None] = {
     "seedvr2-7b": None,
     "ideogram-4-fp8": None,
     "boogu-image-turbo": None,
-    # mflux 0.20: new 64-channel VAE, no tiny decoder exists for it.
+    # Qwen-Image 2.1: new 64-channel VAE, no tiny decoder exists for it.
     "qwen-image-2.1": None,
-    # mflux 0.21 to 0.24, classified in _MFLUX_0_23_NEW_KEYS and _MFLUX_0_24_NEW_KEYS above.
+    # Classified in _MFLUX_0_23_NEW_KEYS and _MFLUX_0_24_NEW_KEYS above.
     **{key: expected for key, (_, _, expected) in _MFLUX_NEW_KEYS.items()},
 }
-# Registry keys that only exist from a given mflux release on; a key newer than the installed
-# mflux is expected to be absent. The walk covers mflux 0.19 and newer; the declared floor is
-# 0.24.
-_REGISTRY_KEY_INTRODUCED_IN: dict[str, tuple[int, int]] = {
-    "qwen-image-2.1": (0, 20),
-    "ming-image-design": (0, 21),
-    "qwen-image-edit-2511": (0, 22),
-    "qwen-image-2.1-controlnet-union": (0, 22),
-    "qwen-image-2.1-turbo": (0, 23),
-    "qwen-image-2.1-turbo-controlnet-union": (0, 23),
-    "flux3-image-klein": (0, 23),
-    "flux3-image-klein-base": (0, 23),
-    "krea-2-controlnet-depth": (0, 23),
-    **dict.fromkeys(_MFLUX_0_24_NEW_KEYS, (0, 24)),
-}
-# Aliases mflux appended to a registry entry from a given release on; an older installed mflux
-# builds the entry without them.
-_REGISTRY_ALIAS_INTRODUCED_IN: dict[str, tuple[int, int]] = {
-    "flux-3-image-klein": (0, 24),
-    "flux-3-image-klein-base": (0, 24),
-}
+# Every key above exists on the 0.24 floor. A key mflux adds in a later release is dated here
+# to that (major, minor), so the walk expects it from that release on and not before.
+_REGISTRY_KEY_INTRODUCED_IN: dict[str, tuple[int, int]] = {}
+# Aliases a later mflux appends to an entry the tables copy, dated the same way: an mflux older
+# than the date builds the entry without them.
+_REGISTRY_ALIAS_INTRODUCED_IN: dict[str, tuple[int, int]] = {}
 
 
-# The newest mflux the 0.21 to 0.24 tables were read from. On a newer mflux the entry guard
+# The newest mflux the tables were read from. On a newer mflux the entry guard
 # skips: an edited entry there is bookkeeping for the lock move, and the drift walk still
 # checks routing on every minor.
 # Moving it also moves the (0, 24) literal in test_the_entry_guard_skips_only_on_an_mflux_newer_than_recorded.
@@ -451,7 +434,7 @@ def _entry_guard_skip_reason(installed: tuple[int, int]) -> str | None:
         return None
     major, minor = installed
     return (
-        f"the 0.21 to 0.24 tables were read from mflux up to 0.24; installed mflux "
+        f"the registry tables were read from mflux up to 0.24; installed mflux "
         f"{major}.{minor} is newer, so only the routing walk checks it"
     )
 
@@ -477,69 +460,69 @@ def _expected_registry_keys() -> set[str]:
     }
 
 
-def test_expected_registry_keys_follow_the_installed_mflux_version(monkeypatch) -> None:
-    """Catches: the version table being ignored, so the walk demands `qwen-image-2.1` from an
-    mflux 0.19.x install (which never had it) or tolerates its absence on 0.20."""
+@pytest.mark.parametrize(
+    ("installed", "demanded"),
+    [("0.24.9", False), ("0.25.0", True), ("0.26.0", True)],
+)
+def test_expected_registry_keys_follow_the_installed_mflux_version(
+    monkeypatch: pytest.MonkeyPatch, installed: str, demanded: bool
+) -> None:
+    """A stand-in key dated to mflux 0.25 is left out of the walk before 0.25 and demanded from
+    0.25 on, while every undated key is demanded on all of them. Catches: the date ignored (the
+    walk demands a newer key from the lock's 0.24 registry and fails), compared the wrong way
+    (`<` for `<=`: the key goes unchecked on the release that added it), or an undated key
+    dropped from the walk."""
     import importlib.metadata
 
-    monkeypatch.setattr(importlib.metadata, "version", lambda name: "0.19.2")
-    assert "qwen-image-2.1" not in _expected_registry_keys()
-    monkeypatch.setattr(importlib.metadata, "version", lambda name: "0.20.0")
-    assert "qwen-image-2.1" in _expected_registry_keys()
-    assert not set(_MFLUX_NEW_KEYS) & _expected_registry_keys()
+    monkeypatch.setitem(_EXPECTED_BY_REGISTRY_KEY, "acme-image-2", None)
+    monkeypatch.setitem(_REGISTRY_KEY_INTRODUCED_IN, "acme-image-2", (0, 25))
+    undated = set(_EXPECTED_BY_REGISTRY_KEY) - {"acme-image-2"}
+    monkeypatch.setattr(importlib.metadata, "version", lambda name: installed)
+
+    assert _expected_registry_keys() == undated | ({"acme-image-2"} if demanded else set())
 
 
-@pytest.mark.parametrize(
-    ("installed", "present"),
-    [
-        ("0.20.0", set()),
-        ("0.21.0", {"ming-image-design"}),
-        (
-            "0.22.0",
-            {"ming-image-design", "qwen-image-edit-2511", "qwen-image-2.1-controlnet-union"},
-        ),
-        ("0.23.0", set(_MFLUX_0_23_NEW_KEYS)),
-        ("0.24.0", set(_MFLUX_0_23_NEW_KEYS) | set(_MFLUX_0_24_NEW_KEYS)),
-    ],
-)
+@pytest.mark.parametrize("installed", ["0.24.0", "0.25.0"])
 def test_the_registry_walk_expects_each_new_key_from_its_mflux_release_on(
-    monkeypatch: pytest.MonkeyPatch, installed: str, present: set[str]
+    monkeypatch: pytest.MonkeyPatch, installed: str
 ) -> None:
-    """The walk compares the installed registry with this map, so after the lock moves to a
-    newer mflux it must demand exactly the keys that release has (Ming in 0.21; the 2511 edit
-    key and the 2.1 ControlNet in 0.22; Turbo, its ControlNet, FLUX 3 and the Krea 2 ControlNet
-    in 0.23). Catches: a new key left out of the map (the walk fails on the lock move), or
-    dated to the wrong release (the walk fails on an mflux in the supported range)."""
+    """The walk compares the installed registry with this map. Every key the tables classify
+    exists on the 0.24 floor, so the walk demands each of them there and on every later release,
+    with the table's kernel. A key mflux adds from 0.25 on gets its release in
+    `_REGISTRY_KEY_INTRODUCED_IN` and is demanded from that release on. Catches: a table key left
+    out of the map, or dated after the floor (the walk on the lock's mflux stops checking a key
+    that release has)."""
     import importlib.metadata
 
     monkeypatch.setattr(importlib.metadata, "version", lambda name: installed)
-    assert set(_MFLUX_NEW_KEYS) & _expected_registry_keys() == present
-    for key in present:
-        assert _EXPECTED_BY_REGISTRY_KEY[key] == _MFLUX_NEW_KEYS[key][2], key
+    assert set(_MFLUX_NEW_KEYS) <= _expected_registry_keys()
+    for key, (_, _, kernel) in _MFLUX_NEW_KEYS.items():
+        assert _EXPECTED_BY_REGISTRY_KEY[key] == kernel, key
 
 
 @pytest.mark.parametrize(
     ("installed", "expected"),
     [
-        ((0, 23), ["flux3-image-klein", "flux3-klein", "flux3"]),
-        ((0, 24), ["flux3-image-klein", "flux3-klein", "flux3", "flux-3-image-klein"]),
-        ((0, 25), ["flux3-image-klein", "flux3-klein", "flux3", "flux-3-image-klein"]),
+        ((0, 24), ["acme-image", "acme"]),
+        ((0, 25), ["acme-image", "acme-v2", "acme"]),
+        ((0, 26), ["acme-image", "acme-v2", "acme"]),
     ],
 )
 def test_a_row_lists_an_appended_alias_only_from_the_mflux_release_that_added_it(
-    installed: tuple[int, int], expected: list[str]
+    monkeypatch: pytest.MonkeyPatch, installed: tuple[int, int], expected: list[str]
 ) -> None:
-    """mflux 0.23.0 builds FLUX 3 Image Klein with three aliases, 0.24.0 with four
-    (`flux-3-image-klein` appended). Catches: the 0.24 alias demanded from a 0.23 registry (the
-    entry guard below fails on the lock's mflux), or dropped on 0.24 and later (the guard stops
-    seeing the real list), or the order changed while filtering."""
-    row_aliases = _MFLUX_NEW_KEYS["flux3-image-klein"][1]
-    assert _registry_aliases_as_of(row_aliases, installed) == expected
+    """An alias a later mflux inserts into an entry the tables copy is dated in
+    `_REGISTRY_ALIAS_INTRODUCED_IN` (here a stand-in dated to 0.25). Catches: the alias demanded
+    from an older registry (the entry guard below fails on the lock's mflux), dropped on its own
+    release and later (the guard stops seeing the real list), or the order changed while
+    filtering."""
+    monkeypatch.setitem(_REGISTRY_ALIAS_INTRODUCED_IN, "acme-v2", (0, 25))
+    assert _registry_aliases_as_of(["acme-image", "acme-v2", "acme"], installed) == expected
 
 
 @pytest.mark.parametrize(
     ("installed", "skips"),
-    [((0, 23), False), ((0, 24), False), ((0, 25), True), ((1, 0), True)],
+    [((0, 24), False), ((0, 25), True), ((1, 0), True)],
 )
 def test_the_entry_guard_compares_up_to_the_newest_recorded_mflux_and_skips_beyond(
     installed: tuple[int, int], skips: bool
@@ -565,8 +548,8 @@ def test_the_entry_guard_skips_only_on_an_mflux_newer_than_recorded(
     monkeypatch: pytest.MonkeyPatch, faked_version: str | None
 ) -> None:
     """The real guard against the installed registry. The compare case runs under the real
-    installed version, never a faked one: a faked 0.24 over an older registry (0.23 or
-    earlier) compares tables the registry cannot match. It runs only
+    installed version, never a faked one: a faked 0.24 over a newer registry compares tables
+    that registry may have edited. It runs only
     when the installed mflux is 0.24, the newest minor the tables were read from, and there a
     skip fails it. The faked 0.25 case only skips, so it holds on any registry.
     Catches: the guard skipping on 0.24 itself (the lock's mflux no longer checked, e.g. `<`
@@ -600,17 +583,16 @@ def test_the_0_21_to_0_24_tables_match_the_installed_mflux_registry_entry_for_en
     aliases a later mflux appended) and `base_model` must equal the installed `AVAILABLE_MODELS`
     entry, so the alias tests exercise the strings mflux really builds. Catches: an alias
     dropped or reordered in a table (the key-named alias was missing from six rows), or a
-    model_name typo. Keys newer than the installed mflux are not checked; on mflux 0.19 (older
-    than the 0.24 floor) there is nothing to compare. This guard is bookkeeping, not routing, so it skips on an
-    mflux newer than the tables (0.24); the routing walk below covers every minor."""
+    model_name typo. Keys dated after the installed mflux are not checked. This guard is
+    bookkeeping, not routing, so it skips on an mflux newer than the tables (0.24); the routing
+    walk below covers every minor."""
     mflux_config = pytest.importorskip("mflux.models.common.config.model_config")
     installed = _installed_mflux_minor()
     skip_reason = _entry_guard_skip_reason(installed)
     if skip_reason is not None:
         pytest.skip(skip_reason)
-    keys = [k for k in _MFLUX_NEW_KEYS if _REGISTRY_KEY_INTRODUCED_IN[k] <= installed]
-    if not keys:
-        pytest.skip(f"no key of the 0.21 to 0.24 tables exists in the installed mflux {installed}")
+    keys = [k for k in _MFLUX_NEW_KEYS if _REGISTRY_KEY_INTRODUCED_IN.get(k, (0, 0)) <= installed]
+    assert keys, "the entry guard has no table key to compare on the installed mflux"
 
     mismatches = []
     for key in keys:
@@ -937,13 +919,10 @@ def test_the_walk_fails_when_a_known_key_is_expected_on_another_kernel(
         test_every_registered_alias_resolves_on_its_own_as_classified()
 
 
-# Kernel aliases mflux registers only from a given release on (the Krea 2 depth ControlNet, 0.23);
-# an older installed mflux does not know them yet, so they are not stale there.
-_KERNEL_ALIAS_INTRODUCED_IN: dict[str, tuple[int, int]] = {
-    "krea-2-controlnet-depth": (0, 23),
-    "krea-2-controlnet": (0, 23),
-    "krea2-controlnet": (0, 23),
-}
+# Kernel aliases mflux registers only from a release after the 0.24 floor, dated to that
+# (major, minor); an older installed mflux does not know them yet, so they are not stale there.
+# Every kernel alias today is registered on the floor.
+_KERNEL_ALIAS_INTRODUCED_IN: dict[str, tuple[int, int]] = {}
 
 
 def _kernel_aliases_newer_than_installed() -> set[str]:
@@ -951,21 +930,23 @@ def _kernel_aliases_newer_than_installed() -> set[str]:
     return {a for a, since in _KERNEL_ALIAS_INTRODUCED_IN.items() if since > installed}
 
 
+@pytest.mark.parametrize(
+    ("installed", "exempt"),
+    [("0.24.9", True), ("0.25.0", False), ("0.26.0", False)],
+)
 def test_kernel_aliases_from_a_newer_mflux_are_exempt_only_before_that_release(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, installed: str, exempt: bool
 ) -> None:
-    """Catches: the exemption outliving its release, so on mflux 0.23 a Krea 2 ControlNet
-    alias mflux renamed or dropped would still pass the stale-alias check below."""
+    """A stand-in kernel alias dated to mflux 0.25 is exempt from the stale-alias check below
+    before 0.25 and checked from 0.25 on. Catches: the exemption outliving its release (an alias
+    mflux renamed or dropped would still pass the check), or starting too late (the check fails
+    on the release before the alias exists)."""
     import importlib.metadata
 
-    monkeypatch.setattr(importlib.metadata, "version", lambda name: "0.22.1")
-    assert _kernel_aliases_newer_than_installed() == {
-        "krea-2-controlnet-depth",
-        "krea-2-controlnet",
-        "krea2-controlnet",
-    }
-    monkeypatch.setattr(importlib.metadata, "version", lambda name: "0.23.0")
-    assert _kernel_aliases_newer_than_installed() == set()
+    monkeypatch.setitem(_KERNEL_ALIAS_INTRODUCED_IN, "acme-controlnet", (0, 25))
+    monkeypatch.setattr(importlib.metadata, "version", lambda name: installed)
+
+    assert _kernel_aliases_newer_than_installed() == ({"acme-controlnet"} if exempt else set())
 
 
 def test_every_kernel_alias_is_one_mflux_registers() -> None:
