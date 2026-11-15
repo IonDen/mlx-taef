@@ -662,12 +662,10 @@ def test_live_preview_survives_real_mflux_before_loop_dispatch(offline_taef2: ob
     """Drive the REAL installed mflux GenerationContext.before_loop over a real CallbackRegistry
     with our callback registered, so the dispatcher's actual keyword set (whatever this mflux
     version passes) is exercised — not a hand-written call that could lag behind mflux.
-    Pure Python, no model load, no network. Under mflux 0.19.x this is the exact call that
-    raised `TypeError: unexpected keyword argument 'control_images'` before the fix. Under an
-    older installed mflux (the pin still allows 0.17/0.18) the dispatcher passes fewer keywords
-    and this test only proves the older contract; the named-parameter assertion in
-    `test_call_before_loop_accepts_mflux_0_19_control_images` is the version-independent
-    guard. The lockfile pins CI to 0.19.1, so CI exercises the 0.19 keyword set."""
+    Pure Python, no model load, no network. This is the call that raised
+    `TypeError: unexpected keyword argument 'control_images'` before the callback accepted it;
+    the named-parameter assertion in `test_call_before_loop_accepts_mflux_0_19_control_images`
+    guards the declared keyword independently of the installed dispatcher."""
     import mlx.core as mx
     from mflux.callbacks.callback_registry import CallbackRegistry
     from mflux.callbacks.generation_context import GenerationContext
@@ -1264,6 +1262,91 @@ def test_numbered_frames_write_distinct_paths(offline_taef2: object, tmp_path: P
     assert all(path.exists() for path in cb.saved_paths)
 
 
+def _callback_with_str_save_to(
+    given: str, target: Path, *, numbered_frames: bool
+) -> LivePreviewCallback:
+    """A taef2 callback whose `save_to` is the str form of `target`, passed the way `given` names:
+    to the constructor, or assigned after construction over a different first path."""
+    if given == "constructor":
+        return LivePreviewCallback(
+            variant="taef2",
+            every=1,
+            numbered_frames=numbered_frames,
+            save_to=str(target),
+            latent_height=1,
+            latent_width=1,
+            on_error="raise",
+        )
+    cb = LivePreviewCallback(
+        variant="taef2",
+        every=1,
+        numbered_frames=numbered_frames,
+        save_to=target.parent.parent / "first.png",
+        latent_height=1,
+        latent_width=1,
+        on_error="raise",
+    )
+    cb.save_to = str(target)
+    return cb
+
+
+_STR_SAVE_TO_GIVEN = pytest.mark.parametrize(
+    "given", ["constructor", "assigned"], ids=["str-to-constructor", "str-assigned-after"]
+)
+
+
+@_STR_SAVE_TO_GIVEN
+def test_save_to_given_as_str_names_numbered_frames_next_to_it(
+    offline_taef2: object, tmp_path: Path, given: str
+) -> None:
+    """A str `save_to`, given to the constructor or assigned after construction, is stored as a
+    Path and used as the numbered-frame template. Catches: the str stored as is (no Path)."""
+    cb = _callback_with_str_save_to(
+        given, tmp_path / "gallery" / "seed7.webp", numbered_frames=True
+    )
+
+    assert isinstance(cb.save_to, Path)
+    assert cb.save_to == tmp_path / "gallery" / "seed7.webp"
+    packed = mx.zeros((1, 1, 128))
+    cb.call_in_loop(0, 0, "", packed, None, None)
+    cb.call_in_loop(0, 0, "", packed, None, None)
+    assert cb.saved_paths == [
+        tmp_path / "gallery" / "seed7_step00.webp",
+        tmp_path / "gallery" / "seed7_step01.webp",
+    ]
+    assert all(path.is_file() for path in cb.saved_paths)
+
+
+@_STR_SAVE_TO_GIVEN
+def test_save_to_given_as_str_receives_the_single_frame_preview(
+    offline_taef2: object, tmp_path: Path, given: str
+) -> None:
+    """In single-frame mode a str `save_to`, given to the constructor or assigned after
+    construction, is stored as a Path and is the file written."""
+    out = tmp_path / "out"
+    out.mkdir()
+    cb = _callback_with_str_save_to(given, out / "seed7.png", numbered_frames=False)
+
+    assert isinstance(cb.save_to, Path)
+    cb.call_in_loop(0, 0, "", mx.zeros((1, 1, 128)), None, None)
+    assert cb.saved_paths == [out / "seed7.png"]
+    assert sorted(p.name for p in out.iterdir()) == ["seed7.png"]
+
+
+@pytest.mark.parametrize("bad", [None, 7], ids=["None", "int"])
+def test_save_to_assigned_a_non_path_raises_type_error_and_keeps_the_old_path(
+    offline_taef2: object, tmp_path: Path, bad: object
+) -> None:
+    """Assigning something that is neither a str nor a path raises TypeError at assignment,
+    not at the first preview write, and the previous `save_to` stays in place.
+    Catches: the value stored without converting it to a Path."""
+    cb = LivePreviewCallback(variant="taef2", save_to=tmp_path / "first.png")
+
+    with pytest.raises(TypeError):
+        cb.save_to = bad  # type: ignore[assignment]
+    assert cb.save_to == tmp_path / "first.png"
+
+
 def test_missing_binding_raises_under_strict_policy(offline_taef2: object) -> None:
     cb = LivePreviewCallback(variant="taef2", on_error="raise")
 
@@ -1466,7 +1549,7 @@ def test_bad_variant_message_names_the_resolved_value_not_the_argument(
 
 
 # ---------------------------------------------------------------------------
-# Per-step predicted image (mflux 0.20 `denoised`)
+# Per-step predicted image (mflux `denoised`)
 # ---------------------------------------------------------------------------
 
 
@@ -1513,8 +1596,8 @@ def test_preview_decodes_the_predicted_image_when_mflux_offers_it(
 def test_preview_falls_back_to_the_latents_when_no_prediction_is_offered(
     offline_taef2: object, tmp_path: Path
 ) -> None:
-    """Catches: the new path breaking today's behaviour; older mflux never passes `denoised`,
-    and 0.20 passes None for every model except Krea 2."""
+    """Catches: the prediction path breaking the latent preview; mflux passes `denoised` as None
+    for every model that does not compute a prediction."""
     from PIL import Image
 
     from mlx_taef.integrations.mflux import LivePreviewCallback
@@ -1585,10 +1668,7 @@ def test_real_mflux_in_loop_dispatch_hands_over_the_prediction(
 ) -> None:
     """Catches: the opt-in not firing against the REAL dispatcher (mflux passes `denoised` only
     to a `call_in_loop` that declares a keyword-capable parameter named exactly `denoised`), and
-    any in-loop keyword this mflux passes that the callback does not accept. On mflux 0.19.x
-    the dispatcher has no `denoised`, so only the plain dispatch is exercised."""
-    import inspect
-
+    any in-loop keyword this mflux passes that the callback does not accept."""
     from mflux.callbacks.callback_registry import CallbackRegistry
     from mflux.callbacks.generation_context import GenerationContext
     from mflux.models.common.config.config import Config
@@ -1607,8 +1687,6 @@ def test_real_mflux_in_loop_dispatch_hands_over_the_prediction(
     ctx.in_loop(0, latents)
     assert cb.last_preview_source == "latents"
 
-    if "denoised" not in inspect.signature(GenerationContext.in_loop).parameters:
-        return  # mflux 0.19.x: no prediction to hand over
     ctx.in_loop(1, latents, denoised=denoised)
     assert cb.last_preview_source == "prediction"
     assert np.array_equal(
@@ -1624,13 +1702,10 @@ def test_live_preview_survives_a_future_in_loop_keyword_through_the_real_dispatc
     generation. The installed GenerationContext.in_loop runs for real: the subscriber it sees is
     the callback's bound `call_in_loop` with one extra keyword pre-applied (a partial), so the
     dispatcher's own opt-in check reads the callback's signature through it. Catches: no `**`
-    catch-all on `call_in_loop` (the call raises TypeError, and on mflux 0.20+ the partial's
-    signature cannot even be read, so the prediction is lost), or the catch-all replacing the
-    named `denoised` parameter (the opt-in check stops seeing it, the prediction never comes).
-    Runs on mflux 0.19.x too (older than the 0.24 floor): its dispatcher has `in_loop` but no
-    `denoised`, so only the plain dispatch is checked there."""
+    catch-all on `call_in_loop` (the call raises TypeError, and the partial's signature
+    cannot even be read, so the prediction is lost), or the catch-all replacing the
+    named `denoised` parameter (the opt-in check stops seeing it, the prediction never comes)."""
     import functools
-    import inspect
     import types
 
     from mflux.callbacks.callback_registry import CallbackRegistry
@@ -1652,8 +1727,6 @@ def test_live_preview_survives_a_future_in_loop_keyword_through_the_real_dispatc
     ctx.in_loop(0, latents)
     assert cb.last_preview_source == "latents"
 
-    if "denoised" not in inspect.signature(GenerationContext.in_loop).parameters:
-        return  # mflux 0.19.x: no prediction to hand over
     ctx.in_loop(1, latents, denoised=denoised)
     assert cb.last_preview_source == "prediction"
     assert np.array_equal(
@@ -1717,9 +1790,8 @@ def test_shipped_example_subclass_survives_a_future_in_loop_keyword_through_the_
     in-loop keyword), or the catch-all costing the prediction opt-in (`denoised` no longer seen
     by the dispatcher or not passed on). Forwarding the extra keywords themselves is not
     observable while the parent ignores them. Same real-dispatcher setup as the base-class
-    test above; on mflux 0.19.x (older than the 0.24 floor) only the plain dispatch is checked."""
+    test above."""
     import functools
-    import inspect
     import types
 
     from mflux.callbacks.callback_registry import CallbackRegistry
@@ -1743,8 +1815,6 @@ def test_shipped_example_subclass_survives_a_future_in_loop_keyword_through_the_
     assert cb.last_preview_source == "latents"
     assert "TAEF2 decode + save" in capsys.readouterr().out
 
-    if "denoised" not in inspect.signature(GenerationContext.in_loop).parameters:
-        return  # mflux 0.19.x: no prediction to hand over
     ctx.in_loop(1, latents, denoised=denoised)
     assert cb.last_preview_source == "prediction"
     assert np.array_equal(
